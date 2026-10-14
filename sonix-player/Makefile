@@ -173,12 +173,13 @@ TARGET_LDFLAGS = $(FREETYPE_PREFIX)/lib/libfreetype.a $(AUDIO_LIBS) -lpthread -l
 # FreeType for the target, built static: the rootfs has no libfreetype.so. The
 # host uses the system one. The device's fonts are plain OTF/TTF, so zlib,
 # bzip2, png, harfbuzz and brotli are all off.
-FREETYPE_VER = 2.13.3
+FREETYPE_VER = 2.15.0
+FREETYPE_SHA256 = 93cd47eb719c325107f2d3cf087d06299e944c3b48a40b55537302304dea1dd5
 FREETYPE_TARBALL = freetype-$(FREETYPE_VER).tar.xz
 FREETYPE_URL = https://download.savannah.gnu.org/releases/freetype/$(FREETYPE_TARBALL)
 FREETYPE_URL_MIRROR = https://downloads.sourceforge.net/project/freetype/freetype2/$(FREETYPE_VER)/$(FREETYPE_TARBALL)
 FREETYPE_SRC = $(CURDIR)/freetype-$(FREETYPE_VER)
-FREETYPE_PREFIX = $(CURDIR)/freetype-target
+FREETYPE_PREFIX = $(CURDIR)/freetype-target/$(FREETYPE_VER)
 
 # The audio libraries carried inside the binary, static like FreeType. The
 # firmware's /usr/lib holds a libopus.so, but it is the raw codec with no Ogg
@@ -189,16 +190,20 @@ FREETYPE_PREFIX = $(CURDIR)/freetype-target
 #
 # The configure options below were settled against these versions.
 # ALAC is not here: its decoder is a single file under src/system/decode/alac/.
-AUDIO_PREFIX = $(CURDIR)/audio-target
+# Keep archives separate across version sets. The include paths also change
+# TARGET_FLAGS_STAMP, so switching back to a cached set recompiles consumers.
+AUDIO_PREFIX = $(CURDIR)/audio-target/ogg-$(OGG_VER)-opus-$(OPUS_VER)-opusfile-$(OPUSFILE_VER)-wv-$(WAVPACK_VER)
 
-OGG_VER = 1.3.5
+OGG_VER = 1.3.6
+OGG_SHA256 = 83e6704730683d004d20e21b8f7f55dcb3383cdf84c0daedf30bde175f774638
 OGG_TARBALL = libogg-$(OGG_VER).tar.gz
 OGG_URL = https://downloads.xiph.org/releases/ogg/$(OGG_TARBALL)
 OGG_URL_MIRROR = https://ftp.osuosl.org/pub/xiph/releases/ogg/$(OGG_TARBALL)
 OGG_SRC = $(CURDIR)/libogg-$(OGG_VER)
 OGG_LIB = $(AUDIO_PREFIX)/lib/libogg.a
 
-OPUS_VER = 1.4
+OPUS_VER = 1.6.1
+OPUS_SHA256 = 6ffcb593207be92584df15b32466ed64bbec99109f007c82205f0194572411a1
 OPUS_TARBALL = opus-$(OPUS_VER).tar.gz
 OPUS_URL = https://downloads.xiph.org/releases/opus/$(OPUS_TARBALL)
 OPUS_URL_MIRROR = https://ftp.osuosl.org/pub/xiph/releases/opus/$(OPUS_TARBALL)
@@ -206,13 +211,15 @@ OPUS_SRC = $(CURDIR)/opus-$(OPUS_VER)
 OPUS_LIB = $(AUDIO_PREFIX)/lib/libopus.a
 
 OPUSFILE_VER = 0.12
+OPUSFILE_SHA256 = 118d8601c12dd6a44f52423e68ca9083cc9f2bfe72da7a8c1acb22a80ae3550b
 OPUSFILE_TARBALL = opusfile-$(OPUSFILE_VER).tar.gz
 OPUSFILE_URL = https://downloads.xiph.org/releases/opus/$(OPUSFILE_TARBALL)
 OPUSFILE_URL_MIRROR = https://ftp.osuosl.org/pub/xiph/releases/opus/$(OPUSFILE_TARBALL)
 OPUSFILE_SRC = $(CURDIR)/opusfile-$(OPUSFILE_VER)
 OPUSFILE_LIB = $(AUDIO_PREFIX)/lib/libopusfile.a
 
-WAVPACK_VER = 5.6.0
+WAVPACK_VER = 5.9.0
+WAVPACK_SHA256 = b0038f515d322042aaa6bd352d437729c6f5f904363cc85bbc9b0d8bd4a81927
 WAVPACK_TARBALL = wavpack-$(WAVPACK_VER).tar.bz2
 WAVPACK_URL = https://www.wavpack.com/$(WAVPACK_TARBALL)
 WAVPACK_URL_MIRROR = https://github.com/dbry/WavPack/releases/download/$(WAVPACK_VER)/$(WAVPACK_TARBALL)
@@ -433,6 +440,7 @@ libs-clean:
 # objects with it.
 $(TARGET_OBJS): $(CROSS_CC) $(FREETYPE_PREFIX)/lib/libfreetype.a $(AUDIO_LIBS)
 $(TARGET_BIN): $(FREETYPE_PREFIX)/lib/libfreetype.a $(AUDIO_LIBS)
+$(FREETYPE_PREFIX)/lib/libfreetype.a $(AUDIO_LIBS): Makefile
 
 $(CROSS_CC):
 	@echo "Building Rockbox toolchain..."
@@ -443,15 +451,30 @@ $(CROSS_CC):
 # are built once: `make libs-clean` removes them, with their extracted sources,
 # so the next `make target` builds them again.
 LIB_CFLAGS = -O2 -march=mips32r2 -mplt
+OPUS_CONFIGURE = --enable-fixed-point --disable-doc --disable-extra-programs --disable-deep-plc --disable-dred --disable-osce
+WAVPACK_CONFIGURE = --disable-apps --disable-man --disable-asm --disable-threads --enable-dsd --enable-legacy --without-libiconv-prefix
+# The MIPS headers in Opus define helpers unused by the 24-bit path. Keep
+# warnings enabled for the player; scope this upstream-only warning here.
+OPUS_CFLAGS = $(LIB_CFLAGS) -Wno-unused-function
+FREETYPE_FLAGS_STAMP = $(FREETYPE_PREFIX)/.flags
+AUDIO_FLAGS_STAMP = $(AUDIO_PREFIX)/.flags
+$(FREETYPE_FLAGS_STAMP): FORCE
+	@mkdir -p $(dir $@)
+	@echo '$(CROSS_CC) | $(LIB_CFLAGS)' | cmp -s - $@ || echo '$(CROSS_CC) | $(LIB_CFLAGS)' > $@
+$(AUDIO_FLAGS_STAMP): FORCE
+	@mkdir -p $(dir $@)
+	@echo '$(CROSS_CC) | $(LIB_CFLAGS) | $(OPUS_CFLAGS) | $(OPUS_CONFIGURE) | $(WAVPACK_CONFIGURE)' | cmp -s - $@ || \
+		echo '$(CROSS_CC) | $(LIB_CFLAGS) | $(OPUS_CFLAGS) | $(OPUS_CONFIGURE) | $(WAVPACK_CONFIGURE)' > $@
 
 # Cross-build FreeType, once. configure needs the toolchain on PATH for
 # ranlib/ar to be found under their host-triplet names.
-$(FREETYPE_PREFIX)/lib/libfreetype.a: $(CROSS_CC)
+$(FREETYPE_PREFIX)/lib/libfreetype.a: $(CROSS_CC) $(FREETYPE_FLAGS_STAMP)
 	@echo "Building static FreeType $(FREETYPE_VER) for the target..."
 	@if [ ! -f $(FREETYPE_TARBALL) ]; then \
 		wget -O $(FREETYPE_TARBALL) $(FREETYPE_URL) || \
 		wget -O $(FREETYPE_TARBALL) $(FREETYPE_URL_MIRROR); \
 	fi
+	@echo '$(FREETYPE_SHA256)  $(FREETYPE_TARBALL)' | sha256sum -c -
 	rm -rf $(FREETYPE_SRC) && tar xf $(FREETYPE_TARBALL)
 	cd $(FREETYPE_SRC) && PATH="$(ROCKBOX_TOOLCHAIN_DIR)/bin:$$PATH" ./configure \
 		--host=mipsel-rockbox-linux-gnu \
@@ -477,11 +500,12 @@ CROSS_TOOLS = CC=$(CROSS_CC) CFLAGS="$(LIB_CFLAGS)" \
 			  RANLIB=$(ROCKBOX_TOOLCHAIN_DIR)/bin/mipsel-rockbox-linux-gnu-ranlib
 CROSS_COMMON = --host=mipsel-rockbox-linux-gnu --prefix=$(AUDIO_PREFIX) --disable-shared --enable-static
 
-$(OGG_LIB): $(CROSS_CC)
+$(OGG_LIB): $(CROSS_CC) $(AUDIO_FLAGS_STAMP)
 	@echo "Building static libogg $(OGG_VER) for the target..."
 	@if [ ! -f $(OGG_TARBALL) ]; then \
 		wget -O $(OGG_TARBALL) $(OGG_URL) || wget -O $(OGG_TARBALL) $(OGG_URL_MIRROR); \
 	fi
+	@echo '$(OGG_SHA256)  $(OGG_TARBALL)' | sha256sum -c -
 	rm -rf $(OGG_SRC) && tar xf $(OGG_TARBALL)
 	cd $(OGG_SRC) && $(CROSS_PATH) ./configure $(CROSS_COMMON) $(CROSS_TOOLS)
 	$(CROSS_PATH) $(MAKE) -C $(OGG_SRC)
@@ -489,15 +513,15 @@ $(OGG_LIB): $(CROSS_CC)
 
 # --enable-fixed-point: integer decoder, bit-exact across platforms. The float
 # API stays compiled in -- removing it would take --disable-float-api.
-$(OPUS_LIB): $(CROSS_CC)
+$(OPUS_LIB): $(CROSS_CC) $(AUDIO_FLAGS_STAMP)
 	@echo "Building static libopus $(OPUS_VER) for the target..."
 	@if [ ! -f $(OPUS_TARBALL) ]; then \
 		wget -O $(OPUS_TARBALL) $(OPUS_URL) || wget -O $(OPUS_TARBALL) $(OPUS_URL_MIRROR); \
 	fi
+	@echo '$(OPUS_SHA256)  $(OPUS_TARBALL)' | sha256sum -c -
 	rm -rf $(OPUS_SRC) && tar xf $(OPUS_TARBALL)
 	cd $(OPUS_SRC) && $(CROSS_PATH) ./configure $(CROSS_COMMON) \
-		--enable-fixed-point --disable-doc --disable-extra-programs \
-		$(CROSS_TOOLS)
+		$(OPUS_CONFIGURE) $(CROSS_TOOLS) CFLAGS="$(OPUS_CFLAGS)"
 	$(CROSS_PATH) $(MAKE) -C $(OPUS_SRC)
 	$(CROSS_PATH) $(MAKE) -C $(OPUS_SRC) install
 
@@ -505,11 +529,12 @@ $(OPUS_LIB): $(CROSS_CC)
 # PKG_CHECK_MODULES, and no pkg-config here knows the cross sysroot. Passing
 # them skips the search. --disable-http drops the stream support that would
 # pull in OpenSSL.
-$(OPUSFILE_LIB): $(CROSS_CC) $(OGG_LIB) $(OPUS_LIB)
+$(OPUSFILE_LIB): $(CROSS_CC) $(OGG_LIB) $(OPUS_LIB) $(AUDIO_FLAGS_STAMP)
 	@echo "Building static opusfile $(OPUSFILE_VER) for the target..."
 	@if [ ! -f $(OPUSFILE_TARBALL) ]; then \
 		wget -O $(OPUSFILE_TARBALL) $(OPUSFILE_URL) || wget -O $(OPUSFILE_TARBALL) $(OPUSFILE_URL_MIRROR); \
 	fi
+	@echo '$(OPUSFILE_SHA256)  $(OPUSFILE_TARBALL)' | sha256sum -c -
 	rm -rf $(OPUSFILE_SRC) && tar xf $(OPUSFILE_TARBALL)
 	cd $(OPUSFILE_SRC) && $(CROSS_PATH) ./configure $(CROSS_COMMON) \
 		--disable-http --disable-examples --disable-doc \
@@ -523,16 +548,15 @@ $(OPUSFILE_LIB): $(CROSS_CC) $(OGG_LIB) $(OPUS_LIB)
 # costs a few kilobytes. --enable-dsd keeps DSD inside WavPack, which the
 # wrapper opens with OPEN_DSD_AS_PCM. --disable-asm because the assembly wavpack
 # ships is for x86 and ARM.
-$(WAVPACK_LIB): $(CROSS_CC)
+$(WAVPACK_LIB): $(CROSS_CC) $(AUDIO_FLAGS_STAMP)
 	@echo "Building static libwavpack $(WAVPACK_VER) for the target..."
 	@if [ ! -f $(WAVPACK_TARBALL) ]; then \
 		wget -O $(WAVPACK_TARBALL) $(WAVPACK_URL) || wget -O $(WAVPACK_TARBALL) $(WAVPACK_URL_MIRROR); \
 	fi
+	@echo '$(WAVPACK_SHA256)  $(WAVPACK_TARBALL)' | sha256sum -c -
 	rm -rf $(WAVPACK_SRC) && tar xf $(WAVPACK_TARBALL)
 	cd $(WAVPACK_SRC) && $(CROSS_PATH) ./configure $(CROSS_COMMON) \
-		--disable-apps --disable-man --disable-asm \
-		--enable-dsd --enable-legacy --without-libiconv-prefix \
-		$(CROSS_TOOLS)
+		$(WAVPACK_CONFIGURE) $(CROSS_TOOLS)
 	$(CROSS_PATH) $(MAKE) -C $(WAVPACK_SRC)
 	$(CROSS_PATH) $(MAKE) -C $(WAVPACK_SRC) install
 
