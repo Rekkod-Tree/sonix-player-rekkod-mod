@@ -1,5 +1,21 @@
 # Graphite 2 native UI
 
+## Alpha8 component and playback-menu pass
+
+The current work is on `main`, following gray-accent commit `f04be22`. Filled choices, title/switch alignment, full-width notes, named accents, two-line quick captions and shared date/time actions address the component review. The user explicitly retained the existing 64x300 volume pill; the prototype now follows it. The status bar adopts the open shade's palette and restores its page/artwork state on dismissal. List rows reserve 12px on the right and preserve complete format/duration text before truncating a long artist name.
+
+The current-track menu supports permanent saves through the existing Zvuk and Yandex download workers. Tests cover the original track after playback changes while the menu is open, already-saved state, a missing card and local-track exclusion. No download action is invented for providers without a permanent-download facility.
+
+Host and MIPS builds pass without new warnings; the ABI check remains within glibc 2.22. Both panel sizes passed the component, row-bounds and status-bar checks. Earlier in this pass, the 36-page dark/light regression and streaming-save fixtures passed. Evidence is under workspace `output/native-ui-alpha8-{full,save,rows-final,status-final}/`. An initial row-test cleanup deleted its screen during a transition; that test defect was fixed and the affected scenarios rerun. Screenshot inspection additionally exposed duration clipping beyond its parent; the layout and the containment assertion were corrected together.
+
+On the physical R1, temporary candidate binaries were launched from an isolated SD directory while preserving the installed alpha7 root filesystem. Fresh ADB captures confirmed dark/light choices, Bluetooth summary/details without changing the battery toggle, date/time cancellation, the shade/status-bar palette and live Zvuk menu states. Saving one live track from its playing menu completed and changed the item to Saved. The final packaged executable is also used for the row-spacing hardware check. This is targeted hardware evidence, not acceptance of every service, Bluetooth codec or storage failure. Yandex live-account testing and R3 Pro II hardware testing remain outstanding.
+
+The final common regression, including list gestures and queue behavior, also passed on both panels in `output/native-ui-alpha8-core-final/`. The R1 was returned to its installed executable and running launcher after the audit; temporary SD candidates and private rollback copies were removed. Gray/dark/tint/text/timeout/brightness/HFP preferences were read back unchanged. The single downloaded test track was retained on the card.
+
+The local R1 image is `D:/Projects/Mediateka/firmware/1.3.0-ui3-alpha8/r1.upt`, SHA-256 `259ed97d014423e72972b98d8cab558bc275dd5c38f67e926903d1cf938a96cf`. Unpacked binaries, R1 kernel, chunk chains, startup JPEGs, private fonts, sealed keys and translations match the intended inputs. Active-source highlighting on Home remains an unimplemented design proposal.
+
+## Earlier implementation history
+
 Implementation on `codex/graphite-ui3`, based on `sonix-r1` commit
 `ab468170f146670a7d8109676ed98a4a96ddbcf8`. Build evidence and remaining hardware acceptance are distinguished below.
 

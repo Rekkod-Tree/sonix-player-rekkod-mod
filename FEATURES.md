@@ -138,8 +138,10 @@ certificate checking, and HLS.
 ## Settings
 
 - **Appearance** - Graphite 2 dark and light surfaces, a Graphite accent, seven colour presets including neutral Gray, and cover accent. Gray adapts to dark/light themes; saved preset indices remain compatible. New configurations start without cover tint; saved choices are retained.
+- **Settings controls** - filled selected segments, aligned title/switch rows and full-width explanations. Long Bluetooth battery details open separately without toggling the setting. Every accent has a visible name; date/time controls share the settings geometry.
 - **Status bar** - compact 20px type and glyphs, a 24px battery and one neutral ink for normal states. High volume and low battery keep readable warnings; idle radios are dimmed. Local play/pause and sleep indicators are omitted, with their controls retained. Left, centre, right and hidden clocks support both time formats.
 - **Playback surfaces** - the control centre and volume overlay share the mini-player's background and foreground, including cover accents. The standard player uses one flat canvas in both themes, also with cover tint; Studio and Waveform remain available.
+- **Open shade** - the status bar adopts the control centre's colours while it is open and restores the underlying page/artwork treatment on dismissal. Quick-control captions can use two lines. The compact floating volume pill keeps its existing dimensions.
 - **Startup identity** - an atmospheric Rekkod Mod splash credits Sonix. Baseline JPEG assets are supplied for both panels and all three boot-theme slots; the startup mechanism is unchanged.
 - **Shared navigation** - equal-size tiles with small line icons, consistent list rows and an Accent mini-player showing the track and artist. Missing-art colours stay tied to the album or folder across lists, queue and playback.
 - **Prototype fidelity** - 34px prototype tile icons, bottom-aligned titles with reserved description space, live library counts, grouped navigation settings and 88px setting choices. Local builds can supply Segoe UI Regular/Semibold while retaining script fallbacks.
@@ -147,6 +149,8 @@ certificate checking, and HLS.
 - **Consistent secondary views** - service line icons, rounded loaded album artwork and a protected scrolling header; coloured file/book/carousel placeholders, 88px carousel/file rows and shared game-setting choices. Fast carousel release uses the latest panel position.
 - **List gestures** - swipe a track left to toggle its favourite state, right to play it next; hold for the menu and append-to-queue action. Album swipes and queue removal/reordering keep their existing meanings.
 - **Now Playing** - an inset square sleeve, compact right-aligned Up Next, and audio-chain details in the menu. Waveform, Studio, lyrics and existing source controls remain available.
+- **Save the current stream** - Zvuk and Yandex Music offer Save to card directly in the playing track's menu, or a checked Saved state. The action retains the track selected when the menu opened and uses the existing download queue. Services without permanent downloads do not show this action.
+- **Track metadata** - symmetric inner row padding keeps duration away from the edge. Long artist names shorten before the format and duration, including compact queue rows.
 - **Feedback** - two-line Undo toasts pause their timeout while touched; long sheet messages scroll above the action buttons.
 - **Control centre and forms** - 64px quick controls with shared colours and readable captions; captions retain tap/hold actions. Playlist and folder naming share the same field and keep the native keyboard.
 - **Service recovery** - bounded, scrollable error explanations with fixed Retry/Sign in and saved-track actions. Zvuk and Yandex return to the failed list after sign-in; Zvuk groups library navigation, shows known collection counts and keeps Search in the header.

@@ -9,30 +9,32 @@
 
 #include "src/gui/bluetooth/airpodspage.h"
 #include "src/gui/fonts/fonts.h"
-#include "src/gui/shell/sx_mini.h"
+#include "src/gui/nowplaying/btline.h"
+#include "src/gui/nowplaying/player.h"
 #include "src/gui/shell/gui.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/keyboard.h"
-#include "src/gui/nowplaying/btline.h"
-#include "src/gui/nowplaying/player.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
+#include "src/gui/shell/sx_card.h"
+#include "src/gui/shell/sx_mini.h"
+#include "src/gui/shell/sx_sheet.h"
 #include "src/gui/shell/sx_styles.h"
+#include "src/gui/shell/sx_tokens.h"
 #include "src/gui/shell/theme.h"
 #include "src/gui/shell/toast.h"
-#include "src/gui/shell/sx_tokens.h"
-#include "src/system/device/power.h"
-#include "src/system/bluetooth/airpods.h"
 #include "src/system/audio/alsa-controls.h"
 #include "src/system/audio/audio.h"
 #include "src/system/audio/eqprofile.h"
+#include "src/system/bluetooth/airpods.h"
 #include "src/system/bluetooth/bluetooth.h"
 #include "src/system/core/config.h"
+#include "src/system/core/lang.h"
 #include "src/system/device/ota.h"
+#include "src/system/device/power.h"
 #include "src/system/net/wifitransfer.h"
 #include "src/system/streaming/podcastcache.h"
 #include "src/system/streaming/provider.h"
-#include "src/system/core/lang.h"
 
 lv_obj_t *btaudio_screen;
 
@@ -142,6 +144,12 @@ static void refresh_battery_row(bool airpods_present) {
 static void battery_toggle_cb(lv_event_t *e) {
 	(void)e;
 	bluetooth_set_headset_battery_enabled(lv_obj_has_state(battery_switch, LV_STATE_CHECKED));
+}
+
+static void battery_info_cb(lv_event_t *e) {
+	lv_event_stop_bubbling(e);
+	sx_sheet_t sheet = {.title = tr("btaudio_headset_battery"), .subtitle = tr("btaudio_headset_battery_note"), .action_label = tr("ok")};
+	sx_sheet_open(&sheet);
 }
 
 static void volume_toggle_cb(lv_event_t *e) {
@@ -615,8 +623,9 @@ void btaudio_init(gui_config_t *cfg) {
 	}
 
 	// The headset battery, opt-in: see refresh_battery_row() above.
-	settingsrow_switch_card(container, "btaudio_headset_battery", "btaudio_headset_battery_note", &battery_switch,
-							battery_toggle_cb);
+	lv_obj_t *battery_card = settingsrow_switch_card(container, "btaudio_headset_battery", "btaudio_headset_battery_summary", &battery_switch, battery_toggle_cb);
+	lv_obj_t *battery_info = sx_card_action(battery_card, tr("details"), battery_info_cb, NULL);
+	lv_obj_set_event_bubble(battery_info, false);
 	if (bluetooth_headset_battery_enabled()) {
 		lv_obj_add_state(battery_switch, LV_STATE_CHECKED);
 	}

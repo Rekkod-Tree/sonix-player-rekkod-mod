@@ -1329,6 +1329,24 @@ static void open_queue_cb(void *user) {
 	trackmenu_open_queue();
 }
 
+static char menu_save_path[512];
+static int menu_save_duration;
+
+static void save_stream_track_cb(void *user) {
+	const char *path = user;
+	const stream_provider_t *service = stream_provider_for_track(path);
+	if (!service || !service->save_track) {
+		gui_notify_popup("download_failed");
+		return;
+	}
+	if (service->track_saved && service->track_saved(path)) {
+		gui_notify_popup(service->saved_label_key);
+		return;
+	}
+	if (!service->save_track(path, menu_save_duration))
+		gui_notify_popup(service->save_failed_key);
+}
+
 // The same page without going through the menu: the player's "Up next" chip,
 // and its episodes button on a podcast -- a podcast's episodes are exactly the
 // queue.
@@ -1545,8 +1563,15 @@ void trackmenu_open(lv_obj_t *anchor) {
 									   : (slash ? slash + 1 : state.current_file));
 	snprintf(sub, sizeof(sub), "%s", state.live ? state.metadata.artist : metadata_shown_artist(&state.metadata));
 
-	sx_sheet_item_t items[12];
+	sx_sheet_item_t items[13];
 	int n = 0;
+	const stream_provider_t *service = !state.live && !ext ? stream_provider_for_track(state.current_file) : NULL;
+	if (service && service->save_track) {
+		snprintf(menu_save_path, sizeof(menu_save_path), "%s", state.current_file);
+		menu_save_duration = (int)state.progress_total_secs;
+		bool saved = service->track_saved && service->track_saved(menu_save_path);
+		items[n++] = (sx_sheet_item_t){tr(saved ? service->saved_label_key : service->save_label_key), &icon_download, saved, false, saved ? NULL : save_stream_track_cb, menu_save_path};
+	}
 	if (!ext && !state.live && loaded) {
 		items[n++] = (sx_sheet_item_t){tr("np_stop_after_track"), &npicon_stop_after,
 									   stop == DEVICE_STATE_STOP_AFTER_TRACK, false, stop_after_pick,

@@ -239,7 +239,7 @@ static lv_obj_t *make_button(lv_obj_t *parent, lv_obj_t **label_out, lv_event_cb
 	lv_obj_remove_style_all(btn);
 	lv_obj_set_height(btn, SX_SHEET_BTN_H);
 	lv_obj_set_flex_grow(btn, 1);
-	lv_obj_set_style_radius(btn, SX_SHEET_BTN_H / 2, 0);
+	lv_obj_set_style_radius(btn, SX_CARD_R, 0);
 	lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
 	lv_obj_set_scrollable(btn, false);
 	lv_obj_set_event_bubble(btn, true);

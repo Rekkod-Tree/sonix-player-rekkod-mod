@@ -44,6 +44,7 @@
 #define SX_ROW_R 14
 #define SX_ROW_GAP 2
 #define SX_ROW_PAD_L 12
+#define SX_ROW_PAD_R 12
 #define SX_ROW_INNER_GAP 12
 #define SX_ROW_TITLE_FONT 26
 #define SX_ROW_SUB_FONT 20

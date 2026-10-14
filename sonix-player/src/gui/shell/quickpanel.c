@@ -77,7 +77,7 @@
 #define CC_RADIUS 24
 #define CC_PAD 16
 #define CC_BOTTOM_PAD 8
-#define CC_CELL_H 112
+#define CC_CELL_H 128
 #define CC_GAP 8	   // between the lines of buttons
 #define CC_LABEL_GAP 8 // between a button and its name
 #define CC_BUTTONS_PER_LINE 4
@@ -288,6 +288,7 @@ static bool raised_topbar;
 // long press on one of the icons closes the player and loads a page while this
 // slide is still running, and a page keeps its status bar.
 static void restore_topbar(void) {
+	topbar_set_control_panel(false);
 	if (raised_topbar) {
 		raised_topbar = false;
 		if (player_sheet_is_open()) {
@@ -434,6 +435,7 @@ static void panel_prepare(void) {
 	}
 
 	// The bar is also restacked above the card, which slides in from under it.
+	topbar_set_control_panel(true);
 	topbar_bring_to_front();
 }
 
@@ -1157,7 +1159,7 @@ static lv_obj_t *make_circle_button(lv_obj_t *parent, const lv_image_dsc_t *glyp
 	// The pressed fill at once (principle 2): a step lighter.
 	lv_obj_add_style(btn, &sx_style_surface, LV_STATE_PRESSED);
 	// The name under it answers a tap too.
-	touch_pad(btn, (cell_w - SX_CC_BTN) / 2, (cell_w - SX_CC_BTN) / 2, 8, CC_LABEL_GAP + lv_font_get_line_height(&font_ui_20));
+	touch_pad(btn, (cell_w - SX_CC_BTN) / 2, (cell_w - SX_CC_BTN) / 2, 8, CC_LABEL_GAP + 2 * lv_font_get_line_height(&font_ui_20));
 
 	lv_obj_t *icon = lv_image_create(btn);
 	lv_image_set_src(icon, glyph);
@@ -1172,7 +1174,7 @@ static lv_obj_t *make_circle_button(lv_obj_t *parent, const lv_image_dsc_t *glyp
 	lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
 	lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
 	lv_obj_set_style_text_font(label, &font_ui_20, 0);
-	lv_obj_set_height(label, lv_font_get_line_height(&font_ui_20));
+	lv_obj_set_height(label, 2 * lv_font_get_line_height(&font_ui_20));
 	lv_obj_add_style(label, &sx_style_text2, 0);
 	lv_obj_set_style_text_opa(label, LV_OPA_COVER, 0);
 	lv_label_set_text(label, tr(button_label[which]));

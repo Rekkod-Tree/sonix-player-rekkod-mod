@@ -1186,7 +1186,7 @@ static void paint_duration_roller(lv_obj_t *roller) {
 	}
 	lv_obj_set_style_text_color(roller, theme()->text_secondary, 0);
 	lv_obj_set_style_bg_color(roller, theme()->surface_pressed, LV_PART_SELECTED);
-	lv_obj_set_style_text_color(roller, theme()->accent, LV_PART_SELECTED);
+	lv_obj_set_style_text_color(roller, theme()->accent_text, LV_PART_SELECTED);
 }
 
 static void fill_wheel_numbers(char *out, size_t size, int last, const char *format) {

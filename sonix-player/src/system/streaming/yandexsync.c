@@ -6,6 +6,7 @@
 #include <time.h>
 
 #include "src/system/core/utils.h"
+#include "src/system/library/metadata.h"
 #include "src/system/streaming/provider.h"
 #include "src/system/streaming/yandex.h"
 #include "src/system/streaming/yandexcache.h"
@@ -267,8 +268,38 @@ static bool provider_album_id(const char *path, char *out, size_t size) {
 	return out[0] != '\0';
 }
 
+static bool provider_track_saved(const char *path) {
+	char id[YANDEX_ID_MAX], local[1024];
+	track_ids(path, id, sizeof(id), NULL, 0);
+	return id[0] && yandexsaved_local(id, local, sizeof(local));
+}
+
+static bool provider_save_track(const char *path, int duration_secs) {
+	yandex_track_t track = {0};
+	track_ids(path, track.id, sizeof(track.id), track.album_id, sizeof(track.album_id));
+	if (!track.id[0])
+		return false;
+	song_metadata_t meta;
+	metadata_read(path, &meta);
+	if (!meta.title[0])
+		return false;
+	snprintf(track.title, sizeof(track.title), "%.*s", (int)sizeof(track.title) - 1, meta.title);
+	snprintf(track.artist, sizeof(track.artist), "%.*s", (int)sizeof(track.artist) - 1, meta.artist[0] ? meta.artist : meta.album_artist);
+	snprintf(track.album, sizeof(track.album), "%.*s", (int)sizeof(track.album) - 1, meta.album);
+	track.track_number = meta.track_number;
+	track.disc_number = meta.disc_number;
+	track.available = true;
+	track.duration = duration_secs;
+	return yandexdl_track(&track);
+}
+
 static stream_provider_t provider = {
 	.id = "yandex",
+	.save_track = provider_save_track,
+	.track_saved = provider_track_saved,
+	.save_label_key = "yandex_save",
+	.saved_label_key = "yandex_saved_on_card",
+	.save_failed_key = "yandex_save_refused",
 	.set_root = provider_set_root,
 	.cache_dir = yandexcache_dir,
 	.owns_path = provider_owns,

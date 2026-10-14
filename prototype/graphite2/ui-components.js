@@ -25,7 +25,8 @@
     const interactive=typeof b.tap==='function';
     const nav=interactive&&b.hasChev&&!toggle;
     const content=[
-      h('div',{className:'sx-card-line',key:'line'},b.tone?h('span',{className:'sx-card-notice-icon'},h(Icon,{name:'info',size:28})):null,h('div',{className:'sx-card-copy'},b.title?h('div',{className:'sx-card-title'},b.title):null,b.hasSub?h('div',{className:'sx-card-sub',style:{color:b.subColor}},b.sub):null),b.value?h('div',{className:'sx-card-value'},b.value):null,toggle?h('span',{className:'sx-switch','data-on':!!b.cardChecked,'aria-hidden':true},h('i')):b.hasChev?h(Icon,{name:'chevR',size:26}):null),
+      h('div',{className:'sx-card-line',key:'line'},b.tone?h('span',{className:'sx-card-notice-icon'},h(Icon,{name:'info',size:28})):null,h('div',{className:'sx-card-copy'},b.title?h('div',{className:'sx-card-title'},b.title):null,b.hasSub&&!toggle?h('div',{className:'sx-card-sub',style:{color:b.subColor}},b.sub):null),b.value?h('div',{className:'sx-card-value'},b.value):null,toggle?h('span',{className:'sx-switch','data-on':!!b.cardChecked,'aria-hidden':true},h('i')):b.hasChev?h(Icon,{name:'chevR',size:26}):null),
+      toggle&&b.hasSub?h('div',{key:'note',className:'sx-card-sub',style:{color:b.subColor}},b.sub):null,
       b.hasPills?h(Choice,{key:'choices',items:b.pills,label:b.title,disabled:b.choicesDisabled}):null,
       b.hasSwatches?h('div',{key:'swatches',className:'sx-accent-grid',role:'group','aria-label':'Акцентный цвет'},b.swatches.map(a=>h(Button,{key:a.label,label:a.label,pressed:a.selected,onClick:a.go,variant:'swatch',className:'accent-choice'},h('span',{className:'sx-accent-dot',style:{background:a.c,color:a.ink}},h(Icon,{name:a.g})),h('span',{className:'sx-accent-name'},a.label)))):null,
       b.hasBar?h('div',{key:'bar',className:'sx-meter','aria-hidden':true},h('i',{style:{width:b.pct}})):null,
@@ -121,7 +122,7 @@
   }
   function Device(v){
     return h(React.Fragment,null,
-      h('button',{type:'button','data-ui':'StatusBar',className:'statusbar','aria-label':'Пункт управления',style:{background:v.sbBg,color:v.sbFg},onClick:v.topClick,onPointerDown:v.topDown,onPointerMove:v.topMove,onPointerUp:v.topUp,onPointerCancel:v.topCancel},h('span',null,h(Icon,{name:v.sbVolIc,size:20}),h('span',{style:{color:v.sbWarn}},v.sbVol),v.sbClockL),h('span',null,v.sbC),h('span',null,v.sbBt?h(Icon,{name:'bt',size:20}):null,v.sbWifi?h(Icon,{name:'wifi',size:20}):null,v.sbR,h(Icon,{name:'battery',size:24}))),
+      h('button',{type:'button','data-ui':'StatusBar',className:'statusbar','aria-label':'Пункт управления',style:{background:v.sbBg,color:v.sbFg,zIndex:v.ccOpen?24:7},onClick:v.topClick,onPointerDown:v.topDown,onPointerMove:v.topMove,onPointerUp:v.topUp,onPointerCancel:v.topCancel},h('span',null,h(Icon,{name:v.sbVolIc,size:20}),h('span',{style:{color:v.sbWarn,background:v.sbWarnBg,borderRadius:4,padding:v.sbWarnBg?'0 2px':undefined}},v.sbVol),v.sbClockL),h('span',null,v.sbC),h('span',null,v.sbBt?h(Icon,{name:'bt',size:20}):null,v.sbWifi?h(Icon,{name:'wifi',size:20}):null,v.sbR,h(Icon,{name:'battery',size:24}))),
       !v.isNp&&v.showHeader?h(Header,{v}):null,
       !v.isNp&&v.isAlbum?h('div',{className:cx('sx-album-bar',v.albBarShow==='flex'&&'sx-album-bar--solid')},h(Button,{onClick:v.back,label:'Назад',icon:'chevL'}),v.albBarShow==='flex'?h(React.Fragment,null,h('strong',null,v.albTitle),h(Button,{onClick:v.albumMenu,label:'Меню альбома',icon:'more'})):null):null,
       v.isNp?h(Player,{v}):h(Content,{v}),

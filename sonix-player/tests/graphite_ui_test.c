@@ -2,6 +2,7 @@
 // Uses LVGL's own input and rendering API; no desktop automation is required.
 #include "src/system/core/logging.h"
 #include <assert.h>
+#include <errno.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -478,6 +479,15 @@ static void status_states(void) {
 				status_layout(bar, left, right);
 				snprintf(name, sizeof(name), "status-%s-%s-12h-clock-%d", dark ? "dark" : "light", large ? "large" : "normal", pos);
 				capture(name);
+				topbar_set_control_panel(true);
+				status_layout(bar, left, right);
+				assert(lv_color_eq(lv_obj_get_style_bg_color(bar, 0), sx_pal()->mini_bg));
+				assert(lv_color_eq(lv_obj_get_style_image_recolor(bt, 0), sx_pal()->mini_ink));
+				assert(lv_obj_get_style_bg_opa(find_label(left, "100"), 0) == LV_OPA_COVER);
+				snprintf(name, sizeof(name), "status-control-%d-%d-%d", dark, large, pos);
+				capture(name);
+				topbar_set_control_panel(false);
+				assert(lv_color_eq(lv_obj_get_style_image_recolor(bt, 0), ink));
 				lv_label_set_text(clock, "18:46");
 				topbar_refresh_volume(40);
 			}
@@ -614,8 +624,18 @@ static void surface_states(void) {
 	}
 }
 
+#include "graphite_components.inc"
+
 static void run(lv_timer_t *timer) {
 	(void)timer;
+	if (getenv("SONIX_UI_TEST_COMPONENTS_ONLY")) {
+		component_states();
+		return;
+	}
+	if (getenv("SONIX_UI_TEST_SAVE_ONLY")) {
+		save_menu_states();
+		return;
+	}
 	if (getenv("SONIX_UI_TEST_SURFACES_ONLY")) {
 		surface_states();
 		return;

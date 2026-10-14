@@ -7,6 +7,7 @@
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/nowplaying/player.h"
 #include "src/gui/shell/corners.h"
+#include "src/gui/shell/icons.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/sx_card.h"
@@ -30,7 +31,7 @@ static lv_obj_t *btn_clock[4]; // left / centre / right / hidden
 #define ACCENT_SLOTS (THEME_ACCENT_COUNT + 2)
 static lv_obj_t *btn_accent[ACCENT_SLOTS];
 static lv_obj_t *accent_name;
-static lv_obj_t *cover_mark[2]; // the half moon on the cover's circle: disc, then the bite out of it
+static lv_obj_t *cover_mark; // artwork marker on the cover-derived accent
 static lv_obj_t *tint_toggle;
 static lv_obj_t *battery_percent_toggle;
 static lv_obj_t *statusbar_always_toggle;
@@ -105,13 +106,15 @@ static int slot_accent(int slot) { return slot == ACCENT_SLOT_GRAPHITE ? THEME_A
 
 // The active circle wears a ring in the text colour; the rest sit flat. The
 // cover's circle is in the colour the cover gives now -- it changes with the
-// album -- and carries a half moon, the handoff's "from the cover" mark.
+// album -- and carries an artwork marker.
 static void refresh_accent_buttons(void) {
 	int active_accent = theme_get_accent();
 	if (accent_name) {
-		lv_label_set_text(accent_name, tr(active_accent == THEME_ACCENT_GRAY ? "appearance_gray" : "appearance_graphite"));
-		lv_obj_set_hidden(accent_name, active_accent != THEME_ACCENT_GRAPHITE && active_accent != THEME_ACCENT_GRAY);
+		static const char *names[] = {"appearance_blue", "appearance_orange", "appearance_yellow", "appearance_green", "appearance_purple", "appearance_pink", "appearance_gray"};
+		const char *name = active_accent == THEME_ACCENT_COVER ? "appearance_cover" : active_accent == THEME_ACCENT_GRAPHITE ? "appearance_graphite" : names[active_accent];
+		lv_label_set_text(accent_name, tr(name));
 	}
+
 	for (int i = 0; i < ACCENT_SLOTS; i++) {
 		if (!btn_accent[i]) {
 			continue;
@@ -122,10 +125,8 @@ static void refresh_accent_buttons(void) {
 								  0);
 		sx_swatch_set_active(btn_accent[i], accent == active_accent);
 	}
-	if (cover_mark[0]) {
-		lv_obj_set_style_bg_color(cover_mark[0], sx_palette_cover_on_accent(), 0);
-		lv_obj_set_style_bg_color(cover_mark[1], sx_palette_cover_accent(), 0);
-	}
+	if (cover_mark)
+		lv_obj_set_style_image_recolor(cover_mark, sx_palette_cover_on_accent(), 0);
 }
 
 static void accent_pick_cb(lv_event_t *e) {
@@ -137,22 +138,15 @@ static void accent_pick_cb(lv_event_t *e) {
 	refresh_accent_buttons();
 }
 
-static lv_obj_t *make_mark_disc(lv_obj_t *parent, int size, int x) {
-	lv_obj_t *disc = sx_box(parent);
-	lv_obj_set_size(disc, size, size);
-	lv_obj_set_style_radius(disc, LV_RADIUS_CIRCLE, 0);
-	lv_obj_set_style_bg_opa(disc, LV_OPA_COVER, 0);
-	lv_obj_align(disc, LV_ALIGN_CENTER, x, 0);
-	return disc;
-}
-
 static lv_obj_t *make_accent_circle(lv_obj_t *parent, int slot) {
 	lv_obj_t *btn = sx_swatch(parent, lv_color_black(), slot, accent_pick_cb);
 	if (slot == ACCENT_SLOT_COVER) {
-		// A disc with a bite taken out of its right half: a half moon in two
-		// plain circles, the second in the swatch's own colour.
-		cover_mark[0] = make_mark_disc(btn, 20, 0);
-		cover_mark[1] = make_mark_disc(btn, 20, 9);
+		cover_mark = lv_image_create(btn);
+		lv_image_set_src(cover_mark, &icon_album);
+		lv_obj_set_size(cover_mark, 24, 24);
+		lv_image_set_inner_align(cover_mark, LV_IMAGE_ALIGN_STRETCH);
+		lv_obj_set_style_image_recolor_opa(cover_mark, LV_OPA_COVER, 0);
+		lv_obj_center(cover_mark);
 	}
 	return btn;
 }
@@ -200,7 +194,7 @@ void appearance_init(gui_config_t *cfg) {
 	// words do not fit across 480 pixels in every language.
 	settingsrow_pills(container, "appearance_clock_position", &pills);
 	btn_clock[TOPBAR_CLOCK_LEFT] = settingsrow_pill(pills, "left", TOPBAR_CLOCK_LEFT, clock_pos_cb);
-	btn_clock[TOPBAR_CLOCK_CENTER] = settingsrow_pill(pills, "centre", TOPBAR_CLOCK_CENTER, clock_pos_cb);
+	btn_clock[TOPBAR_CLOCK_CENTER] = settingsrow_pill(pills, "appearance_clock_center", TOPBAR_CLOCK_CENTER, clock_pos_cb);
 	btn_clock[TOPBAR_CLOCK_RIGHT] = settingsrow_pill(pills, "right", TOPBAR_CLOCK_RIGHT, clock_pos_cb);
 	btn_clock[TOPBAR_CLOCK_HIDDEN] = settingsrow_pill(pills, "hide", TOPBAR_CLOCK_HIDDEN, clock_pos_cb);
 

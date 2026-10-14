@@ -119,6 +119,14 @@ typedef struct stream_provider {
 	// Translation key for "the album could not be opened".
 	const char *album_failed_key;
 
+	// Optional permanent save through the service's existing download queue.
+	// GUI thread: no network request here. The worker reports progress/errors.
+	bool (*save_track)(const char *path, int duration_secs);
+	bool (*track_saved)(const char *path);
+	const char *save_label_key;
+	const char *saved_label_key;
+	const char *save_failed_key;
+
 	// --- the account's playlists (all NULL when there are none to write) --
 
 	bool (*playlists_known)(void);

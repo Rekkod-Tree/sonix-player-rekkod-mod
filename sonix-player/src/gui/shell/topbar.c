@@ -12,6 +12,7 @@
 #include "src/gui/nowplaying/player.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/quickpanel.h"
+#include "src/gui/shell/sx_palette.h"
 #include "src/gui/shell/sx_tokens.h"
 #include "src/gui/shell/theme.h"
 #include "src/system/audio/alsa-controls.h"
@@ -181,10 +182,13 @@ static lv_style_t tint_icon_style;
 // Up over the player's artwork (topbar_set_over_artwork): white on the
 // picture, whatever the theme or the page underneath says.
 static bool over_art;
+static bool control_panel_palette;
 static bool over_art_blur;	   // asked for a blur behind the bar
 static bool over_art_blur_held; // ...and topbar_hold_backdrop_blur() holds it off
 
 static lv_color_t shell_color(bool known) {
+	if (control_panel_palette)
+		return known ? sx_pal()->mini_ink : sx_mix(sx_pal()->mini_ink, sx_pal()->mini_bg, 65);
 	if (over_art) {
 		return known ? lv_color_white() : lv_color_make(200, 200, 200);
 	}
@@ -194,9 +198,16 @@ static lv_color_t shell_color(bool known) {
 	return theme()->text_secondary;
 }
 // Warnings use one readable role; normal hardware states remain neutral.
-static lv_color_t warning_color(void) { return lv_color_hex(over_art || theme_is_dark() ? SX_DANGER_TEXT : SX_L_DANGER_TEXT); }
+static lv_color_t warning_color(void) {
+	bool dark_surface = control_panel_palette ? lv_color_eq(sx_pal()->mini_ink, lv_color_white()) : over_art || theme_is_dark();
+	return lv_color_hex(dark_surface ? SX_DANGER_TEXT : SX_L_DANGER_TEXT);
+}
 
 static void refresh_status_ink(void) {
+	if (control_panel_palette) {
+		lv_obj_set_style_bg_color(top_bar, sx_pal()->mini_bg, 0);
+		lv_obj_set_style_bg_opa(top_bar, LV_OPA_COVER, 0);
+	}
 	lv_color_t ink = shell_color(true);
 	lv_style_set_text_color(&tint_text_style, ink);
 	lv_style_set_image_recolor(&tint_icon_style, ink);
@@ -330,9 +341,20 @@ void topbar_refresh_volume(int percent) {
 	// Past this threshold the number turns red, warning that the next steps are
 	// the loud ones. The volume pop-up uses the same threshold.
 	if (percent > VOLUME_WARN_PERCENT) {
-		bar_set_local(vol_label, LV_STYLE_TEXT_COLOR, (lv_style_value_t){.color = warning_color()});
+		bar_set_local(vol_label, LV_STYLE_TEXT_COLOR, (lv_style_value_t){.color = control_panel_palette ? lv_color_white() : warning_color()});
 	} else {
 		bar_remove_local(vol_label, LV_STYLE_TEXT_COLOR);
+	}
+	if (control_panel_palette && percent > VOLUME_WARN_PERCENT) {
+		bar_set_local(vol_label, LV_STYLE_BG_COLOR, (lv_style_value_t){.color = lv_color_hex(SX_DANGER_BG)});
+		bar_set_local(vol_label, LV_STYLE_BG_OPA, (lv_style_value_t){.num = LV_OPA_COVER});
+		bar_set_local(vol_label, LV_STYLE_RADIUS, (lv_style_value_t){.num = 4});
+		bar_set_local(vol_label, LV_STYLE_PAD_LEFT, (lv_style_value_t){.num = 2});
+		bar_set_local(vol_label, LV_STYLE_PAD_RIGHT, (lv_style_value_t){.num = 2});
+	} else {
+		bar_remove_local(vol_label, LV_STYLE_BG_OPA);
+		bar_remove_local(vol_label, LV_STYLE_PAD_LEFT);
+		bar_remove_local(vol_label, LV_STYLE_PAD_RIGHT);
 	}
 
 	const lv_image_dsc_t *icon = &icon_volume_high;
@@ -1061,7 +1083,7 @@ void topbar_set_battery_percent(bool shown) {
 
 // Puts the bar in the tint or back in the theme, for the page now shown.
 static void tint_apply(void) {
-	if (!top_bar || over_art) {
+	if (!top_bar || over_art || control_panel_palette) {
 		return; // the artwork's look holds for as long as the player is up
 	}
 	bool active = tint_screen && tint_page == tint_screen;
@@ -1107,13 +1129,18 @@ void topbar_hold_backdrop_blur(bool hold) {
 		return;
 	}
 	over_art_blur_held = hold;
-	if (top_bar && over_art && over_art_blur) {
+	if (top_bar && over_art && over_art_blur && !control_panel_palette) {
 		over_art_backdrop(true);
 	}
 }
 
 void topbar_set_over_artwork(bool on, bool blur) {
 	if (!top_bar) {
+		return;
+	}
+	if (control_panel_palette) {
+		over_art = on;
+		over_art_blur = blur;
 		return;
 	}
 	if (on) {
@@ -1158,6 +1185,24 @@ void topbar_bring_to_front(void) {
 	if (top_bar) {
 		lv_obj_move_foreground(top_bar);
 	}
+}
+
+void topbar_set_control_panel(bool shown) {
+	if (!top_bar || control_panel_palette == shown)
+		return;
+	control_panel_palette = shown;
+	if (shown) {
+		lv_obj_remove_local_style_prop(top_bar, LV_STYLE_BLUR_RADIUS, 0);
+		lv_obj_remove_local_style_prop(top_bar, LV_STYLE_BLUR_BACKDROP, 0);
+		lv_obj_remove_local_style_prop(top_bar, LV_STYLE_BLUR_QUALITY, 0);
+	} else if (over_art) {
+		over_art_backdrop(over_art_blur);
+	} else {
+		lv_obj_remove_local_style_prop(top_bar, LV_STYLE_BG_OPA, 0);
+		tint_active = true;
+		tint_apply();
+	}
+	refresh_status_ink();
 }
 
 // Shows or hides the whole bar. The player page hides it so the album art can

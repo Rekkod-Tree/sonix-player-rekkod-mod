@@ -57,3 +57,11 @@ Real R1 captures confirmed square loaded album artwork and track text scrolling 
 Service tile glyphs are taken from the prototype. Source badges are retained. Game settings reuse the shared choice component, including wrapping based on label length. File-manager rows and ebook placeholders/captions use the common visual scale; ebook reading preferences remain independent.
 
 Verification was strengthened after two false positives: a screenshot of a following page could still be covered by the carousel, and a raw album title could retrieve tracks while missing the cover cache's canonical album identity. Tests now assert that the carousel is hidden and resolve album identity through the normal library API; the artwork check requires the actual fixture's two image colours, not just a non-empty placeholder.
+## Alpha8 latest acceptance
+
+- Shared filled choices, switch-card notes, named accents, date/time actions and two-line quick captions are implemented. The original volume geometry is retained by user choice.
+- The open shade includes the status bar in its palette, with readable warnings and restoration on close. Targeted native checks passed at both panel sizes; the open/closed states were inspected on the physical R1.
+- Track rows have symmetric 12px inner padding. Format and duration remain inside their text column with long artist names and a queue grip. Both normal and large-text fixtures passed, and the packaged binary's local library list was captured on R1.
+- Zvuk and Yandex support saving from the current track's menu through their existing workers. The mock verifies retained track identity, saved state, missing card and local-track exclusion. A live Zvuk save completed on R1 and appeared in the library; live Yandex acceptance remains open.
+- Temporary candidates ran from SD without replacing the installed alpha7 image. Alpha8 package integrity is verified separately; booting the packaged alpha8 image still requires installation. R3 Pro II remains simulator-only.
+- Active-source highlighting on Home was analysed only and is not implemented.

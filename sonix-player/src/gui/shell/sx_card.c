@@ -95,14 +95,17 @@ void sx_pill_set_active(lv_obj_t *pill, bool active) {
 	}
 	if (lv_obj_get_user_flag(lv_obj_get_parent(pill), 2)) {
 		lv_obj_t *label = lv_obj_get_child(pill, 0);
-		lv_obj_t *line = lv_obj_get_child(pill, 1);
 		lv_obj_remove_style(pill, &sx_style_accent, 0);
 		lv_obj_remove_style(pill, &sx_style_accent_press, LV_STATE_PRESSED);
 		lv_obj_remove_style(label, &sx_style_text, 0);
 		lv_obj_remove_style(label, &sx_style_text2, 0);
-		lv_obj_add_style(label, active ? &sx_style_text : &sx_style_text2, 0);
+		if (active)
+			lv_obj_add_state(pill, LV_STATE_CHECKED);
+		else {
+			lv_obj_remove_state(pill, LV_STATE_CHECKED);
+			lv_obj_add_style(label, &sx_style_text2, 0);
+		}
 		lv_obj_set_style_text_font(label, active ? &font_ui_22_bold : &font_ui_22, 0);
-		lv_obj_set_hidden(line, !active);
 		return;
 	}
 	// The accent's style goes on top of the neutral one, so it wins while
@@ -140,7 +143,7 @@ void sx_choice_reflow(lv_obj_t *row) {
 	lv_obj_add_style(row, &sx_style_press, 0);
 	lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
 	lv_obj_set_style_radius(row, SX_CARD_R, 0);
-	lv_obj_set_style_pad_all(row, 0, 0);
+	lv_obj_set_style_pad_all(row, 4, 0);
 	lv_obj_set_style_pad_hor(row, 4, 0);
 	lv_obj_set_style_pad_gap(row, 4, 0);
 	bool single_row = count <= (fonts_large_text() ? 2U : 4U);
@@ -154,32 +157,27 @@ void sx_choice_reflow(lv_obj_t *row) {
 			const lv_font_t *font = lv_obj_get_style_text_font(label, 0);
 			lv_point_t size;
 			lv_text_get_size(&size, lv_label_get_text(label), font, 0, 0, LV_MAX(1, label_width), LV_TEXT_FLAG_NONE);
-			if (size.y > 2 * lv_font_get_line_height(font))
+			if (size.y > lv_font_get_line_height(font))
 				single_row = false;
 		}
 	}
 	lv_obj_set_flex_flow(row, single_row ? LV_FLEX_FLOW_ROW : LV_FLEX_FLOW_ROW_WRAP);
 	for (uint32_t i = 0; i < count; i++) {
 		lv_obj_t *button = lv_obj_get_child(row, (int)i);
-		lv_obj_set_size(button, single_row ? 0 : lv_pct(48), 88);
+		lv_obj_set_size(button, single_row ? 0 : lv_pct(count % 2 && i == count - 1 ? 100 : 48), 80);
 		lv_obj_set_flex_grow(button, single_row ? 1 : 0);
 		lv_obj_set_style_pad_hor(button, 8, 0);
 		lv_obj_set_style_radius(button, 12, 0);
 		lv_obj_set_style_bg_opa(button, LV_OPA_TRANSP, 0);
+		lv_obj_add_style(button, &sx_style_accent, LV_STATE_CHECKED);
+		lv_obj_add_style(button, &sx_style_accent_press, LV_STATE_CHECKED | LV_STATE_PRESSED);
 		lv_obj_set_style_bg_opa(button, LV_OPA_40, LV_STATE_PRESSED);
 		lv_obj_set_ext_click_area(button, 0);
 		lv_obj_t *label = lv_obj_get_child(button, 0);
 		lv_obj_set_width(label, lv_pct(100));
 		lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
 		lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
-		lv_obj_set_style_translate_y(label, -4, 0);
-		if (lv_obj_get_child_count(button) == 1) {
-			lv_obj_t *line = sx_box(button);
-			lv_obj_set_size(line, lv_pct(90), 2);
-			lv_obj_align(line, LV_ALIGN_BOTTOM_MID, 0, -16);
-			lv_obj_add_style(line, &sx_style_accent, 0);
-			lv_obj_set_hidden(line, true);
-		}
+		lv_obj_set_style_translate_y(label, 0, 0);
 	}
 	busy = false;
 }
@@ -289,7 +287,7 @@ lv_obj_t *sx_card_subtitle(lv_obj_t *card, const char *text, bool mono) {
 		return NULL;
 	}
 	if (!p->subtitle) {
-		p->subtitle = lv_label_create(p->text);
+		p->subtitle = lv_label_create(p->sw ? card : p->text);
 		lv_obj_set_width(p->subtitle, lv_pct(100));
 		lv_label_set_long_mode(p->subtitle, LV_LABEL_LONG_WRAP);
 	}
@@ -372,6 +370,10 @@ lv_obj_t *sx_card_switch(lv_obj_t *card, lv_event_cb_t cb) {
 		return NULL;
 	}
 	if (!p->sw) {
+		if (p->subtitle) {
+			lv_obj_set_parent(p->subtitle, card);
+			lv_obj_move_to_index(p->subtitle, 1);
+		}
 		p->sw = lv_switch_create(p->head);
 		sx_switch_style(p->sw);
 		lv_obj_set_checkable(p->sw, false);

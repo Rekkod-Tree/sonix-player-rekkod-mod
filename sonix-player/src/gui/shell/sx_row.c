@@ -525,6 +525,7 @@ lv_obj_t *sx_row_create(lv_obj_t *parent, const sx_row_handlers_t *handlers, boo
 	lv_obj_set_style_radius(r->content, SX_ROW_R, 0);
 	lv_obj_add_style(r->content, &sx_style_press, LV_STATE_PRESSED);
 	lv_obj_set_style_pad_left(r->content, SX_ROW_PAD_L, 0);
+	lv_obj_set_style_pad_right(r->content, SX_ROW_PAD_R, 0);
 	lv_obj_set_style_pad_column(r->content, SX_ROW_INNER_GAP, 0);
 	lv_obj_set_flex_flow(r->content, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(r->content, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -619,17 +620,16 @@ void sx_row_set_subtitle(lv_obj_t *row, const char *subtitle, const char *badge,
 		return;
 	}
 	lv_label_set_text(r->sub, subtitle ? subtitle : "");
-	// The subtitle leaves room for a badge or a length only when there is
-	// one: alone it takes the line ("Author · 30 episodes" was cut at 75 %).
+	// Keep the duration and format intact; the subtitle uses the space left.
 	bool beside = (badge && badge[0]) || (duration && duration[0]);
-	lv_obj_set_style_max_width(r->sub, beside ? lv_pct(75) : lv_pct(100), 0);
+	lv_obj_set_style_max_width(r->sub, lv_pct(100), 0);
+	lv_obj_set_width(r->sub, beside ? 0 : lv_pct(100));
+	lv_obj_set_flex_grow(r->sub, beside ? 1 : 0);
 	lv_obj_set_hidden(r->badge, !badge || !badge[0]);
 	lv_label_set_text(r->badge, badge ? badge : "");
-	// Whatever follows the subtitle takes the rest of the line, so the
-	// duration ends up against the right edge either way.
 	bool has_badge = badge && badge[0];
-	lv_obj_set_flex_grow(r->badge, has_badge ? 1 : 0);
-	lv_obj_set_flex_grow(r->duration, has_badge ? 0 : 1);
+	lv_obj_set_flex_grow(r->badge, 0);
+	lv_obj_set_flex_grow(r->duration, 0);
 	lv_obj_set_hidden(r->duration, !duration || !duration[0]);
 	lv_label_set_text(r->duration, duration ? duration : "");
 	// Nothing at all under the title (a folder, an artist whose count is not
