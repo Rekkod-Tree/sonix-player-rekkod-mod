@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/nowplaying/player.h"
@@ -26,6 +27,7 @@ typedef struct {
 	bool compact;
 	bool playing;
 	bool starred;
+	bool placeholder;
 	bool lift;
 	lv_color_t lift_page;
 	lead_kind_t lead_kind;
@@ -57,6 +59,19 @@ typedef struct {
 } row_t;
 
 static row_t *row_of(lv_obj_t *row) { return row ? lv_obj_get_user_data(row) : NULL; }
+
+static bool left_is_like(const row_t *r) { return r->trail_kind == SX_ROW_TRAIL_STAR && r->h.on_star && !r->h.end_is_remove; }
+
+static bool left_allowed(const row_t *r) {
+	if (!r->swipe_end_on) {
+		return false;
+	}
+	if (left_is_like(r) || r->h.end_is_remove) {
+		return true;
+	}
+	// A disabled track like must not silently turn into an append action.
+	return r->h.on_swipe_end && (!r->h.on_star || r->trail_kind == SX_ROW_TRAIL_CHEVRON);
+}
 
 int sx_row_height(bool compact) {
 	bool big = touch_large_rows();
@@ -256,6 +271,11 @@ static void underlay_for(row_t *r, int32_t dx) {
 		lv_image_set_src(r->under_icon, &icon_list_start);
 		lv_label_set_text(r->under_label, tr("sx_row_next"));
 		lv_obj_set_flex_align(r->underlay, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	} else if (left_is_like(r)) {
+		lv_obj_add_style(r->underlay, &sx_style_accent, 0);
+		lv_image_set_src(r->under_icon, r->starred ? &icon_star_x : &icon_star_filled);
+		lv_label_set_text(r->under_label, tr(r->starred ? "sx_row_unlike" : "sx_row_like"));
+		lv_obj_set_flex_align(r->underlay, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	} else if (r->h.end_is_remove) {
 		lv_obj_set_style_bg_color(r->underlay, lv_color_hex(SX_DANGER_BG), 0);
 		lv_obj_set_style_text_color(r->underlay, lv_color_white(), 0);
@@ -351,7 +371,7 @@ static void content_event_cb(lv_event_t *e) {
 			if (LV_ABS(dx) <= SX_SWIPE_LOCK_PX || LV_ABS(dx) <= LV_ABS(dy)) {
 				return;
 			}
-			bool allowed = dx > 0 ? r->swipe_next_on : r->swipe_end_on;
+			bool allowed = dx > 0 ? r->swipe_next_on : left_allowed(r);
 			// A press in the left edge strip is the swipe back's.
 			if (!allowed || r->press_at.x < SX_EDGE_BACK_W) {
 				r->tracking = false;
@@ -379,7 +399,7 @@ static void content_event_cb(lv_event_t *e) {
 			}
 			lv_obj_set_hidden(r->underlay, false);
 		}
-		int32_t lo = r->swipe_end_on ? -SX_SWIPE_MAX_PX : 0;
+		int32_t lo = left_allowed(r) ? -SX_SWIPE_MAX_PX : 0;
 		int32_t hi = r->swipe_next_on ? SX_SWIPE_MAX_PX : 0;
 		int32_t x = dx < lo ? lo : (dx > hi ? hi : dx);
 		if ((x > 0) != (r->dx > 0) || r->dx == 0) {
@@ -401,13 +421,18 @@ static void content_event_cb(lv_event_t *e) {
 			return;
 		}
 		snap_back(r);
+		r->long_pressed = true; // consume the click generated after a horizontal drag
 		if (code == LV_EVENT_PRESS_LOST) {
 			return;
 		}
 		if (dx >= SX_SWIPE_COMMIT_PX && r->h.on_swipe_next) {
 			r->h.on_swipe_next(row, r->user);
-		} else if (dx <= -SX_SWIPE_COMMIT_PX && r->h.on_swipe_end) {
-			r->h.on_swipe_end(row, r->user);
+		} else if (dx <= -SX_SWIPE_COMMIT_PX && left_allowed(r)) {
+			if (left_is_like(r)) {
+				r->h.on_star(row, r->user);
+			} else if (r->h.on_swipe_end) {
+				r->h.on_swipe_end(row, r->user);
+			}
 		}
 		return;
 	}
@@ -467,7 +492,7 @@ lv_obj_t *sx_row_create(lv_obj_t *parent, const sx_row_handlers_t *handlers, boo
 		r->h = *handlers;
 	}
 	r->swipe_next_on = r->h.on_swipe_next != NULL;
-	r->swipe_end_on = r->h.on_swipe_end != NULL;
+	r->swipe_end_on = r->h.on_swipe_end || r->h.on_star;
 	r->compact = compact;
 	r->trail_kind = SX_ROW_TRAIL_NONE;
 
@@ -522,22 +547,22 @@ lv_obj_t *sx_row_create(lv_obj_t *parent, const sx_row_handlers_t *handlers, boo
 	lv_obj_set_height(text, LV_SIZE_CONTENT);
 	lv_obj_set_flex_grow(text, 1);
 	lv_obj_set_flex_flow(text, LV_FLEX_FLOW_COLUMN);
-	lv_obj_set_style_pad_row(text, 1, 0);
+	lv_obj_set_style_pad_row(text, 4, 0);
 
-	r->title = sx_label(text, &font_ui_26, &sx_style_text);
+	r->title = sx_label(text, &font_ui_26_bold, &sx_style_text);
 	lv_obj_set_width(r->title, lv_pct(100));
 	// One line, always: LV_LABEL_LONG_DOT wraps before it truncates, and a long
 	// title on two lines pushes the line under it out of the row.
-	lv_obj_set_height(r->title, lv_font_get_line_height(&font_ui_26));
+	lv_obj_set_height(r->title, lv_font_get_line_height(&font_ui_26_bold));
 
 	lv_obj_t *line = sx_box(text);
 	lv_obj_set_size(line, lv_pct(100), LV_SIZE_CONTENT);
 	lv_obj_set_flex_flow(line, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(line, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_set_style_pad_column(line, 8, 0);
-	r->sub = sx_label(line, &font_ui_20, &sx_style_text2);
+	r->sub = sx_label(line, &font_ui_22, &sx_style_text2);
 	lv_obj_set_style_max_width(r->sub, lv_pct(75), 0);
-	lv_obj_set_height(r->sub, lv_font_get_line_height(&font_ui_20));
+	lv_obj_set_height(r->sub, lv_font_get_line_height(&font_ui_22));
 	r->badge = sx_label(line, &font_ui_20, &sx_style_text_accent);
 	r->duration = sx_label(line, &font_ui_20, &sx_style_text2);
 	lv_obj_set_style_text_align(r->duration, LV_TEXT_ALIGN_RIGHT, 0);
@@ -646,6 +671,7 @@ void sx_row_set_thumb(lv_obj_t *row, const lv_image_dsc_t *image, lv_color_t ton
 	}
 	lead_reset(r);
 	r->lead_kind = LEAD_THUMB;
+	r->placeholder = image == NULL;
 	lv_obj_set_style_bg_color(r->lead, tone, 0);
 	lv_obj_set_style_bg_opa(r->lead, LV_OPA_COVER, 0);
 	if (image) {
@@ -655,12 +681,22 @@ void sx_row_set_thumb(lv_obj_t *row, const lv_image_dsc_t *image, lv_color_t ton
 		}
 		lv_image_set_src(r->lead_image, image);
 		lv_obj_set_style_image_recolor_opa(r->lead_image, LV_OPA_TRANSP, 0);
-		// A 56 px thumbnail on a large row's 68 px lead is drawn to its size.
+		// Keep cached pixels at their native size; centre them in a larger lead.
 		int side = thumb_size(r->compact);
 		int32_t w = (int32_t)image->header.w;
-		lv_image_set_scale(r->lead_image, w > 0 && w != side ? (uint32_t)(side * LV_SCALE_NONE / w) : LV_SCALE_NONE);
+		lv_image_set_scale(r->lead_image, w > side ? (uint32_t)(side * LV_SCALE_NONE / w) : LV_SCALE_NONE);
 		lv_obj_set_hidden(r->lead_image, false);
 		lv_obj_set_style_clip_corner(r->lead, true, 0);
+	} else {
+		if (!r->lead_image) {
+			r->lead_image = lv_image_create(r->lead);
+			lv_obj_center(r->lead_image);
+		}
+		lv_image_set_src(r->lead_image, &icon_music2);
+		lv_image_set_scale(r->lead_image, LV_SCALE_NONE);
+		lv_obj_set_style_image_recolor(r->lead_image, lv_color_white(), 0);
+		lv_obj_set_style_image_recolor_opa(r->lead_image, LV_OPA_COVER, 0);
+		lv_obj_set_hidden(r->lead_image, false);
 	}
 	apply_sizes(r, row);
 	eq_place(r);
@@ -688,6 +724,25 @@ void sx_row_set_glyph(lv_obj_t *row, const lv_image_dsc_t *glyph, lv_color_t ton
 	}
 	apply_sizes(r, row);
 	eq_place(r);
+}
+
+void sx_row_set_person(lv_obj_t *row, const lv_image_dsc_t *image, const char *name) {
+	const char *s = name && name[0] ? name : "?";
+	unsigned char c = (unsigned char)*s;
+	size_t n = c < 0x80 ? 1 : c < 0xE0 ? 2 : c < 0xF0 ? 3 : 4;
+	if (n > strlen(s))
+		n = strlen(s);
+	char letter[5] = "";
+	memcpy(letter, s, n);
+	if (c >= 'a' && c <= 'z')
+		letter[0] -= 'a' - 'A';
+	sx_row_set_letter(row, letter, sx_placeholder_name(s), true);
+	if (image) {
+		sx_row_set_thumb(row, image, sx_placeholder_name(s));
+		row_t *r = row_of(row);
+		if (r)
+			lv_obj_set_style_radius(r->lead, LV_RADIUS_CIRCLE, 0);
+	}
 }
 
 void sx_row_set_number(lv_obj_t *row, int number) {
@@ -729,7 +784,7 @@ void sx_row_set_letter(lv_obj_t *row, const char *letter, lv_color_t tone, bool 
 	}
 	lv_label_set_text(r->lead_label, letter ? letter : "");
 	lv_obj_set_style_text_font(r->lead_label, &font_ui_26_bold, 0);
-	lv_obj_set_style_text_color(r->lead_label, lv_color_white(), 0);
+	lv_obj_set_style_text_color(r->lead_label, lv_color_eq(tone, sx_hex(SX_CATEGORY_BG)) ? sx_hex(SX_CATEGORY_INK) : lv_color_white(), 0);
 	apply_sizes(r, row);
 	eq_place(r);
 }
@@ -750,8 +805,11 @@ void sx_row_set_trail(lv_obj_t *row, sx_row_trail_t trail) {
 		return;
 	}
 	r->trail_kind = trail;
-	lv_obj_set_hidden(r->trail, trail == SX_ROW_TRAIL_NONE);
-	lv_obj_set_clickable(r->trail, trail == SX_ROW_TRAIL_STAR || trail == SX_ROW_TRAIL_GRIP);
+	if (r->lead_kind == LEAD_THUMB && r->placeholder && r->lead_image) {
+		lv_image_set_src(r->lead_image, trail == SX_ROW_TRAIL_CHEVRON ? &icon_album : &icon_music2);
+	}
+	lv_obj_set_hidden(r->trail, trail == SX_ROW_TRAIL_NONE || trail == SX_ROW_TRAIL_STAR);
+	lv_obj_set_clickable(r->trail, trail == SX_ROW_TRAIL_GRIP);
 	// A grip is held and dragged: a drag on it must not scroll the list.
 	lv_obj_set_scroll_chain_ver(r->trail, trail != SX_ROW_TRAIL_GRIP);
 	lv_obj_remove_style(r->trail_icon, &sx_style_star_on, 0);
@@ -811,7 +869,7 @@ static void eq_place(row_t *r) {
 		// What the bars stood in for comes back.
 		if (r->lead_kind == LEAD_NUMBER || r->lead_kind == LEAD_LETTER) {
 			lv_obj_set_hidden(r->lead_label, false);
-		} else if (r->lead_kind == LEAD_GLYPH && r->lead_image) {
+		} else if ((r->lead_kind == LEAD_GLYPH || (r->lead_kind == LEAD_THUMB && r->placeholder)) && r->lead_image) {
 			lv_obj_set_hidden(r->lead_image, false);
 		}
 		return;
@@ -842,7 +900,7 @@ static void eq_place(row_t *r) {
 	// they stand on it): the two drawn over each other read as neither.
 	if (r->lead_kind == LEAD_NUMBER || r->lead_kind == LEAD_LETTER) {
 		lv_obj_set_hidden(r->lead_label, true);
-	} else if (r->lead_kind == LEAD_GLYPH && r->lead_image) {
+	} else if ((r->lead_kind == LEAD_GLYPH || (r->lead_kind == LEAD_THUMB && r->placeholder)) && r->lead_image) {
 		lv_obj_set_hidden(r->lead_image, true);
 	}
 	eq_wake();
@@ -884,7 +942,7 @@ void sx_row_set_swipes(lv_obj_t *row, bool next, bool end) {
 	row_t *r = row_of(row);
 	if (r) {
 		r->swipe_next_on = next && r->h.on_swipe_next;
-		r->swipe_end_on = end && r->h.on_swipe_end;
+		r->swipe_end_on = end && (r->h.on_swipe_end || r->h.on_star);
 	}
 }
 

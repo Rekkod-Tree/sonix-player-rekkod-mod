@@ -47,6 +47,7 @@ typedef struct {
 	lv_color_t text;
 	lv_color_t text2;
 	lv_color_t accent;
+	lv_color_t accent_text;
 	lv_color_t on_accent;  // text and glyphs on an accent fill
 	lv_color_t active;	   // 16 % accent into surface: the "on now" plaque (sx_card active)
 	lv_color_t swipe_end;  // the underlay of a row pulled left ("add to the end")
@@ -60,11 +61,8 @@ typedef struct {
 	lv_color_t np_accent;
 	lv_color_t np_ink; // the glyph on the white play disc
 	lv_color_t mini_bg;
+	lv_color_t mini_ink;
 	lv_color_t mini_cover_tone;
-	lv_color_t np_grad_top;
-	lv_color_t np_grad_bot;
-	lv_color_t np_panel_top;
-	lv_color_t np_panel_bot;
 
 	// The album page, at the page hue: its gradient at 0, 380 and 900 px.
 	lv_color_t album_grad[3];
@@ -98,6 +96,11 @@ void sx_palette_track_cleared(void);
 // The hue a name hashes to, for a page that needs a tone and has no cover:
 // an album without art, an artist's letter plaque, a genre.
 float sx_palette_hue_of_name(const char *name);
+
+// Stable, saturated missing-art colour, independent of theme and playing cover.
+lv_color_t sx_placeholder_tone(float hue);
+lv_color_t sx_placeholder_name(const char *name);
+lv_color_t sx_placeholder_file(const char *path, const char *album);
 
 // An album page colours itself after its own album rather than after the
 // track playing: push its hue when it opens and pop when it closes. One level

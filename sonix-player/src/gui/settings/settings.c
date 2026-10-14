@@ -511,6 +511,7 @@ static void settings_loaded_cb(lv_event_t *e) {
 
 void settings_init(gui_config_t *cfg) {
 	lv_obj_t *container = settingsrow_page(settings_screen, cfg, "settings");
+	container = sx_card_nav_group(container);
 
 	build_screen_page(cfg);
 	build_other_page(cfg);

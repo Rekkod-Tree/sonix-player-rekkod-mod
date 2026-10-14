@@ -1,4 +1,5 @@
 #include "browser.h"
+#include "src/gui/library/rowart.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -259,6 +260,7 @@ static int entry_cmp(const void *a, const void *b) {
 
 typedef struct {
 	lv_obj_t *row; // the 2.0 row (sx_row.h)
+	lv_color_t art_tone;
 
 	// Which entry this row is currently showing, or -1 when parked.
 	int index;
@@ -295,11 +297,17 @@ static void row_show_glyph(row_t *row, bool is_dir) {
 	const char *name = row->index >= 0 && (size_t)row->index < shown.count ? entry_name((size_t)row->index) : "";
 	// Audio files get the note, not a generic sheet of paper -- everything a
 	// browser row can show besides a folder is playable anyway.
-	sx_row_set_glyph(row->row, is_dir ? &icon_folder : &icon_music2,
-					 is_dir ? listacts_name_tone(name) : sx_pal()->cover_tone);
+	char path[768], album[512] = "", title[256] = "";
+	const char *file = row->index >= 0 && (size_t)row->index < shown.count ? entry_file((size_t)row->index) : "";
+	snprintf(path, sizeof(path), "%s/%s", current_path, file);
+	if (!is_dir && rowart_album_of_track(path, album, sizeof(album))) {
+		library_album_title(album, title, sizeof(title));
+	}
+	row->art_tone = is_dir ? sx_placeholder_name(name) : sx_placeholder_file(path, title);
+	sx_row_set_glyph(row->row, is_dir ? &icon_folder : &icon_music2, row->art_tone);
 }
 
-static void row_show_cover(row_t *row, const lv_image_dsc_t *dsc) { sx_row_set_thumb(row->row, dsc, sx_pal()->cover_tone); }
+static void row_show_cover(row_t *row, const lv_image_dsc_t *dsc) { sx_row_set_thumb(row->row, dsc, row->art_tone); }
 
 static int row_slot(const row_t *row) { return (int)(row - rows); }
 

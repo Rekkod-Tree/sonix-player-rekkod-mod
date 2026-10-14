@@ -33,6 +33,11 @@
 
 // A card, flex column, full width of `parent`, its height its content's.
 lv_obj_t *sx_card_create(lv_obj_t *parent);
+// Consecutive navigation rows share one rounded surface and inset dividers.
+lv_obj_t *sx_card_nav_group(lv_obj_t *parent);
+void sx_card_nav_item(lv_obj_t *card);
+// Reflow a completed row of choices; long option sets use two columns.
+void sx_choice_reflow(lv_obj_t *row);
 
 // Makes the whole card a button: pressed fill, `cb` on a tap (with `user` as
 // the event's user data). A tap at the end of a swipe or a scroll is not one.

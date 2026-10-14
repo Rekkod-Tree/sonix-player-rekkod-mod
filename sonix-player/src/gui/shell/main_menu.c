@@ -22,7 +22,7 @@ void main_menu_init(gui_config_t *cfg) {
 	// Music and Audiobooks both open with the card out or at a computer, and
 	// say so on their own page.
 	const grid_entry_t entries[] = {
-		{"music", &icon_menu_music, &music_screen},
+		{"music", &icon_menu_music, &music_screen, NULL, shufflecard_tracks_description},
 		{"streaming", &icon_menu_streaming, &streaming_screen},
 		{"wireless", &icon_menu_wireless, &wireless_screen},
 		{"audiobooks", &icon_menu_audiobooks, &audiobooks_screen},

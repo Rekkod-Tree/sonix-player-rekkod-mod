@@ -48,6 +48,20 @@ static void action_cb(lv_event_t *e) {
 // The two children add_tile() puts on every tile, in the order it makes them.
 #define TILE_ICON_CHILD 0
 #define TILE_LABEL_CHILD 1
+#define TILE_SUBTITLE_CHILD 2
+
+static void refresh_subtitles(lv_obj_t *grid) {
+	for (uint32_t i = 0; i < lv_obj_get_child_count(grid); i++) {
+		lv_obj_t *sub = lv_obj_get_child(lv_obj_get_child(grid, i), TILE_SUBTITLE_CHILD);
+		void (*fill)(char *, size_t) = (void (*)(char *, size_t))lv_obj_get_user_data(sub);
+		char text[96] = "";
+		if (fill && gui_card_available())
+			fill(text, sizeof(text));
+		lv_label_set_text(sub, text);
+	}
+}
+
+static void grid_load_cb(lv_event_t *e) { refresh_subtitles(lv_event_get_user_data(e)); }
 
 void gridpage_set_tile(lv_obj_t *grid, int index, const lv_image_dsc_t *icon, const char *label) {
 	if (!grid || index < 0 || index >= (int)lv_obj_get_child_count(grid)) {
@@ -65,40 +79,6 @@ void gridpage_set_tile(lv_obj_t *grid, int index, const lv_image_dsc_t *icon, co
 	}
 }
 
-// A short tile (the R3 Pro II's 720 px, under the 2.0 header and the mini
-// player's slot) with a caption on two lines ("Album-Interpreten") has no
-// room for the full picture: it is drawn smaller rather than the caption
-// being cut off at the tile's bottom edge, and at full size again when the
-// caption is back on one line.
-static void fit_icon(lv_obj_t *icon, int32_t tile_h, int32_t caption_h) {
-	const lv_image_dsc_t *dsc = lv_image_get_src(icon);
-	if (!dsc || lv_image_src_get_type(dsc) != LV_IMAGE_SRC_VARIABLE) {
-		return;
-	}
-	int32_t room = tile_h - 2 * 8 - 8 - caption_h;
-	int32_t ih = (int32_t)dsc->header.h;
-	if (room > 0 && room < ih) {
-		lv_image_set_scale(icon, (uint32_t)(room * LV_SCALE_NONE / ih));
-		lv_obj_set_size(icon, (int32_t)dsc->header.w * room / ih, room);
-		lv_image_set_inner_align(icon, LV_IMAGE_ALIGN_CENTER);
-	} else {
-		lv_image_set_scale(icon, LV_SCALE_NONE);
-		lv_obj_set_size(icon, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-	}
-}
-
-// The caption changed height after the tile was built -- the language chosen at
-// first start relabels the pages built in English, and "Album artists" becomes
-// "Album-Interpreten" on two lines: the picture is fitted again.
-static void caption_size_cb(lv_event_t *e) {
-	lv_obj_t *label = lv_event_get_target(e);
-	lv_obj_t *tile = lv_obj_get_parent(label);
-	lv_obj_t *icon = tile ? lv_obj_get_child(tile, TILE_ICON_CHILD) : NULL;
-	if (icon) {
-		fit_icon(icon, lv_obj_get_height(tile), lv_obj_get_height(label));
-	}
-}
-
 static void add_tile(lv_obj_t *grid, const grid_entry_t *entry, int width, int height) {
 	lv_obj_t *tile = lv_btn_create(grid);
 	lv_obj_set_size(tile, width, height);
@@ -107,14 +87,14 @@ static void add_tile(lv_obj_t *grid, const grid_entry_t *entry, int width, int h
 	lv_obj_add_style(tile, &sx_style_press, LV_STATE_PRESSED);
 	lv_obj_set_style_radius(tile, TILE_RADIUS, 0);
 	lv_obj_set_style_shadow_width(tile, 0, 0);
-	lv_obj_set_style_pad_all(tile, 8, 0);
+	lv_obj_set_style_pad_all(tile, SX_TILE_PAD, 0);
 
 	// Presses bubble up to the grid so a swipe can start on a tile: the whole
 	// page has to be draggable, not just the gaps between the tiles.
 	lv_obj_set_event_bubble(tile, true);
 
 	lv_obj_set_flex_flow(tile, LV_FLEX_FLOW_COLUMN);
-	lv_obj_set_flex_align(tile, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_flex_align(tile, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
 	lv_obj_set_style_pad_gap(tile, 8, 0);
 	lv_obj_set_scrollable(tile, false);
 
@@ -123,27 +103,27 @@ static void add_tile(lv_obj_t *grid, const grid_entry_t *entry, int width, int h
 	lv_obj_t *icon = lv_image_create(tile);
 	lv_image_set_src(icon, entry->icon);
 
-	// The picture's size for the caption under it (fit_icon), measured now --
-	// nothing has been laid out yet -- and again whenever the caption changes
-	// height (caption_size_cb).
-	if (entry->icon) {
-		lv_point_t text;
-		lv_text_get_size(&text, tr(entry->label), &font_ui_24_bold, 0, 0, width - 16, LV_TEXT_FLAG_NONE);
-		fit_icon(icon, height, text.y);
-	}
+	lv_obj_add_style(icon, &sx_style_icon_accent, 0);
+	lv_obj_set_ignore_layout(icon, true);
+	lv_obj_align(icon, LV_ALIGN_TOP_LEFT, 0, 1);
 
-	// The caption wraps rather than running out of the tile: a translated label
-	// such as "Album-Interpreten" does not fit on one line. Centred, because a
-	// tile is read as a block under its picture.
 	lv_obj_t *label = lv_label_create(tile);
 	lv_label_set_text(label, tr(entry->label));
 	lv_obj_add_style(label, &theme_style_text, 0);
 	lv_obj_set_style_text_font(label, &font_ui_24_bold, 0);
 	lv_obj_set_width(label, lv_pct(100));
-	lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
-	if (entry->icon) {
-		lv_obj_add_event_cb(label, caption_size_cb, LV_EVENT_SIZE_CHANGED, NULL);
-	}
+	lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_LEFT, 0);
+	lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+	lv_obj_set_ignore_layout(label, true);
+	lv_obj_set_style_max_height(label, 2 * lv_font_get_line_height(&font_ui_24_bold), 0);
+	lv_obj_align(label, LV_ALIGN_BOTTOM_LEFT, 0, -SX_TILE_SUB_H - 4);
+	// Keep the approved subtitle slot, even on tiles without metadata.
+	lv_obj_t *subtitle = sx_label(tile, &font_ui_20, &sx_style_text2);
+	lv_obj_set_size(subtitle, lv_pct(100), SX_TILE_SUB_H);
+	lv_obj_set_ignore_layout(subtitle, true);
+	lv_obj_align(subtitle, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+	lv_label_set_long_mode(subtitle, LV_LABEL_LONG_DOT);
+	lv_obj_set_user_data(subtitle, (void *)entry->subtitle);
 
 	if (entry->target) {
 		lv_obj_add_event_cb(tile, switch_screen_cb, LV_EVENT_CLICKED, *entry->target);
@@ -163,25 +143,16 @@ void gridpage_set_entries(lv_obj_t *grid, gui_config_t *cfg, const grid_entry_t 
 	}
 	lv_obj_clean(grid);
 
-	int top = clear_corner_buttons ? settingsrow_content_top(cfg) : cfg->top_bar_height;
-	int usable_w = cfg->screen_width - (2 * cfg->padding);
-
-	// The handoff's (H - top - 88 - 15 - 2 x 12) / 3, for any number of rows:
-	// the body's own top (SX_BODY_TOP under a header, the status bar and a
-	// margin on the home page), the bottom slot whether or not the mini player
-	// is in it -- the home and Music pages put the idle card there -- and the
-	// margin under the tiles.
-	int body_top = clear_corner_buttons ? top : top + cfg->padding;
-	int tile_h_max = clear_corner_buttons ? SX_TILE_H_MAX : SX_TILE_H_MAX_HOME;
-	int rows_shown = rows > 0 ? rows : 1;
+	(void)rows;
+	(void)clear_corner_buttons;
+	int usable_w = cfg->screen_width - SX_BODY_PAD_L - SX_BODY_PAD_R;
 	int tile_w = (usable_w - (columns - 1) * GRID_GAP) / columns;
-	int tile_h = ((int)cfg->screen_height - body_top - SX_MINI_SLOT_H - cfg->padding - (rows_shown - 1) * GRID_GAP) /
-				 rows_shown;
-	tile_h = tile_h < SX_TILE_H_MIN ? SX_TILE_H_MIN : (tile_h > tile_h_max ? tile_h_max : tile_h);
+	int tile_h = cfg->screen_height >= 800 ? SX_TILE_H_R1 : SX_TILE_H_R3;
 
 	for (int i = 0; i < count; i++) {
 		add_tile(grid, &entries[i], tile_w, tile_h);
 	}
+	refresh_subtitles(grid);
 }
 
 lv_obj_t *gridpage_build(lv_obj_t *screen, gui_config_t *cfg, const grid_entry_t *entries, int count, int columns,
@@ -196,14 +167,14 @@ lv_obj_t *gridpage_build(lv_obj_t *screen, gui_config_t *cfg, const grid_entry_t
 	lv_obj_set_style_bg_opa(grid, 0, 0);
 	lv_obj_set_style_border_width(grid, 0, 0);
 	lv_obj_set_style_radius(grid, 0, 0);
-	lv_obj_set_style_pad_all(grid, cfg->padding, 0);
+	lv_obj_set_style_pad_all(grid, SX_BODY_PAD_L, 0);
 	// Under a 2.0 header the body starts at SX_BODY_TOP itself, with no margin
 	// of its own above the first row.
 	if (clear_corner_buttons) {
 		lv_obj_set_style_pad_top(grid, 0, 0);
 	}
 	lv_obj_set_style_pad_gap(grid, GRID_GAP, 0);
-	lv_obj_set_scrollable(grid, false);
+	gridpage_set_scrolling(grid);
 
 	lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
 	// START on the main axis, not CENTER: the tile size is computed for a full
@@ -213,6 +184,8 @@ lv_obj_t *gridpage_build(lv_obj_t *screen, gui_config_t *cfg, const grid_entry_t
 	lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);
 
 	gridpage_set_entries(grid, cfg, entries, count, columns, rows, clear_corner_buttons);
+	lv_obj_add_event_cb(screen, grid_load_cb, LV_EVENT_SCREEN_LOAD_START, grid);
+	lv_obj_add_event_cb(screen, grid_load_cb, LV_EVENT_REFRESH, grid);
 
 	// The player can be pulled in from any tiled page.
 	player_sheet_attach_drag(grid, true);
@@ -325,7 +298,7 @@ lv_obj_t *gridpage_empty_panel(lv_obj_t *screen, gui_config_t *cfg, const lv_ima
 	lv_obj_add_style(button, &sx_style_accent, 0);
 	lv_obj_add_style(button, &sx_style_press, LV_STATE_PRESSED);
 	lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
-	lv_obj_set_style_radius(button, LV_RADIUS_CIRCLE, 0);
+	lv_obj_set_style_radius(button, SX_CARD_R, 0);
 	lv_obj_set_style_shadow_width(button, 0, 0);
 	lv_obj_add_event_cb(button, scan_cb, LV_EVENT_CLICKED, NULL);
 

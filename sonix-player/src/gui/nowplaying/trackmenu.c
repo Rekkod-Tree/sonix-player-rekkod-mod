@@ -147,7 +147,9 @@ static bool queue_path_at(int index, char *out, size_t size) {
 	return playlist_path_at(index, out, size);
 }
 
-static void queue_names_of(const char *path, char *title, size_t title_size, char *artist, size_t artist_size) {
+static void queue_names_of(const char *path, char *title, size_t title_size, char *artist, size_t artist_size, char *album, size_t album_size) {
+	if (album && album_size)
+		album[0] = '\0';
 	title[0] = '\0';
 	artist[0] = '\0';
 	if (library_track_names(path, title, title_size, artist, artist_size) && title[0]) {
@@ -159,6 +161,8 @@ static void queue_names_of(const char *path, char *title, size_t title_size, cha
 	if (stat(path, &st) == 0) {
 		song_metadata_t meta;
 		metadata_read(path, &meta);
+		if (album && album_size)
+			snprintf(album, album_size, "%s", meta.album);
 		if (meta.title[0]) {
 			snprintf(title, title_size, "%s", meta.title);
 			snprintf(artist, artist_size, "%s", metadata_shown_artist(&meta));
@@ -179,7 +183,7 @@ static void queue_title_of(int index, char *out, size_t size) {
 	if (queue_path_at(index, path, sizeof(path))) {
 		char title[256];
 		char artist[256];
-		queue_names_of(path, title, sizeof(title), artist, sizeof(artist));
+		queue_names_of(path, title, sizeof(title), artist, sizeof(artist), NULL, 0);
 		snprintf(out, size, "%s", title);
 	}
 }
@@ -199,7 +203,7 @@ static bool queue_removable(int index) {
 
 // The album's 56 px thumbnail on the row, or its tone plaque until there is
 // one (covertone.h, "List rows").
-static void queue_row_cover(queue_row_t *q, const char *path, const char *title) {
+static void queue_row_cover(queue_row_t *q, const char *path, const char *fallback_album) {
 	char album[512];
 	int64_t id = 0;
 	char shown[256] = "";
@@ -207,11 +211,7 @@ static void queue_row_cover(queue_row_t *q, const char *path, const char *title)
 		id = covertone_album_id(album);
 		library_album_title(album, shown, sizeof(shown));
 	}
-	float hue = 0, chroma = 0, light = 0;
-	if (!id || !covertone_for_album(id, &hue, &chroma, &light)) {
-		hue = covertone_hash_hue(shown[0] ? shown : title);
-	}
-	lv_color_t tone = sx_tone(SX_T_COVER_TONE, hue);
+	lv_color_t tone = sx_placeholder_file(path, shown[0] ? shown : fallback_album);
 	if (id && id == q->album) {
 		return; // that thumbnail is up already
 	}
@@ -245,7 +245,8 @@ static void queue_row_bind(queue_row_t *q, int index) {
 	}
 	char title[256];
 	char artist[256];
-	queue_names_of(path, title, sizeof(title), artist, sizeof(artist));
+	char fallback_album[256];
+	queue_names_of(path, title, sizeof(title), artist, sizeof(artist), fallback_album, sizeof(fallback_album));
 
 	char length[16] = "";
 	uint32_t ms = 0;
@@ -262,7 +263,7 @@ static void queue_row_bind(queue_row_t *q, int index) {
 	sx_row_set_subtitle(q->row, artist, queued ? tr("queue_badge_next") : NULL, length[0] ? length : NULL);
 	sx_row_set_playing(q->row, index == queue_cur);
 	sx_row_set_swipes(q->row, false, queue_removable(index));
-	queue_row_cover(q, path, title);
+	queue_row_cover(q, path, fallback_album);
 
 	lv_obj_set_y(q->row, queue_row_y(index));
 	lv_obj_set_hidden(q->row, false);
@@ -533,7 +534,7 @@ static void queue_covertone_changed(void) {
 			char path[512];
 			char title[256], artist[256];
 			if (queue_path_at(q->index, path, sizeof(path))) {
-				queue_names_of(path, title, sizeof(title), artist, sizeof(artist));
+				queue_names_of(path, title, sizeof(title), artist, sizeof(artist), NULL, 0);
 				queue_row_cover(q, path, title);
 			}
 		}
@@ -653,7 +654,7 @@ static void queue_row_hold(lv_obj_t *row, void *user) {
 	static char title[256];
 	static char sub[128];
 	char artist[256];
-	queue_names_of(path, title, sizeof(title), artist, sizeof(artist));
+	queue_names_of(path, title, sizeof(title), artist, sizeof(artist), NULL, 0);
 	snprintf(sub, sizeof(sub), tr("queue_position_fmt"), index + 1, queue_total);
 
 	char album[512];
@@ -819,7 +820,7 @@ int trackmenu_queue_paths(const char *const *paths, int count, playlist_queue_wh
 		static char text[320];
 		if (queued == 1 && paths && paths[0]) {
 			char title[256], artist[256];
-			queue_names_of(paths[0], title, sizeof(title), artist, sizeof(artist));
+			queue_names_of(paths[0], title, sizeof(title), artist, sizeof(artist), NULL, 0);
 			snprintf(text, sizeof(text),
 					 tr(where == PLAYLIST_QUEUE_NEXT ? "queue_next_named_fmt" : "queue_end_named_fmt"), title);
 		} else {
@@ -1360,6 +1361,11 @@ static void stop_after_pick(void *user) {
 				  stop_after_undo, (void *)(intptr_t)was);
 }
 
+static void chain_cb(void *user) {
+	(void)user;
+	player_chain_open();
+}
+
 static void sleep_cb(void *user) {
 	(void)user;
 	player_sleep_sheet_open();
@@ -1547,6 +1553,7 @@ void trackmenu_open(lv_obj_t *anchor) {
 									   (void *)(intptr_t)DEVICE_STATE_STOP_AFTER_TRACK};
 	}
 	items[n++] = (sx_sheet_item_t){player_sleep_label(), &npicon_sleep, false, false, sleep_cb, NULL};
+	items[n++] = (sx_sheet_item_t){tr("np_audio_chain"), &npicon_details, false, false, chain_cb, NULL};
 	if (!ext && loaded) {
 		items[n++] = (sx_sheet_item_t){tr("add_to_playlist"), &npicon_add_playlist, false, false, add_to_playlist_cb,
 									   NULL};

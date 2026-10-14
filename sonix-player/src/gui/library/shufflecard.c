@@ -62,6 +62,22 @@ static void counts_refresh(void) {
 	}
 }
 
+void shufflecard_tracks_description(char *text, size_t size) {
+	counts_refresh();
+	if (library_is_open())
+		snprintf(text, size, tr("lists_tracks_n"), tracks_n);
+	else if (size)
+		text[0] = '\0';
+}
+
+void shufflecard_albums_description(char *text, size_t size) {
+	counts_refresh();
+	if (library_is_open())
+		snprintf(text, size, tr("lists_albums_n"), albums_n);
+	else if (size)
+		text[0] = '\0';
+}
+
 static void card_fill(card_t *c) {
 	counts_refresh();
 	// Nothing to shuffle: the slot stays empty rather than offering a button

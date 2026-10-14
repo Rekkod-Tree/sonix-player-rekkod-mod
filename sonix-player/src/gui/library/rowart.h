@@ -33,7 +33,7 @@
 typedef struct {
 	int64_t album_id; // 0: no album (the plaque in the neutral cover tone)
 	lv_color_t tone;
-	bool tone_known;	// from the pipeline, not from the hash
+	bool tone_known;	// stable identity colour has been bound
 	bool has_picture;	// `dsc` shows this album's thumbnail
 	bool asked;			// covertone_request() made for it
 	bool settled;		// nothing more to try until covertone says something landed

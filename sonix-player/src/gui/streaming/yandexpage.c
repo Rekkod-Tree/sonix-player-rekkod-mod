@@ -831,7 +831,7 @@ static void list_bind(lv_obj_t *row, int index) {
 		if ((list_kind == JOB_ALBUM || list_kind == JOB_SAVED_ALBUM) && r.u.track.track_number > 0) {
 			sx_row_set_number(row, r.u.track.track_number);
 		} else {
-			sx_row_set_thumb(row, NULL, svcui_tone(r.u.track.album_id[0] ? r.u.track.album_id : r.u.track.title));
+			sx_row_set_thumb(row, NULL, svcui_tone(r.u.track.album[0] ? r.u.track.album : r.u.track.title));
 		}
 		sx_row_set_trail(row, SX_ROW_TRAIL_STAR);
 		sx_row_set_starred(row, yandex_is_liked(r.u.track.id));
@@ -845,7 +845,7 @@ static void list_bind(lv_obj_t *row, int index) {
 	}
 	case ROW_ALBUM:
 		sx_row_set_subtitle(row, detail, row_saved(&r) ? tr("svc_badge_saved") : NULL, NULL);
-		sx_row_set_thumb(row, NULL, svcui_tone(r.u.album.id[0] ? r.u.album.id : r.u.album.title));
+		sx_row_set_thumb(row, NULL, svcui_tone(r.u.album.title));
 		sx_row_set_trail(row, SX_ROW_TRAIL_CHEVRON);
 		sx_row_set_swipes(row, true, true);
 		break;
@@ -945,7 +945,20 @@ static void clear_list(void) {
 	ensure_list();
 	svclist_set_count(list, 0, false);
 	lv_obj_set_hidden(list_message, true);
+	streamerror_hide(list_error);
 	page_asked = -1;
+}
+
+static void error_sign_in(void) {
+	if (yandex_logged_in())
+		retry_list();
+	else switch_screen(yandex_screen);
+}
+
+static void list_returned_cb(lv_event_t *e) {
+	(void)e;
+	if (shown && shown->error_class == STREAM_ERR_SIGN_IN && streamerror_visible(list_error) && yandex_logged_in())
+		retry_list();
 }
 
 static void fill_list(void) {
@@ -955,9 +968,12 @@ static void fill_list(void) {
 	lv_obj_set_hidden(list_message, true);
 	update_album_bar();
 	if (count == 0 && shown && shown->error[0] && shown->error_class != STREAM_ERR_NONE) {
+		lv_obj_set_hidden(album_bar, true);
+		lv_obj_set_hidden(artist_bar, true);
+		lv_obj_set_hidden(wave_bar, true);
 		// What went wrong and "Retry", as on the other services' pages; the
 		// panel stays one object, so a retry that fails again counts.
-		streamerror_show(list_error, shown->error_class, shown->error, retry_list, NULL);
+		streamerror_show(list_error, shown->error_class, shown->error, retry_list, error_sign_in);
 		return;
 	}
 	streamerror_hide(list_error);
@@ -1698,6 +1714,7 @@ static void build_list_page(gui_config_t *cfg) {
 	lv_obj_align(list_error, LV_ALIGN_TOP_MID, 0, top);
 	streamerror_set_service(list_error, tr("yandex"));
 	streamerror_set_offline(list_error, open_saved);
+	lv_obj_add_event_cb(list_screen, list_returned_cb, LV_EVENT_SCREEN_LOADED, NULL);
 
 	list_spin = svcui_spinner(list_screen);
 	switcher_attach_back_gesture(list_screen);

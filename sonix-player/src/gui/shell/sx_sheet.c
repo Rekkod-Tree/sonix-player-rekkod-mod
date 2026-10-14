@@ -312,6 +312,11 @@ void sx_sheet_init(void) {
 	lv_obj_set_style_pad_bottom(head, 6, 0);
 	lv_obj_set_flex_flow(head, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_style_pad_row(head, 2, 0);
+	lv_obj_set_scrollable(head, true);
+	lv_obj_set_clickable(head, true);
+	lv_obj_set_scroll_dir(head, LV_DIR_VER);
+	lv_obj_set_scroll_elastic(head, false);
+	lv_obj_set_scrollbar_mode(head, LV_SCROLLBAR_MODE_ACTIVE);
 
 	title_label = lv_label_create(head);
 	lv_obj_set_width(title_label, lv_pct(100));
@@ -367,7 +372,7 @@ static lv_obj_t *add_item(int index) {
 	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_add_event_cb(row, item_clicked_cb, LV_EVENT_CLICKED, (void *)(intptr_t)index);
 
-	lv_color_t danger = lv_color_hex(SX_DANGER_TEXT);
+	lv_color_t danger = lv_color_hex(theme_is_dark() ? SX_DANGER_TEXT : SX_L_DANGER_TEXT);
 
 	// The glyph column, there whether or not this item has a glyph so that the
 	// labels line up. Without a glyph of its own it carries the tick.
@@ -466,6 +471,14 @@ static void fill(void) {
 	int32_t panel_max = screen_h - SX_STATUSBAR_H - TOP_MARGIN + SX_SHEET_R;
 	lv_obj_set_style_max_height(panel, LV_COORD_MAX, 0);
 	lv_obj_set_style_max_height(list, LV_COORD_MAX, 0);
+	lv_obj_set_style_max_height(head, LV_COORD_MAX, 0);
+	lv_obj_update_layout(panel);
+	int32_t head_h = lv_obj_is_hidden(head) ? 0 : lv_obj_get_height(head);
+	int32_t list_h = shown.item_count ? lv_obj_get_height(list) : 0;
+	int32_t chrome = lv_obj_get_height(panel) - head_h - list_h;
+	int32_t head_room = panel_max - chrome - (shown.item_count ? SX_SHEET_ITEM_H : 0);
+	lv_obj_set_style_max_height(head, LV_MAX(head_room, SX_SHEET_ITEM_H), 0);
+	lv_obj_scroll_to_y(head, 0, LV_ANIM_OFF);
 	lv_obj_update_layout(panel);
 	int32_t rest = lv_obj_get_height(panel) - lv_obj_get_height(list);
 	int32_t room = panel_max - rest;

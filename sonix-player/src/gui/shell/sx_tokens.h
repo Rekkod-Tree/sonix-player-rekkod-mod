@@ -4,11 +4,9 @@
 #include <stdint.h>
 
 // ---------------------------------------------------------------------------
-// Sonix UI 2.0: the design tokens
+// Sonix UI 3.1: Graphite 2 design tokens
 //
-// Every size, timing, gesture threshold and colour of the 2.0 interface, as the
-// design handoff gives them (design_handoff_sonix_ui_2/sonix_ui_tokens.h), in
-// one place so that a page never carries a number of its own. All sizes are
+// Shared component sizes, gesture thresholds and colours. All sizes are
 // screen pixels on the 480 px wide panel (R1 480 x 800, R3 Pro II 480 x 720);
 // nothing here scales.
 //
@@ -22,44 +20,44 @@
 // ---------- The frame ----------
 #define SX_STATUSBAR_H 44
 #define SX_STATUSBAR_FONT 22
-#define SX_HEADER_H 76		  // under the status bar, so its top is 44
-#define SX_HEADER_BTN 72	  // the round back target and the header's buttons
-#define SX_TITLE_FONT 34	  // bold; 30 when the title is longer than 12 characters
+#define SX_HEADER_H 88	 // under the 44 px status bar
+#define SX_HEADER_BTN 88 // the back target and the header's buttons
+#define SX_TITLE_FONT 32 // semibold; smaller when the available width requires it
 #define SX_TITLE_FONT_LONG 30
 #define SX_TITLE_LONG_CHARS 12
-#define SX_BODY_TOP 120		  // 59 on the home page, 44 on an album page, 0 on the player
+#define SX_BODY_TOP 132
 #define SX_BODY_TOP_HOME 59
-#define SX_BODY_PAD_L 15
-#define SX_BODY_PAD_R 15	  // 32 with the A-Z lane
+#define SX_BODY_PAD_L 16
+#define SX_BODY_PAD_R 16 // 32 with the A-Z lane
 #define SX_BODY_PAD_R_LANE 32
 #define SX_EDGE_BACK_W 22	  // the strip along the left edge a back swipe starts in
 
 // ---------- A list row ----------
-#define SX_ROW_H 80			  // "Large rows": 100
-#define SX_ROW_H_BIG 100
+#define SX_ROW_H 88
+#define SX_ROW_H_BIG 104
 #define SX_ROW_H_COMPACT 64	  // the queue; with large rows 84
 #define SX_ROW_H_COMPACT_BIG 84
 #define SX_ROW_THUMB 56		  // large rows 68, compact 48
-#define SX_ROW_THUMB_BIG 68
+#define SX_ROW_THUMB_BIG 64
 #define SX_ROW_THUMB_COMPACT 48
 #define SX_ROW_THUMB_R 12
 #define SX_ROW_R 14
 #define SX_ROW_GAP 2
 #define SX_ROW_PAD_L 12
-#define SX_ROW_INNER_GAP 14
+#define SX_ROW_INNER_GAP 12
 #define SX_ROW_TITLE_FONT 26
 #define SX_ROW_SUB_FONT 20
 #define SX_ROW_TRAIL_W 72	  // the star button or the chevron at the right
 #define SX_ROW_NUM_W 32		  // the track number on an album page
 
 // ---------- A settings card ----------
-#define SX_CARD_R 16
-#define SX_CARD_PAD_V 12
-#define SX_CARD_PAD_H 20
-#define SX_CARD_MIN_H 60	  // of the content: a one-line card stands 84
-#define SX_CARD_GAP 8
+#define SX_CARD_R 20
+#define SX_CARD_PAD_V 16
+#define SX_CARD_PAD_H 24
+#define SX_CARD_MIN_H 56 // content plus vertical padding gives an 88 px card
+#define SX_CARD_GAP 12
 #define SX_CARD_TITLE_FONT 24
-#define SX_CARD_SUB_FONT 21	  // the mono subtitle (codec, network): 17
+#define SX_CARD_SUB_FONT 22 // the mono subtitle (codec, network): 17
 #define SX_CARD_SUB_MONO_FONT 17
 #define SX_CARD_VALUE_FONT 22
 #define SX_PILL_H 52
@@ -79,44 +77,50 @@
 #define SX_TILE_H_MAX 204
 #define SX_TILE_H_MIN 120	  // height = (H - top - 88 - 15 - 2 * 12) / 3, kept in range
 #define SX_TILE_FONT 24
+#define SX_TILE_H_R1 188
+#define SX_TILE_H_R3 164
+#define SX_TILE_PAD 20
+#define SX_TILE_SUB_H 24
+#define SX_TILE_ICON 34
 
 // ---------- The mini player ----------
-#define SX_MINI_SLOT_H 88	  // margins 6 above, 12 at the sides, 10 below
-#define SX_MINI_H 72
+#define SX_MINI_SLOT_H 128
+#define SX_MINI_H 112
 #define SX_MINI_R 20
-#define SX_MINI_COVER 52
-#define SX_MINI_COVER_R 10
-#define SX_MINI_PLAY 48		  // the white disc
+#define SX_MINI_COVER 64
+#define SX_MINI_COVER_R 12
+#define SX_MINI_PLAY 64
+#define SX_MINI_PLAY_TARGET 88
 #define SX_MINI_PROGRESS_H 3
-#define SX_MINI_MARGIN_TOP 6
-#define SX_MINI_MARGIN_SIDE 12
-#define SX_MINI_MARGIN_BOTTOM 10
+#define SX_MINI_MARGIN_TOP 8
+#define SX_MINI_MARGIN_SIDE 16
+#define SX_MINI_MARGIN_BOTTOM 8
 
 // ---------- Now playing ----------
-#define SX_NP_PANEL_H 312	  // the cover takes H - 312
+#define SX_NP_PANEL_H 352
 #define SX_NP_PANEL_R 24
-#define SX_NP_TITLE_FONT 28
-#define SX_NP_ARTIST_FONT 24
-#define SX_NP_SEEK_TRACK_H 10
-#define SX_NP_SEEK_KNOB 28	  // with a 5 px white ring
-#define SX_NP_PLAY 84
+#define SX_NP_TITLE_FONT 32
+#define SX_NP_ARTIST_FONT 22
+#define SX_NP_SEEK_TRACK_H 6
+#define SX_NP_SEEK_KNOB 20
+#define SX_NP_PLAY 96
 #define SX_NP_SKIP 76
 #define SX_NP_SIDE_BTN 72
-#define SX_NP_UPNEXT_H 52
+#define SX_NP_UPNEXT_H 72
 
 // ---------- Layers ----------
-#define SX_SHEET_R 28
-#define SX_SHEET_ITEM_H 64
+#define SX_SHEET_R 24
+#define SX_SHEET_ITEM_H 88
 #define SX_SHEET_ITEM_FONT 24
 #define SX_SHEET_TITLE_FONT 26
 #define SX_SHEET_SUB_FONT 21
 #define SX_SHEET_HANDLE_W 44
 #define SX_SHEET_HANDLE_H 5
 #define SX_SHEET_PAD_H 28
-#define SX_SHEET_BTN_H 68	  // the "Cancel / Action" pair
-#define SX_TOAST_H 56
+#define SX_SHEET_BTN_H 88
+#define SX_TOAST_H 88
 #define SX_TOAST_R 18
-#define SX_TOAST_MS 3500
+#define SX_TOAST_MS 6000
 #define SX_TOAST_FONT 22
 #define SX_TOAST_MARGIN 16	  // from the sides
 #define SX_VOL_OSD_W 64
@@ -125,7 +129,7 @@
 #define SX_VOL_OSD_RIGHT 14	  // from the right edge
 #define SX_AZ_LANE_W 28
 #define SX_AZ_BUBBLE 104
-#define SX_CC_BTN 84
+#define SX_CC_BTN 64
 
 // ---------- Gestures and time ----------
 #define SX_LONGPRESS_MS 450
@@ -147,16 +151,21 @@
 #define SX_EQ_FRAME_MS 100	  // the equaliser bars, about 10 frames a second
 
 // ---------- The neutral palette (tint from cover off) ----------
-#define SX_D_BG 0x242424
-#define SX_D_SURFACE 0x303030
-#define SX_D_PRESS 0x404040
-#define SX_D_TEXT 0xFFFFFF
-#define SX_D_TEXT2 0xA0A0A0
-#define SX_L_BG 0xECEDF0
-#define SX_L_SURFACE 0xFFFFFF
-#define SX_L_PRESS 0xDDDFE4
-#define SX_L_TEXT 0x323232
-#define SX_L_TEXT2 0x737373
+#define SX_D_BG 0x11151A
+#define SX_D_SURFACE 0x1E252D
+#define SX_D_PRESS 0x303B46
+#define SX_D_TEXT 0xF1F4F7
+#define SX_D_TEXT2 0xAEBBC6
+#define SX_L_BG 0xE5E9EC
+#define SX_L_SURFACE 0xF7F9FA
+#define SX_L_PRESS 0xD4DDE3
+#define SX_L_TEXT 0x1A252E
+#define SX_L_TEXT2 0x465663
+#define SX_D_ACCENT 0x366C8C
+#define SX_D_ACCENT_TEXT 0x8FBAD4
+#define SX_L_ACCENT 0x295C7A
+#define SX_CATEGORY_BG 0xAAB8C2
+#define SX_CATEGORY_INK 0x17232B
 
 // ---------- Fixed colours ----------
 #define SX_TEXT_ON_DARK 0xF1EFE9
@@ -166,13 +175,16 @@
 #define SX_STAR_OFF 0x969696
 #define SX_CHAIN_OK 0x8FE3C0
 #define SX_CHAIN_WARN 0xF6C548
-#define SX_DANGER_BG 0xE01B24
-#define SX_DANGER_TEXT 0xE5484D
+#define SX_DANGER_BG 0xAE3540
+#define SX_DANGER_TEXT 0xFF9B9F
+#define SX_L_DANGER_TEXT 0xA12E38
+#define SX_D_WARNING_TEXT 0xE0BD79
+#define SX_L_WARNING_TEXT 0x75551A
 #define SX_TOAST_BG 0xF1EFE9
 #define SX_TOAST_TEXT 0x17161A
 #define SX_TOAST_ACTION 0x245A8A
-#define SX_CC_BG 0x303030
-#define SX_CC_BTN_OFF 0x404040
+#define SX_CC_BG SX_D_SURFACE
+#define SX_CC_BTN_OFF SX_D_PRESS
 #define SX_VOL_OSD_BG 0x141416
 // The 1 px line along the top of the sheet and the mini player: white at 16 %
 // in the dark theme, black at 12 % in the light one.

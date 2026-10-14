@@ -255,6 +255,15 @@ bool zvuk_is_liked(zvuk_item_t kind, const char *id) {
 
 bool zvuk_liked_known(zvuk_item_t kind) { return (unsigned)kind < ZVUK_ITEM_KINDS && liked[kind].known; }
 
+int zvuk_liked_count(zvuk_item_t kind) {
+	if ((unsigned)kind >= ZVUK_ITEM_KINDS)
+		return -1;
+	pthread_mutex_lock(&liked_lock);
+	int count = liked[kind].known ? liked[kind].count : -1;
+	pthread_mutex_unlock(&liked_lock);
+	return count;
+}
+
 void zvuk_liked_mark(zvuk_item_t kind, const char *id, bool in) {
 	if ((unsigned)kind >= ZVUK_ITEM_KINDS) {
 		return;
@@ -524,8 +533,11 @@ static answer_t request(const char *what, const char *url, const char *json_body
 	int status = 0;
 	bool got = http_request(url, &req, body, NULL, ZVUK_BODY_LIMIT, ZVUK_TIMEOUT_SECS, &status);
 	memset(headers, 0, sizeof(headers));
+	last_status = status;
 	if (!got) {
 		if (diag) {
+			if (status > 0)
+				printf("zvuk: diag %s -> HTTP %d without a usable response\n", what, status);
 			diag_no_answer(what);
 		}
 		const char *why = http_last_error();
@@ -533,7 +545,6 @@ static answer_t request(const char *what, const char *url, const char *json_body
 		*body = NULL;
 		return last_answer = ANSWER_NONE;
 	}
-	last_status = status;
 	if (diag) {
 		diag_answer(what, status, *body);
 	}
@@ -950,10 +961,11 @@ cardimport_result_t zvuk_sign_in(const char *raw, char *message, size_t message_
 	printf("zvuk: trying the token from the card (%zu characters), base %s\n", strlen(tok), base_url);
 	bool anonymous = false;
 	answer_t a = read_profile(tok, &anonymous);
-	if (a == ANSWER_BLOCKED) {
+	if (a == ANSWER_BLOCKED || (a == ANSWER_NONE && (last_status == 307 || last_status == 308))) {
 		// The profile sits behind the strictest filter; GraphQL may still
-		// pass (Music Assistant verifies tokens that way when it does not).
-		printf("zvuk: the profile is blocked, trying the token through GraphQL\n");
+		// pass. The filter also redirects back to the same profile URL;
+		// exhausting those redirects is not evidence of a bad token.
+		printf("zvuk: the profile is blocked or redirected, trying the token through GraphQL\n");
 		char url[300];
 		snprintf(url, sizeof(url), "%s/api/v1/graphql", base_url);
 		char payload[256];

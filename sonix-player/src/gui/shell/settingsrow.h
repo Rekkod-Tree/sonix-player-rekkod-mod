@@ -5,6 +5,9 @@
 
 #include "lvgl/lvgl.h"
 
+// Shared one-line naming field below the standard header.
+lv_obj_t *settingsrow_name_field(lv_obj_t *parent, gui_config_t *cfg, uint32_t max_length);
+
 // The row shape shared by every settings page: same height, radius and text as
 // a file browser row, so a list of settings and a list of tracks read as the
 // same interface.

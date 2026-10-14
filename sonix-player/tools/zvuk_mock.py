@@ -43,6 +43,7 @@ every request, so a test can switch them while the player runs):
     429     rate limited
     500     server error
     401     the token refused (the session expires)
+    profile307 / profile308  the profile redirects to itself; GraphQL works
     expire  every stream address handed out is already expired: the CDN
             answers 403 until the player asks getStream again (which then
             hands out a good one, once)
@@ -217,6 +218,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         url = urllib.parse.urlparse(self.path)
         if url.path in ("/api/tiny/profile", "/api/v2/tiny/profile"):
+            if mode() in ("profile307", "profile308"):
+                self.send(int(mode()[-3:]), b"", extra={"Location": "http://127.0.0.1:%d%s" % (PORT, url.path)})
+                return
             token = self.gate(False)
             if not token:
                 return

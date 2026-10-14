@@ -24,10 +24,10 @@
 // Gestures, the handoff's matrix:
 //   tap                       on_tap -- play a track, open an album
 //   drag right past 100 px    on_swipe_next -- "⇥ Play next", accent underlay
-//   drag left past 100 px     on_swipe_end -- "+ Add to the end", or, with
-//                             end_is_remove, the queue's red "✕ Remove"
+//   drag left past 100 px     on_star for a track; on_swipe_end for an album,
+//                             or end_is_remove for a queue entry
 //   hold 450 ms               on_long_press -- the item's bottom sheet
-//   the star                  on_star
+//   track Like                on_star (swipe, without a trailing button)
 // A drag is taken sideways only after SX_SWIPE_LOCK_PX and only when more
 // across than down; it follows the finger up to SX_SWIPE_MAX_PX and springs
 // back in SX_ANIM_ROW_SNAP_MS. While it is taken, the list's vertical scroll is
@@ -100,6 +100,7 @@ void sx_row_set_subtitle(lv_obj_t *row, const char *subtitle, const char *badge,
 // The lead. A thumbnail (`image` NULL: the tone plaque in `tone`), a track
 // number, or a letter or two on a tone plaque (`round` for an artist).
 void sx_row_set_thumb(lv_obj_t *row, const lv_image_dsc_t *image, lv_color_t tone);
+void sx_row_set_person(lv_obj_t *row, const lv_image_dsc_t *image, const char *name);
 // A glyph (white, at its own size) on a tone plaque: a folder, a file that has
 // no picture of its own.
 void sx_row_set_glyph(lv_obj_t *row, const lv_image_dsc_t *glyph, lv_color_t tone);

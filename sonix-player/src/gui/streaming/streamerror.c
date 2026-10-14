@@ -7,19 +7,24 @@
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/switcher.h"
+#include "src/gui/shell/sx_frame.h"
 #include "src/gui/shell/sx_styles.h"
+#include "src/gui/shell/sx_tokens.h"
 #include "src/system/core/lang.h"
 
-// See streamerror.h. The layout is the prototype's state block: 60 px down, a
-// round 84 px plaque, the headline (30 bold), the reason (22, secondary), a
-// 68 px accent pill and, under it, a 68 px quiet one.
+// The prototype state block: a scrolling explanation and fixed 88px actions
+// above the mini-player slot. Long service messages never cover the actions.
 
-#define PLAQUE 84
-#define BUTTON_H 68
+#define PLAQUE 72
+#define BUTTON_H 88
 // A load is at most a few requests of STREAM_UI_TIMEOUT_SECS each.
 #define RETRY_WINDOW_MS 40000
 
-typedef struct {
+typedef struct error_panel {
+	lv_obj_t *root;
+	lv_obj_t *body;
+	lv_obj_t *actions;
+	struct error_panel *next;
 	lv_obj_t *mark;	 // "!" on the plaque
 	lv_obj_t *wifi;	 // or the Wi-Fi glyph, for "no network"
 	lv_obj_t *title;
@@ -38,6 +43,26 @@ typedef struct {
 	bool retried;
 	uint32_t retried_at;
 } panel_t;
+
+static panel_t *panels;
+static bool frame_hooked;
+
+static void fit_panel(panel_t *p) {
+	if (lv_obj_is_hidden(p->root))
+		return;
+	lv_obj_update_layout(p->root);
+	lv_area_t box;
+	lv_obj_get_coords(p->root, &box);
+	int height = lv_display_get_vertical_resolution(lv_display_get_default()) - sx_frame_body_bottom() - box.y1 - 16;
+	lv_obj_set_height(p->root, LV_MAX(BUTTON_H + 96, height));
+}
+
+static void frame_changed(void) {
+	for (panel_t *p = panels; p; p = p->next) {
+		if (lv_obj_get_screen(p->root) == lv_screen_active())
+			fit_panel(p);
+	}
+}
 
 static void button_cb(lv_event_t *e) {
 	// The back swipe starts anywhere on the page, this button included.
@@ -62,15 +87,24 @@ static void offline_cb(lv_event_t *e) {
 	}
 }
 
-static void deleted_cb(lv_event_t *e) { free(lv_event_get_user_data(e)); }
+static void deleted_cb(lv_event_t *e) {
+	panel_t *p = lv_event_get_user_data(e);
+	panel_t **at = &panels;
+	while (*at && *at != p)
+		at = &(*at)->next;
+	if (*at)
+		*at = p->next;
+	free(p);
+}
 
 static lv_obj_t *pill(lv_obj_t *parent, bool primary, lv_event_cb_t cb, panel_t *p, lv_obj_t **label_out) {
 	lv_obj_t *btn = lv_btn_create(parent);
-	lv_obj_set_size(btn, LV_SIZE_CONTENT, BUTTON_H);
-	lv_obj_set_style_radius(btn, BUTTON_H / 2, 0);
+	lv_obj_set_size(btn, 0, BUTTON_H);
+	lv_obj_set_flex_grow(btn, 1);
+	lv_obj_set_style_radius(btn, SX_CARD_R, 0);
 	lv_obj_set_style_border_width(btn, 0, 0);
 	lv_obj_set_style_shadow_width(btn, 0, 0);
-	lv_obj_set_style_pad_hor(btn, primary ? 56 : 40, 0);
+	lv_obj_set_style_pad_hor(btn, 8, 0);
 	lv_obj_set_style_pad_ver(btn, 0, 0);
 	lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
 	lv_obj_add_style(btn, primary ? &sx_style_accent : &sx_style_press, 0);
@@ -79,10 +113,14 @@ static lv_obj_t *pill(lv_obj_t *parent, bool primary, lv_event_cb_t cb, panel_t 
 	}
 	lv_obj_set_style_transform_width(btn, 0, LV_STATE_PRESSED);
 	lv_obj_set_style_transform_height(btn, 0, LV_STATE_PRESSED);
-	lv_obj_set_style_margin_top(btn, primary ? 26 : 12, 0);
+	lv_obj_set_style_margin_top(btn, 0, 0);
 	lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, p);
 	lv_obj_t *label = lv_label_create(btn);
-	lv_obj_set_style_text_font(label, primary ? &font_ui_24_bold : &font_ui_24, 0);
+	lv_obj_set_style_text_font(label, primary ? &font_ui_22_bold : &font_ui_22, 0);
+	lv_obj_set_width(label, lv_pct(100));
+	lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+	lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+	lv_obj_set_style_max_height(label, 2 * lv_font_get_line_height(&font_ui_22), 0);
 	lv_obj_center(label);
 	*label_out = label;
 	return btn;
@@ -95,55 +133,78 @@ lv_obj_t *streamerror_create(lv_obj_t *parent) {
 	}
 	lv_obj_t *panel = lv_obj_create(parent);
 	lv_obj_remove_style_all(panel);
-	lv_obj_set_size(panel, lv_pct(100), LV_SIZE_CONTENT);
-	lv_obj_set_style_pad_top(panel, 60, 0);
-	lv_obj_set_style_pad_bottom(panel, 16, 0);
-	lv_obj_set_style_pad_hor(panel, 16, 0);
+	lv_obj_set_size(panel, lv_pct(100), 200);
+	lv_obj_set_style_pad_row(panel, 16, 0);
 	lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_flex_align(panel, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_set_scrollable(panel, false);
+	lv_obj_set_event_bubble(panel, true);
+	sx_frame_exempt(panel);
 	lv_obj_set_user_data(panel, p);
 	lv_obj_add_event_cb(panel, deleted_cb, LV_EVENT_DELETE, p);
+	p->root = panel;
+	p->next = panels;
+	panels = p;
+	if (!frame_hooked) {
+		sx_frame_on_body_change(frame_changed);
+		frame_hooked = true;
+	}
+	p->body = sx_box(panel);
+	lv_obj_set_size(p->body, lv_pct(100), 0);
+	lv_obj_set_flex_grow(p->body, 1);
+	lv_obj_set_flex_flow(p->body, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_flex_align(p->body, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_style_pad_all(p->body, 24, 0);
+	lv_obj_set_scrollable(p->body, true);
+	lv_obj_set_clickable(p->body, true);
+	lv_obj_set_scroll_dir(p->body, LV_DIR_VER);
+	lv_obj_set_scrollbar_mode(p->body, LV_SCROLLBAR_MODE_AUTO);
+	lv_obj_set_event_bubble(p->body, true);
 
-	lv_obj_t *plaque = sx_box(panel);
+	lv_obj_t *plaque = sx_box(p->body);
 	lv_obj_set_size(plaque, PLAQUE, PLAQUE);
+	lv_obj_set_style_margin_top(plaque, 16, 0);
 	lv_obj_set_style_radius(plaque, LV_RADIUS_CIRCLE, 0);
 	lv_obj_set_style_bg_opa(plaque, LV_OPA_COVER, 0);
 	lv_obj_add_style(plaque, &sx_style_surface, 0);
 	p->mark = lv_label_create(plaque);
 	lv_obj_set_style_text_font(p->mark, &font_ui_36_bold, 0);
-	lv_obj_add_style(p->mark, &sx_style_text, 0);
+	lv_obj_add_style(p->mark, &sx_style_text_accent, 0);
 	lv_label_set_text(p->mark, "!");
 	lv_obj_center(p->mark);
 	p->wifi = lv_image_create(plaque);
 	lv_image_set_src(p->wifi, &icon_wifi_off);
-	lv_obj_add_style(p->wifi, &sx_style_icon, 0);
+	lv_obj_add_style(p->wifi, &sx_style_icon_accent, 0);
 	lv_obj_center(p->wifi);
 	lv_obj_set_hidden(p->wifi, true);
 
-	p->title = lv_label_create(panel);
+	p->title = lv_label_create(p->body);
 	lv_label_set_long_mode(p->title, LV_LABEL_LONG_WRAP);
 	lv_obj_set_width(p->title, lv_pct(100));
 	lv_obj_set_style_text_align(p->title, LV_TEXT_ALIGN_CENTER, 0);
 	lv_obj_add_style(p->title, &sx_style_text, 0);
-	lv_obj_set_style_text_font(p->title, &font_ui_30_bold, 0);
-	lv_obj_set_style_margin_top(p->title, 20, 0);
+	lv_obj_set_style_text_font(p->title, &font_ui_32_bold, 0);
+	lv_obj_set_style_margin_top(p->title, 16, 0);
 	lv_label_set_text(p->title, "");
 
-	p->text = lv_label_create(panel);
+	p->text = lv_label_create(p->body);
 	lv_label_set_long_mode(p->text, LV_LABEL_LONG_WRAP);
 	lv_obj_set_width(p->text, lv_pct(100));
 	lv_obj_set_style_text_align(p->text, LV_TEXT_ALIGN_CENTER, 0);
 	lv_obj_add_style(p->text, &sx_style_text2, 0);
 	lv_obj_set_style_text_font(p->text, &font_ui_22, 0);
-	lv_obj_set_style_text_line_space(p->text, 8, 0);
-	lv_obj_set_style_margin_top(p->text, 8, 0);
+	lv_obj_set_style_text_line_space(p->text, 2, 0);
+	lv_obj_set_style_margin_top(p->text, 16, 0);
 	lv_label_set_text(p->text, "");
 
-	p->button = pill(panel, true, button_cb, p, &p->button_label);
+	p->actions = sx_box(panel);
+	lv_obj_set_size(p->actions, lv_pct(100), BUTTON_H);
+	lv_obj_set_flex_flow(p->actions, LV_FLEX_FLOW_ROW);
+	lv_obj_set_style_pad_column(p->actions, 12, 0);
+	p->button = pill(p->actions, true, button_cb, p, &p->button_label);
 	lv_label_set_text(p->button_label, tr("stream_retry"));
 	lv_obj_t *offline_label;
-	p->offline = pill(panel, false, offline_cb, p, &offline_label);
+	p->offline = pill(p->actions, false, offline_cb, p, &offline_label);
 	lv_label_set_text(offline_label, tr("stream_saved_tracks"));
 	lv_obj_set_hidden(p->offline, true);
 
@@ -236,7 +297,10 @@ void streamerror_show(lv_obj_t *panel, stream_err_t cls, const char *text, void 
 	lv_label_set_text(p->button_label, tr(offer_sign_in ? "sign_in" : "stream_retry"));
 	lv_obj_set_hidden(p->button, p->action == NULL);
 	lv_obj_set_hidden(p->offline, p->open_offline == NULL);
+	lv_obj_set_hidden(p->actions, p->action == NULL && p->open_offline == NULL);
 	lv_obj_set_hidden(panel, false);
+	fit_panel(p);
+	lv_obj_scroll_to_y(p->body, 0, LV_ANIM_OFF);
 	lv_obj_move_foreground(panel);
 }
 

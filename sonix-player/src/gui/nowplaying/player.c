@@ -260,6 +260,7 @@ static bool audiobook_mode_valid;   // false until the first apply, so it paints
 
 static cover_image_t current_cover;	   // pixels currently referenced by cover_img
 static cover_image_t current_backdrop; // upside-down blurred copy behind the controls
+static lv_obj_t *cover_art;
 static int cover_box_w, cover_box_h;   // the artwork spans the full screen width
 
 // ---------------------------------------------------------------------------
@@ -283,10 +284,10 @@ static int cover_box_w, cover_box_h;   // the artwork spans the full screen widt
 // smaller circle of the accent colour. The ring is a wide white border over an
 // accent-coloured body rather than a second object, so it costs nothing and
 // follows the knob on its own.
-#define PROGRESS_TRACK_HEIGHT 10 // as thick as every other slider
-#define PROGRESS_KNOB_GROW 9	 // how far the knob grows past the track
+#define PROGRESS_TRACK_HEIGHT 6	 // as thick as every other slider
+#define PROGRESS_KNOB_GROW 7	 // how far the knob grows past the track
 #define PROGRESS_TOUCH_REACH 18	 // how far past the track a press still seeks
-#define PROGRESS_KNOB_RING 5
+#define PROGRESS_KNOB_RING 0
 
 // How the shape of the track is drawn, and how much room it gets. The bars are
 // wide and well apart with rounded ends rather than a comb of hairlines: at
@@ -742,7 +743,7 @@ static void apply_playback_status(audio_status_t status) {
 	// This runs from every poll, twice a second: written only when it changes.
 	sx_set_src(play_btn_icon, live_mode ? (playing ? &icon_stop : &icon_play) : (playing ? &icon_pause : &icon_play));
 	// 2.0: the glyph on the white disc is the album's dark ink (np_ink).
-	sx_set_recolor(play_btn_icon, sx_pal()->np_ink);
+	sx_set_recolor(play_btn_icon, (layout_studio_now) ? sx_pal()->np_ink : sx_pal()->on_accent);
 	np_pause_badge_update(playing);
 
 	// Keep polling either way, just less often when nothing is playing. The
@@ -1005,6 +1006,25 @@ static void prefetch_next_cover(void);
 // of its own over the blurred copy -- and the artwork arrives on a worker, so
 // whatever the arrangement did when it was set up would be undone the moment a
 // cover landed.
+// The viewport stays full-width for lyrics and gestures; only the sleeve is inset.
+static int cover_art_side(void) { return cover_box_h - 132; }
+
+static void cover_art_layout(void) {
+	if (!cover_art)
+		return;
+	bool full = layout_alt_now || layout_studio_now;
+	int side = cover_art_side();
+	lv_obj_set_size(cover_art, full ? cover_box_w : side, full ? cover_box_h : side);
+	lv_obj_align(cover_art, LV_ALIGN_TOP_MID, 0, full ? 0 : 124);
+	lv_obj_set_style_radius(cover_art, full ? 0 : SX_ROW_THUMB_R, 0);
+	lv_obj_set_style_bg_color(cover_art, sx_pal()->mini_cover_tone, 0);
+	lv_obj_set_hidden(cover_art, layout_studio_now);
+	if (cover_thumb_img)
+		lv_obj_set_size(cover_thumb_img, full ? cover_box_w : side, full ? cover_box_h : side);
+	if (!layout_studio_now)
+		lv_obj_set_style_bg_color(cover_panel, sx_pal()->bg, 0);
+}
+
 static void cover_show(bool have_cover) {
 	if (!cover_img) {
 		return;
@@ -1025,16 +1045,23 @@ static void cover_show(bool have_cover) {
 	}
 }
 
+static void paint_seek_track(void) {
+	if (!progress_slider || layout_wave_now)
+		return;
+	bool dark_backdrop = layout_studio_now;
+	lv_obj_set_style_bg_color(progress_slider, dark_backdrop ? lv_color_white() : sx_pal()->text2, LV_PART_MAIN);
+	lv_obj_set_style_bg_opa(progress_slider, dark_backdrop ? LV_OPA_30 : theme_is_dark() ? LV_OPA_50 : LV_OPA_70, LV_PART_MAIN);
+}
+
 static void set_over_cover(bool on) {
 	chrome_over_cover = on;
-	// 2.0: the player is always dark -- the gradient where there is no
-	// picture, the picture where there is one -- so its chrome is always the
-	// light one. Whether a cover is up is still remembered, for the status bar.
-	on = true;
+	// Only Studio lays controls over artwork. Standard and Waveform use the
+	// page palette, so a light tinted surface needs dark text too.
+	on = layout_studio_now;
 
 	lv_obj_t *const text_objs[] = {song_title_label, elapsed_label, remaining_label};
 	lv_obj_t *const dim_objs[] = {song_artist_label, format_label, queue_position_label};
-	lv_obj_t *const icon_objs[] = {prev_icon, next_icon};
+	lv_obj_t *const icon_objs[] = {prev_icon, next_icon, more_btn_icon};
 
 	for (size_t i = 0; i < sizeof(text_objs) / sizeof(text_objs[0]); i++) {
 		if (!text_objs[i]) {
@@ -1075,16 +1102,17 @@ static void set_over_cover(bool on) {
 	// light theme with no cover -- a white disc on a near-white panel is
 	// invisible.
 	if (play_btn) {
-		lv_obj_set_style_bg_color(play_btn, lv_color_white(), 0);
+		lv_obj_set_style_bg_color(play_btn, on ? lv_color_white() : sx_pal()->accent, 0);
 		lv_obj_set_style_bg_opa(play_btn, LV_OPA_COVER, 0);
 	}
 	if (play_btn_icon) {
-		lv_obj_set_style_image_recolor(play_btn_icon, sx_pal()->np_ink, 0);
+		lv_obj_set_style_image_recolor(play_btn_icon, on ? sx_pal()->np_ink : sx_pal()->on_accent, 0);
 		lv_obj_set_style_image_recolor_opa(play_btn_icon, LV_OPA_COVER, 0);
 	}
 
 	// The floating chevron parks over the artwork's top-left corner.
-	back_btn_over_cover(on);
+	back_btn_over_cover(on || layout_alt_now);
+	paint_seek_track();
 }
 
 // Told before the loaded track's artwork is freed. The screensaver borrows
@@ -1170,7 +1198,7 @@ static lv_color_t tone_shaped(int sat, int want) {
 // in. Cover Flow throws the same hue under the record in the middle, which is
 // what makes the two pages look like they belong to the same player.
 static lv_color_t alt_surface(void) { return tone_shaped(ALT_SURFACE_SAT, ALT_SURFACE_LUMA); }
-static lv_color_t alt_mark(void) { return tone_shaped(ALT_MARK_SAT, ALT_MARK_LUMA); }
+static lv_color_t alt_mark(void) { return tone_shaped(ALT_MARK_SAT, (!theme_is_dark() && !layout_studio_now) ? 70 : ALT_MARK_LUMA); }
 
 // The accent the transport, the progress bar and the sung line wear: the
 // sleeve's colour in the Waveform arrangement, and in the other two as well
@@ -1198,8 +1226,9 @@ static void lyrics_repaint_lit(void);
 // The two glyphs that wear the accent, repainted whenever the accent of the
 // moment can have moved: the play/pause disc and the repeat/shuffle mode.
 static void paint_transport_tint(void) {
+	bool on = layout_studio_now;
 	if (play_btn_icon) {
-		lv_obj_set_style_image_recolor(play_btn_icon, sx_pal()->np_ink, 0);
+		lv_obj_set_style_image_recolor(play_btn_icon, on ? sx_pal()->np_ink : sx_pal()->on_accent, 0);
 		lv_obj_set_style_image_recolor_opa(play_btn_icon, LV_OPA_COVER, 0);
 	}
 	if (repeat_btn_icon) {
@@ -1254,6 +1283,7 @@ static void paint_alt_tint(void) {
 		return;
 	}
 
+	set_over_cover(chrome_over_cover);
 	lv_color_t surface = alt_surface();
 	lv_color_t ink = alt_ink();
 
@@ -1354,7 +1384,7 @@ static void slider_over_waveform(bool over) {
 	}
 	lv_obj_set_size(progress_slider, lv_pct(100), PROGRESS_TRACK_HEIGHT);
 	lv_obj_remove_local_style_prop(progress_slider, LV_STYLE_BG_OPA, LV_PART_MAIN);
-	lv_obj_set_style_bg_opa(progress_slider, LV_OPA_30, LV_PART_MAIN);
+	paint_seek_track();
 	lv_obj_remove_local_style_prop(progress_slider, LV_STYLE_BG_OPA, LV_PART_INDICATOR);
 	lv_obj_remove_local_style_prop(progress_slider, LV_STYLE_OPA, LV_PART_KNOB);
 }
@@ -2460,6 +2490,10 @@ static void align_title_with_star(void) {
 	if (!song_title_label) {
 		return;
 	}
+	if (!layout_alt_now && !layout_studio_now) {
+		lv_obj_set_style_translate_y(song_title_label, 0, 0);
+		return;
+	}
 	int32_t shift = 0;
 	if (song_text_obj && song_side_obj && fav_btn_obj && lv_obj_get_parent(song_title_label) == song_text_obj &&
 		lv_obj_get_parent(fav_btn_obj) == song_side_obj && !lv_obj_is_hidden(fav_btn_obj) &&
@@ -2519,7 +2553,7 @@ static void studio_take_back(void) {
 		if (player_menu) {
 			lv_obj_remove_local_style_prop(player_menu, LV_STYLE_BG_OPA, 0);
 			lv_obj_remove_local_style_prop(player_menu, LV_STYLE_BG_IMAGE_OPA, 0);
-			// 2.0: the panel's own radius and gradient come back with it.
+			// 2.0: the panel's radius and opaque surface come back with it.
 			lv_obj_set_style_radius(player_menu, SX_NP_PANEL_R, 0);
 		}
 		// The picture at full width comes back, and the note with it when there
@@ -2739,6 +2773,7 @@ static void apply_layout(void) {
 	} else {
 		lyrics_layout(); // studio_put() places the page itself
 	}
+	cover_art_layout();
 	menu_style_for_layout(); // the panel's spacing for the arrangement now up
 	np_layout_changed();
 	align_title_with_star(); // the title may have just left its row, or come back to it
@@ -2769,6 +2804,7 @@ static void update_layout(const device_state_t *state) {
 		alt_title_pill) {
 		return;
 	}
+	bool cover_shape_changed = studio != layout_studio_now || alt != layout_alt_now;
 	layout_studio_now = studio;
 	layout_alt_now = alt;
 	layout_wave_now = wave;
@@ -2788,7 +2824,7 @@ static void update_layout(const device_state_t *state) {
 	// or out of Studio means the one on hand is the wrong shape and the picture
 	// is asked for again. Only on a change of arrangement, which is a setting
 	// the user has just touched.
-	if (studio != backdrop_is_studio && cover_shown_path[0]) {
+	if ((cover_shape_changed || studio != backdrop_is_studio) && cover_shown_path[0]) {
 		reload_cover(cover_shown_path);
 	}
 }
@@ -2892,7 +2928,7 @@ static void wave_paint(int played_px) {
 			}
 			// Decided per column of pixels rather than per bar, which is what
 			// lets the playhead stand in the middle of a bar.
-			uint8_t opa = x < played_px ? WAVE_PAST_OPA : WAVE_TODO_OPA;
+			uint8_t opa = x < played_px ? WAVE_PAST_OPA : (!theme_is_dark() && !layout_studio_now ? LV_OPA_70 : WAVE_TODO_OPA);
 			// Doubled coordinates, so that an even-width bar can have its
 			// centre between two pixels without any rounding.
 			int d2 = 2 * dx - (solid - 1);
@@ -2963,8 +2999,8 @@ static void wave_refresh(const char *path, double position) {
 // The size the sleeve is asked for in the arrangement in force (see
 // reload_cover()).
 static void cover_request_size(int *w, int *h) {
-	*w = layout_studio_now ? studio_cover_geometry(NULL) : cover_box_w;
-	*h = layout_studio_now ? *w : cover_box_h;
+	*w = layout_studio_now ? studio_cover_geometry(NULL) : layout_alt_now ? cover_box_w : cover_art_side();
+	*h = layout_alt_now ? cover_box_h : *w;
 }
 
 // The next track's cover, made and kept in the cache while this one plays, so
@@ -2996,7 +3032,7 @@ static void reload_cover(const char *filepath) {
 	// buffer that's already gone. The placeholder covers the gap while the
 	// worker decodes.
 	lv_image_set_src(cover_img, NULL);
-	// 2.0: the panel under the controls is the album's gradient
+	// 2.0: the panel under the controls is the flat page canvas
 	// (np_paint_backgrounds), not the blurred copy any more; the copy is still
 	// made, for the screensaver and Studio, and nothing on the panel points
 	// at it.
@@ -3252,14 +3288,14 @@ static void player_refresh_theme(void) {
 		return;
 
 	if (studio_box) {
-		lv_obj_set_style_bg_color(studio_box, sx_pal()->np_grad_bot, 0);
+		lv_obj_set_style_bg_color(studio_box, sx_hex(SX_D_BG), 0);
 	}
 
 	// 2.0: always dark, whatever the theme -- the plaque in the album's tone
 	// and a white glyph on it. A new accent can change the palette, so the
 	// gradients are looked at again (made again only if their colours moved).
 	if (!studio_up && !lyrics_look_on) {
-		lv_obj_set_style_bg_color(cover_panel, sx_pal()->mini_cover_tone, 0);
+		lv_obj_set_style_bg_color(cover_panel, sx_pal()->bg, 0);
 	}
 	lv_obj_set_style_image_recolor(cover_placeholder_icon, lv_color_white(), 0);
 	np_paint_backgrounds();
@@ -3269,12 +3305,17 @@ static void player_refresh_theme(void) {
 	lv_obj_set_style_bg_color(progress_slider, chrome_accent(), LV_PART_INDICATOR);
 	lv_obj_set_style_bg_color(progress_slider, chrome_accent(), LV_PART_KNOB);
 	set_over_cover(chrome_over_cover); // repaints the play disc for the new palette
+	paint_alt_tint();
 	update_repeat_button();
 	update_speed_button();
 
 	device_state_t state;
 	device_state_get(&state);
 	refresh_cover(state.current_file);
+	if (sheet_open && power_screen_is_on()) {
+		np_chain_refresh(&state);
+		wave_refresh(state.current_file, state.progress_current_secs);
+	}
 	if (lyrics_pane) {
 		lyrics_look(lyrics_look_on); // the words in the new theme's colours
 	}
@@ -3307,15 +3348,14 @@ static void refresh_now_playing(void) {
 	// album recolours the interface here, before anything below paints.
 	if (state.live) {
 		sx_palette_track_changed(NULL, state.metadata.title);
-		sx_mini_set_track(state.metadata.title, NULL, true);
+		sx_mini_set_track(state.metadata.title, NULL, state.metadata.artist, true);
 	} else {
 		sx_palette_track_changed(state.current_file[0] ? state.current_file : NULL,
 								 state.metadata.album[0] ? state.metadata.album : NULL);
 		// The mini player on every page says the same as this one.
 		const char *base = strrchr(state.current_file, '/');
 		const char *shown = state.metadata.title[0] ? state.metadata.title : (base ? base + 1 : state.current_file);
-		sx_mini_set_track(state.current_file[0] ? shown : NULL, state.current_file[0] ? state.current_file : NULL,
-						  false);
+		sx_mini_set_track(state.current_file[0] ? shown : NULL, state.current_file[0] ? state.current_file : NULL, state.metadata.artist, false);
 	}
 	sx_mini_set_playing(state.status == AUDIO_STATUS_PLAYING);
 	// The album the track belongs to, for its thumbnails (the mini player's
@@ -3329,7 +3369,6 @@ static void refresh_now_playing(void) {
 	// What comes next, and the chain, for the new track.
 	upnext_update();
 	np_chain_refresh(&state);
-	sx_mini_refresh_chain();
 	// Before anything is drawn: which arrangement this source gets decides
 	// where the title goes and what colour everything is.
 	update_layout(&state);
@@ -3775,7 +3814,7 @@ static void update_speed_button(void) {
 	// 2.0: as the repeat button it stands in for -- white, and at 45 % while
 	// it is at its rest (normal speed).
 	bool normal = speed_current_permille() == AUDIOBOOK_SPEED_NORMAL;
-	lv_obj_set_style_image_recolor(speed_btn_icon, normal ? lv_color_white() : chrome_accent(), 0);
+	lv_obj_set_style_image_recolor(speed_btn_icon, normal ? (layout_studio_now ? lv_color_white() : sx_pal()->text) : chrome_accent(), 0);
 	lv_obj_set_style_image_recolor_opa(speed_btn_icon, LV_OPA_COVER, 0);
 	lv_obj_set_style_image_opa(speed_btn_icon, normal ? NP_REPEAT_OFF_OPA : LV_OPA_COVER, 0);
 }
@@ -3849,7 +3888,7 @@ static void update_repeat_button(void) {
 	}
 
 	lv_image_set_src(repeat_btn_icon, icon);
-	lv_obj_set_style_image_recolor(repeat_btn_icon, lv_color_white(), 0);
+	lv_obj_set_style_image_recolor(repeat_btn_icon, (layout_studio_now) ? lv_color_white() : sx_pal()->text, 0);
 	lv_obj_set_style_image_recolor_opa(repeat_btn_icon, LV_OPA_COVER, 0);
 	lv_obj_set_style_image_opa(repeat_btn_icon, on ? LV_OPA_COVER : NP_REPEAT_OFF_OPA, 0);
 }
@@ -5017,40 +5056,26 @@ void player_sheet_attach_drag(lv_obj_t *obj, bool opening) {
 }
 
 // ---------------------------------------------------------------------------
-// Sonix UI 2.0: the panel, the signal chain, "Up next", the artwork's gestures
-//
-// The handoff's "Воспроизведение": the artwork across the top, H - 312 tall,
-// over a vertical gradient in the album's colour; a panel of 312 with rounded
-// top corners on a gradient of its own; in it the title (28) with the star,
-// the artist (24), the signal chain in one line, the bar, the two clocks with
-// the place in the queue between them, and the transport. Over the artwork:
-// the chevron that puts the player away and the "Up next · X ›" chip that
-// opens the queue. Always dark, whatever the theme.
-//
-// What it costs. The two gradients are strips 16 px wide (sx_gradient_create:
-// 16 x 800 x 2 = 25.6 KB for the page, 16 x 336 x 2 = 10.7 KB for the panel;
-// see NP_GRAD_STRIP_W), made when the album's colour changes (about 0.1 ms of
-// the emulator's CPU for both) and tiled across the width by the renderer. No
-// timer is added: everything here is updated from the poll the player already
-// runs, and only when its text or state actually changes.
+// Graphite playback: inset artwork, flat canvas, title and transport controls.
+// Signal-chain details and artwork gestures retain their native behaviour.
 // ---------------------------------------------------------------------------
 
-#define NP_PANEL_PAD_H 26
-#define NP_PANEL_PAD_TOP 14
-#define NP_PANEL_PAD_BOTTOM 10 // above the screen's edge
-#define NP_SEEK_BAND_H 56	   // the bar's 10 px track in the middle of it
+#define NP_PANEL_PAD_H 16
+#define NP_PANEL_PAD_TOP 16
+#define NP_PANEL_PAD_BOTTOM 16 // above the screen's edge
+#define NP_SEEK_BAND_H 72	   // the bar's 10 px track in the middle of it
 #define NP_SEEK_MARGIN ((NP_SEEK_BAND_H - PROGRESS_TRACK_HEIGHT) / 2)
-#define NP_TIMES_LIFT (-4)
+#define NP_TIMES_LIFT (-8)
 #define NP_TRANSPORT_TOP 6
 #define NP_TRANSPORT_GAP 12
-#define NP_CHAIN_ROW_H 44
+#define NP_CHAIN_ROW_H 28
 #define NP_CHAIN_DOT 10
 #define NP_PAUSE_BADGE 80
 #define NP_PAUSE_BADGE_OPA 115 // 45 %
-#define NP_CHIP_MAX_W 300 // the handoff's 270 is for 19 px type; MiSans 20 bold is wider
-#define NP_CHIP_PAD_H 20
+#define NP_CHIP_MAX_W 344	   // the handoff's 270 is for 19 px type; MiSans 20 bold is wider
+#define NP_CHIP_PAD_H 16
 #define NP_CHIP_OPA 107 // 42 %
-#define NP_CHIP_RIGHT 12
+#define NP_CHIP_RIGHT 16
 #define NP_BADGE_GAP 10 // between the chip and the source marks under it
 #define NP_CHAIN_BLOCK_GAP 12
 #define NP_CHAIN_BLOCK_R 20
@@ -5075,66 +5100,27 @@ static void menu_style_for_layout(void) {
 						   : layout_alt_now	 ? LV_FLEX_ALIGN_CENTER
 											 : LV_FLEX_ALIGN_START;
 	lv_obj_set_flex_align(player_menu, main, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	if (controls_row) {
+		bool standard = !layout_studio_now && !layout_alt_now;
+		lv_obj_set_ignore_layout(controls_row, standard);
+		if (standard)
+			lv_obj_align(controls_row, LV_ALIGN_BOTTOM_MID, 0, 0);
+	}
 }
 
 // ---------------------------------------------------------------------------
-// The gradients, once per album
+// Flat playback surfaces follow the page palette, including cover tint.
+// Studio's artwork backdrop is handled separately by its existing layout.
 // ---------------------------------------------------------------------------
-
-// How wide the strips are. Tiled across the screen, each copy is a draw task
-// of its own: at 4 px a full redraw of the player (opening it, the slide)
-// is 120 tasks a strip and cost a third more than flat colours (5.6 ms ->
-// 7.5 ms of the emulator's CPU per frame, 200 frames, measured); at 16 px it
-// is 30 tasks and +8 % (6.1 ms), for 36 KB of strips instead of 9 KB. The
-// ordered dither repeats every 4 px, so any multiple of 4 is seamless.
-#define NP_GRAD_STRIP_W 16
-
-static lv_draw_buf_t *np_page_strip;
-static lv_draw_buf_t *np_panel_strip;
-static lv_color_t np_strip_cols[4];
-static bool np_strips_valid;
-
 static void np_paint_backgrounds(void) {
-	if (!player_screen || !player_menu) {
+	if (!player_screen || !player_menu)
 		return;
-	}
 	const sx_palette_t *pal = sx_pal();
-	lv_color_t want[4] = {pal->np_grad_top, pal->np_grad_bot, pal->np_panel_top, pal->np_panel_bot};
-	if (np_strips_valid && memcmp(want, np_strip_cols, sizeof(want)) == 0) {
-		return;
-	}
-	int h = sheet_height > 0 ? sheet_height : (int)lv_obj_get_height(player_screen);
-	sx_grad_stop_t page[2] = {{want[0], 0}, {want[1], h}};
-	sx_grad_stop_t panel[2] = {{want[2], 0}, {want[3], np_panel_h}};
-	lv_draw_buf_t *page_strip = sx_gradient_create(NP_GRAD_STRIP_W, h, page, 2);
-	lv_draw_buf_t *panel_strip = sx_gradient_create(NP_GRAD_STRIP_W, np_panel_h + SX_NP_PANEL_R, panel, 2);
-
-	// The flat colours stay under them: what shows if a strip could not be
-	// made, and what the renderer starts from.
-	lv_obj_set_style_bg_color(player_screen, want[1], 0);
-	lv_obj_set_style_bg_color(player_menu, want[3], 0);
-	lv_obj_set_style_bg_image_src(player_screen, page_strip, 0);
-	lv_obj_set_style_bg_image_tiled(player_screen, true, 0);
-	// The panel's strip is drawn by sx_gradient_paint() (attached where the
-	// panel is made), which reads np_panel_strip: rounded corners make LVGL's
-	// own tiled background far too dear for the panel (sx_palette.h).
-	lv_obj_invalidate(player_menu);
-	// The old strips only once nothing points at them.
-	sx_gradient_destroy(np_page_strip);
-	sx_gradient_destroy(np_panel_strip);
-	np_page_strip = page_strip;
-	np_panel_strip = panel_strip;
-	memcpy(np_strip_cols, want, sizeof(want));
-	np_strips_valid = true;
-
-	// The plaque behind the artwork, and the glyph on the play disc, are in the
-	// same colour family.
-	if (cover_panel && !studio_up) {
-		lv_obj_set_style_bg_color(cover_panel, pal->mini_cover_tone, 0);
-	}
-	if (play_btn_icon) {
-		lv_obj_set_style_image_recolor(play_btn_icon, pal->np_ink, 0);
-	}
+	lv_obj_set_style_bg_color(player_screen, pal->bg, 0);
+	lv_obj_set_style_bg_color(player_menu, pal->bg, 0);
+	if (cover_panel && !studio_up)
+		lv_obj_set_style_bg_color(cover_panel, pal->bg, 0);
+	cover_art_layout();
 }
 
 // ---------------------------------------------------------------------------
@@ -5319,7 +5305,7 @@ static void np_pause_badge_update(bool playing) {
 	device_state_t state;
 	device_state_get(&state);
 	bool loaded = state.current_file[0] != '\0';
-	bool show = !playing && loaded && !live_mode && !lyrics_on_screen();
+	bool show = layout_alt_now && !playing && loaded && !live_mode && !lyrics_on_screen();
 	if (lv_obj_is_hidden(pause_badge) == show) {
 		lv_obj_set_hidden(pause_badge, !show);
 		if (show) {
@@ -5425,6 +5411,7 @@ static void cover_gesture_cb(lv_event_t *e) {
 // ---------------------------------------------------------------------------
 
 static lv_obj_t *upnext_chip;
+static lv_obj_t *upnext_words;
 static lv_obj_t *upnext_lead; // "Up next"
 static lv_obj_t *upnext_name; // the track, or "Queue"
 static lv_obj_t *upnext_arrow;
@@ -5450,12 +5437,10 @@ static void np_upnext_build(void) {
 	lv_obj_remove_style_all(upnext_chip);
 	lv_obj_set_size(upnext_chip, LV_SIZE_CONTENT, SX_NP_UPNEXT_H);
 	lv_obj_set_style_max_width(upnext_chip, NP_CHIP_MAX_W, 0);
-	lv_obj_set_style_radius(upnext_chip, SX_NP_UPNEXT_H / 2, 0);
-	lv_obj_set_style_bg_color(upnext_chip, lv_color_black(), 0);
-	lv_obj_set_style_bg_opa(upnext_chip, NP_CHIP_OPA, 0);
-	lv_obj_set_style_bg_opa(upnext_chip, LV_OPA_70, LV_STATE_PRESSED);
+	lv_obj_set_style_radius(upnext_chip, SX_CARD_R, 0);
+	lv_obj_add_style(upnext_chip, &sx_style_press, LV_STATE_PRESSED);
 	lv_obj_set_style_pad_hor(upnext_chip, NP_CHIP_PAD_H, 0);
-	lv_obj_set_style_pad_column(upnext_chip, 8, 0);
+	lv_obj_set_style_pad_column(upnext_chip, 12, 0);
 	lv_obj_set_flex_flow(upnext_chip, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(upnext_chip, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_set_scrollable(upnext_chip, false);
@@ -5464,23 +5449,28 @@ static void np_upnext_build(void) {
 	lv_obj_add_event_cb(upnext_chip, upnext_clicked_cb, LV_EVENT_CLICKED, NULL);
 	lv_obj_align(upnext_chip, LV_ALIGN_TOP_RIGHT, -NP_CHIP_RIGHT, upnext_y());
 
-	upnext_lead = lv_label_create(upnext_chip);
+	upnext_words = sx_box(upnext_chip);
+	lv_obj_set_size(upnext_words, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+	lv_obj_set_flex_flow(upnext_words, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_flex_align(upnext_words, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
+	upnext_lead = lv_label_create(upnext_words);
 	lv_label_set_text(upnext_lead, tr("np_up_next"));
 	lv_obj_set_style_text_font(upnext_lead, &font_ui_20, 0);
-	lv_obj_set_style_text_color(upnext_lead, lv_color_white(), 0);
-	lv_obj_set_style_text_opa(upnext_lead, LV_OPA_70, 0);
+	lv_obj_add_style(upnext_lead, &sx_style_text2, 0);
+	lv_obj_set_style_text_opa(upnext_lead, LV_OPA_COVER, 0);
 
-	upnext_name = lv_label_create(upnext_chip);
+	upnext_name = lv_label_create(upnext_words);
 	lv_label_set_long_mode(upnext_name, LV_LABEL_LONG_DOT);
-	lv_obj_set_style_text_font(upnext_name, &font_ui_20_bold, 0);
-	lv_obj_set_style_text_color(upnext_name, lv_color_white(), 0);
-	lv_obj_set_height(upnext_name, lv_font_get_line_height(&font_ui_20_bold));
+	lv_obj_set_style_text_font(upnext_name, &font_ui_22_bold, 0);
+	lv_obj_add_style(upnext_name, &sx_style_text, 0);
+	lv_obj_set_style_text_align(upnext_name, LV_TEXT_ALIGN_RIGHT, 0);
+	lv_obj_set_height(upnext_name, lv_font_get_line_height(&font_ui_22_bold));
 
 	upnext_arrow = lv_image_create(upnext_chip);
 	lv_image_set_src(upnext_arrow, &npicon_chevron_right_sm);
-	lv_obj_set_style_image_recolor(upnext_arrow, lv_color_white(), 0);
+	lv_obj_add_style(upnext_arrow, &sx_style_icon, 0);
 	lv_obj_set_style_image_recolor_opa(upnext_arrow, LV_OPA_COVER, 0);
-	lv_obj_set_style_image_opa(upnext_arrow, LV_OPA_70, 0);
+	lv_obj_set_style_image_opa(upnext_arrow, LV_OPA_COVER, 0);
 
 	lv_label_set_text(upnext_name, tr("trackmenu_queue"));
 }
@@ -5551,8 +5541,8 @@ static void upnext_update(void) {
 	lv_label_set_text(upnext_name, shown);
 	// The name takes what the chip's NP_CHIP_MAX_W leaves it.
 	lv_obj_update_layout(upnext_lead);
-	int32_t room = NP_CHIP_MAX_W - 2 * NP_CHIP_PAD_H - 2 * 8 - (int32_t)npicon_chevron_right_sm.header.w -
-				   (title[0] ? lv_obj_get_width(upnext_lead) : 0);
+	int32_t room = NP_CHIP_MAX_W - 2 * NP_CHIP_PAD_H - 12 - (int32_t)npicon_chevron_right_sm.header.w;
+	lv_obj_set_style_max_width(upnext_lead, room, 0);
 	lv_obj_set_width(upnext_name, LV_SIZE_CONTENT);
 	lv_obj_set_style_max_width(upnext_name, room > 40 ? room : 40, 0);
 }
@@ -5562,6 +5552,9 @@ static void upnext_update(void) {
 static void np_layout_changed(void) {
 	if (upnext_chip) {
 		lv_obj_set_hidden(upnext_chip, layout_studio_now);
+		lv_obj_remove_style(upnext_chip, &sx_style_surface, 0);
+		if (layout_alt_now)
+			lv_obj_add_style(upnext_chip, &sx_style_surface, 0);
 		lv_obj_align(upnext_chip, LV_ALIGN_TOP_RIGHT, -NP_CHIP_RIGHT, upnext_y());
 	}
 }
@@ -5680,7 +5673,7 @@ static void chain_block_fill(void);
 
 static void chain_paint_mark(void) {
 	if (chain_mark) {
-		lv_image_set_src(chain_mark, chain_opened ? &npicon_chevron_down_sm : &npicon_chevron_up_sm);
+		lv_obj_set_hidden(chain_mark, true);
 	}
 }
 
@@ -5697,16 +5690,13 @@ static void np_chain_refresh(const device_state_t *state) {
 	if (lv_obj_is_hidden(chain_row) == show) {
 		lv_obj_set_hidden(chain_row, !show);
 	}
-	if (!show && chain_opened) {
-		chain_set_open(false);
-	}
 	if (strcmp(text, chain_shown) != 0) {
 		snprintf(chain_shown, sizeof(chain_shown), "%s", text);
 		lv_label_set_text(chain_text, text);
 	}
-	if ((int)warn != chain_warn_shown) {
+	lv_color_t c = warn ? sx_hex(sx_pal()->dark ? SX_D_WARNING_TEXT : SX_L_WARNING_TEXT) : sx_pal()->text2;
+	if ((int)warn != chain_warn_shown || !lv_color_eq(c, lv_obj_get_style_bg_color(chain_dot, 0))) {
 		chain_warn_shown = warn;
-		lv_color_t c = lv_color_hex(warn ? SX_CHAIN_WARN : SX_CHAIN_OK);
 		lv_obj_set_style_bg_color(chain_dot, c, 0);
 		lv_obj_set_style_text_color(chain_text, c, 0);
 	}
@@ -5715,13 +5705,7 @@ static void np_chain_refresh(const device_state_t *state) {
 	}
 }
 
-static void chain_row_clicked_cb(lv_event_t *e) {
-	(void)e;
-	if (player_sheet_drag_active()) {
-		return;
-	}
-	chain_set_open(!chain_opened);
-}
+void player_chain_open(void) { chain_set_open(true); }
 
 static void np_chain_build(lv_obj_t *parent) {
 	chain_row = lv_obj_create(parent);
@@ -5734,8 +5718,7 @@ static void np_chain_build(lv_obj_t *parent) {
 	lv_obj_set_flex_align(chain_row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_set_style_pad_column(chain_row, 8, 0);
 	lv_obj_set_scrollable(chain_row, false);
-	lv_obj_set_clickable(chain_row, true);
-	lv_obj_add_event_cb(chain_row, chain_row_clicked_cb, LV_EVENT_CLICKED, NULL);
+	lv_obj_set_clickable(chain_row, false);
 
 	chain_dot = lv_obj_create(chain_row);
 	lv_obj_remove_style_all(chain_dot);
@@ -5743,12 +5726,13 @@ static void np_chain_build(lv_obj_t *parent) {
 	lv_obj_set_style_radius(chain_dot, LV_RADIUS_CIRCLE, 0);
 	lv_obj_set_style_bg_opa(chain_dot, LV_OPA_COVER, 0);
 	lv_obj_set_clickable(chain_dot, false);
+	lv_obj_set_hidden(chain_dot, true);
 
 	chain_text = lv_label_create(chain_row);
 	lv_label_set_text(chain_text, "");
 	lv_label_set_long_mode(chain_text, LV_LABEL_LONG_DOT);
-	lv_obj_set_style_text_font(chain_text, &font_ui_17, 0);
-	lv_obj_set_height(chain_text, lv_font_get_line_height(&font_ui_17));
+	lv_obj_set_style_text_font(chain_text, &font_ui_20, 0);
+	lv_obj_set_height(chain_text, lv_font_get_line_height(&font_ui_20));
 	lv_obj_set_style_max_width(chain_text,
 							   (int32_t)lv_obj_get_style_width(player_screen, 0) - 2 * NP_PANEL_PAD_H - NP_CHAIN_DOT -
 								   16 - (int32_t)npicon_chevron_up_sm.header.w,
@@ -5780,7 +5764,7 @@ static void chain_block_build(void) {
 	lv_obj_remove_style_all(chain_block);
 	lv_obj_set_size(chain_block, w - 2 * NP_CHAIN_BLOCK_GAP, LV_SIZE_CONTENT);
 	lv_obj_set_style_radius(chain_block, NP_CHAIN_BLOCK_R, 0);
-	lv_obj_set_style_bg_color(chain_block, lv_color_hex(NP_CHAIN_BLOCK_BG), 0);
+	lv_obj_add_style(chain_block, &sx_style_surface, 0);
 	lv_obj_set_style_bg_opa(chain_block, LV_OPA_COVER, 0);
 	lv_obj_set_style_pad_hor(chain_block, 18, 0);
 	lv_obj_set_style_pad_ver(chain_block, 8, 0);
@@ -5808,8 +5792,7 @@ static void chain_block_build(void) {
 		lv_label_set_text(key, tr(KEYS[i]));
 		lv_obj_set_width(key, NP_CHAIN_KEY_W);
 		lv_obj_set_style_text_font(key, &font_ui_16, 0);
-		lv_obj_set_style_text_color(key, lv_color_white(), 0);
-		lv_obj_set_style_text_opa(key, LV_OPA_60, 0);
+		lv_obj_add_style(key, &sx_style_text2, 0);
 		lv_obj_set_style_pad_top(key, 4, 0);
 		lv_label_set_long_mode(key, LV_LABEL_LONG_DOT);
 
@@ -5818,7 +5801,7 @@ static void chain_block_build(void) {
 		lv_label_set_long_mode(chain_vals[i], LV_LABEL_LONG_WRAP);
 		lv_obj_set_flex_grow(chain_vals[i], 1);
 		lv_obj_set_style_text_font(chain_vals[i], &font_ui_21, 0);
-		lv_obj_set_style_text_color(chain_vals[i], lv_color_white(), 0);
+		lv_obj_add_style(chain_vals[i], &sx_style_text, 0);
 	}
 	lv_obj_set_hidden(chain_block, true);
 }
@@ -5994,7 +5977,7 @@ static void np_outside_watch(const device_state_t *state) {
 		if (!shown || serial != shown_serial) {
 			shown = true;
 			shown_serial = serial;
-			sx_mini_set_track(title, NULL, true);
+			sx_mini_set_track(title, NULL, air.playing ? air.artist : NULL, true);
 			sx_mini_set_cover(NULL);
 			mini_thumb_album = 0;
 			upnext_update();
@@ -6005,10 +5988,8 @@ static void np_outside_watch(const device_state_t *state) {
 		// The phone let go: the mini player says what the player has loaded.
 		shown = false;
 		const char *base = strrchr(state->current_file, '/');
-		const char *name =
-			state->metadata.title[0] ? state->metadata.title : (base ? base + 1 : state->current_file);
-		sx_mini_set_track(state->current_file[0] ? name : NULL, state->current_file[0] ? state->current_file : NULL,
-						  state->live);
+		const char *name = state->metadata.title[0] ? state->metadata.title : (base ? base + 1 : state->current_file);
+		sx_mini_set_track(state->current_file[0] ? name : NULL, state->current_file[0] ? state->current_file : NULL, state->metadata.artist, state->live);
 		np_mini_thumb_refresh();
 		upnext_update();
 	}
@@ -6030,8 +6011,6 @@ static void np_poll(const device_state_t *state) {
 	if (power_screen_is_on()) {
 		if (sheet_open) {
 			np_chain_refresh(state);
-		} else if (sx_mini_visible()) {
-			sx_mini_refresh_chain();
 		}
 	}
 	queue_undo_tick();
@@ -6319,23 +6298,21 @@ void player_init(gui_config_t *cfg) {
 	backdrop_h = menu_height;
 	backdrop_studio_h = (int)cfg->screen_height;
 
-	// The page itself: the vertical gradient in the playing album's colour,
-	// always dark (np_paint_backgrounds() draws it once per album).
-	lv_obj_set_style_bg_color(player_screen, sx_pal()->np_grad_bot, 0);
+	// The page and controls share the flat canvas used by the prototype.
+	lv_obj_set_style_bg_color(player_screen, sx_pal()->bg, 0);
 	lv_obj_set_style_bg_opa(player_screen, LV_OPA_COVER, 0);
 
-	// The panel: title, chain, bar, clocks and transport, on its own gradient.
+	// The panel: title, chain, bar, clocks and transport on the same canvas.
 	player_menu = lv_obj_create(player_screen);
 	lv_obj_set_size(player_menu, cfg->screen_width, menu_height + SX_NP_PANEL_R);
 	lv_obj_set_pos(player_menu, 0, (int)cfg->screen_height - menu_height);
-	lv_obj_set_style_bg_color(player_menu, sx_pal()->np_panel_bot, 0);
+	lv_obj_set_style_bg_color(player_menu, sx_pal()->bg, 0);
 	lv_obj_set_style_bg_opa(player_menu, LV_OPA_COVER, 0);
 	lv_obj_set_flex_flow(player_menu, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_style_border_width(player_menu, 0, 0);
 	lv_obj_set_style_shadow_width(player_menu, 0, 0);
 	lv_obj_set_style_radius(player_menu, SX_NP_PANEL_R, 0);
 	lv_obj_set_style_pad_hor(player_menu, NP_PANEL_PAD_H, 0);
-	sx_gradient_paint(player_menu, &np_panel_strip);
 	menu_style_for_layout();
 	lv_obj_set_scrollable(player_menu, false);
 	// Pulled down, the panel takes the player with it, as the artwork does.
@@ -6344,18 +6321,19 @@ void player_init(gui_config_t *cfg) {
 	// Track info: the text on the left, the star and the format on the right.
 	lv_obj_t *song_info = lv_obj_create(player_menu);
 	lv_obj_set_size(song_info, lv_pct(100), LV_SIZE_CONTENT);
+	lv_obj_set_style_min_height(song_info, 80, 0);
 	lv_obj_set_style_bg_opa(song_info, 0, 0);
 	lv_obj_set_style_border_width(song_info, 0, 0);
 	lv_obj_set_style_radius(song_info, 0, 0);
 	lv_obj_set_style_pad_all(song_info, 0, 0);
-	lv_obj_set_style_pad_column(song_info, 10, 0);
+	lv_obj_set_style_pad_column(song_info, 0, 0);
 	lv_obj_set_flex_flow(song_info, LV_FLEX_FLOW_ROW);
 	// Both columns from the top: the title is lined up with the star by hand
 	// (align_title_with_star()), and with the columns centred a third line
 	// under the artist (btline.h) would push the star down by half a line and
 	// the title with it, onto the artist. With the star's column the taller,
 	// as it is without that line, the two placements are the same.
-	lv_obj_set_flex_align(song_info, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_flex_align(song_info, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_set_scrollable(song_info, false);
 	// Every time the row is laid out (a new text size, the star shown or
 	// hidden, the row coming back from another arrangement) the title is lined
@@ -6370,6 +6348,7 @@ void player_init(gui_config_t *cfg) {
 	lv_obj_set_style_border_width(song_text, 0, 0);
 	lv_obj_set_style_pad_all(song_text, 0, 0);
 	lv_obj_set_flex_flow(song_text, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_style_pad_row(song_text, 4, 0);
 	lv_obj_set_scrollable(song_text, false);
 
 	// Long titles scroll rather than end in an ellipsis: on a 480 px panel a
@@ -6379,7 +6358,7 @@ void player_init(gui_config_t *cfg) {
 	lv_label_set_text(song_title_label, tr("player_no_track_loaded"));
 	lv_obj_set_width(song_title_label, lv_pct(100));
 	lv_obj_add_style(song_title_label, &theme_style_text, 0);
-	lv_obj_set_style_text_font(song_title_label, &font_ui_28_bold, 0);
+	lv_obj_set_style_text_font(song_title_label, &font_ui_32_bold, 0);
 	scrolltext_apply(song_title_label);
 
 	// The artist line -- see refresh_now_playing().
@@ -6387,7 +6366,7 @@ void player_init(gui_config_t *cfg) {
 	lv_label_set_text(song_artist_label, "");
 	lv_obj_set_width(song_artist_label, lv_pct(100));
 	lv_obj_add_style(song_artist_label, &theme_style_text_dim, 0);
-	lv_obj_set_style_text_font(song_artist_label, &font_ui_24, 0);
+	lv_obj_set_style_text_font(song_artist_label, &font_ui_22, 0);
 	scrolltext_apply(song_artist_label);
 	// A tap on it opens the artist, as "Show artist" in the menu does. The
 	// label follows the track info wherever the layouts move it (the pill,
@@ -6415,8 +6394,7 @@ void player_init(gui_config_t *cfg) {
 
 	lv_obj_t *fav_btn = lv_btn_create(song_side);
 	fav_btn_obj = fav_btn;
-	lv_obj_set_size(fav_btn, 48, 44);
-	touch_grow(fav_btn, 48, 44, 14); // a fingertip's worth (touch.h)
+	lv_obj_set_size(fav_btn, 88, 80);
 	lv_obj_set_style_bg_opa(fav_btn, LV_OPA_TRANSP, 0);
 	lv_obj_set_style_border_width(fav_btn, 0, 0);
 	lv_obj_set_style_shadow_width(fav_btn, 0, 0);
@@ -6534,14 +6512,14 @@ void player_init(gui_config_t *cfg) {
 	// Elapsed and total time, tucked under the two ends of the bar.
 	elapsed_label = lv_label_create(below_slider_group);
 	lv_label_set_text(elapsed_label, "0:00");
-	lv_obj_add_style(elapsed_label, &theme_style_text, 0);
-	lv_obj_set_style_text_font(elapsed_label, &font_ui_22, 0);
+	lv_obj_add_style(elapsed_label, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(elapsed_label, &font_ui_20, 0);
 	lv_obj_set_align(elapsed_label, LV_ALIGN_LEFT_MID);
 
 	remaining_label = lv_label_create(below_slider_group);
 	lv_label_set_text(remaining_label, "0:00");
-	lv_obj_add_style(remaining_label, &theme_style_text, 0);
-	lv_obj_set_style_text_font(remaining_label, &font_ui_22, 0);
+	lv_obj_add_style(remaining_label, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(remaining_label, &font_ui_20, 0);
 	lv_obj_set_align(remaining_label, LV_ALIGN_RIGHT_MID);
 
 	// Between them, in the middle the two clocks left empty. Dimmer than they
@@ -6551,7 +6529,7 @@ void player_init(gui_config_t *cfg) {
 	lv_obj_add_style(queue_position_label, &theme_style_text_dim, 0);
 	// 2.0: the same size as the clocks either side of it and only dimmer, as
 	// the handoff draws it.
-	lv_obj_set_style_text_font(queue_position_label, &font_ui_22, 0);
+	lv_obj_set_style_text_font(queue_position_label, &font_ui_20, 0);
 	lv_obj_set_align(queue_position_label, LV_ALIGN_CENTER);
 
 	// Transport: prev, play/pause, next -- with the repeat toggle parked on
@@ -6559,6 +6537,8 @@ void player_init(gui_config_t *cfg) {
 	lv_obj_t *player_controls_buttons = lv_obj_create(player_menu);
 	controls_row = player_controls_buttons;
 	lv_obj_set_size(player_controls_buttons, lv_pct(100), LV_SIZE_CONTENT);
+	lv_obj_set_ignore_layout(player_controls_buttons, true);
+	lv_obj_align(player_controls_buttons, LV_ALIGN_BOTTOM_MID, 0, 0);
 	lv_obj_set_style_bg_opa(player_controls_buttons, 0, 0);
 	lv_obj_set_style_border_width(player_controls_buttons, 0, 0);
 	lv_obj_set_style_radius(player_controls_buttons, 0, 0);
@@ -6648,7 +6628,7 @@ void player_init(gui_config_t *cfg) {
 	play_btn = lv_btn_create(player_controls_buttons);
 	lv_obj_set_size(play_btn, SX_NP_PLAY, SX_NP_PLAY);
 	lv_obj_set_style_radius(play_btn, LV_RADIUS_CIRCLE, 0);
-	lv_obj_set_style_bg_color(play_btn, lv_color_white(), 0); // repainted by set_over_cover
+	lv_obj_set_style_bg_color(play_btn, sx_pal()->accent, 0); // repainted by set_over_cover
 	lv_obj_set_style_bg_opa(play_btn, LV_OPA_COVER, 0);
 	lv_obj_set_style_shadow_width(play_btn, 0, 0);
 	lv_obj_add_event_cb(play_btn, play_btn_event_cb, LV_EVENT_CLICKED, NULL);
@@ -6686,7 +6666,7 @@ void player_init(gui_config_t *cfg) {
 	lv_obj_align(cover_panel, LV_ALIGN_TOP_MID, 0, 0);
 	// Until the picture (or its 240 px thumbnail) is up, the plaque in the
 	// album's tone, as every 2.0 cover is drawn first.
-	lv_obj_set_style_bg_color(cover_panel, sx_pal()->mini_cover_tone, 0);
+	lv_obj_set_style_bg_color(cover_panel, sx_pal()->bg, 0);
 	// A tap pauses, a swipe across skips; the pull down is the sheet's.
 	lv_obj_add_event_cb(cover_panel, cover_gesture_cb, LV_EVENT_PRESSED, NULL);
 	lv_obj_add_event_cb(cover_panel, cover_gesture_cb, LV_EVENT_PRESSING, NULL);
@@ -6734,7 +6714,10 @@ void player_init(gui_config_t *cfg) {
 	lv_obj_set_hidden(podcast_badge, true);
 
 	// Shown while there is no artwork for the current track.
-	cover_placeholder_icon = lv_image_create(cover_panel);
+	cover_art = sx_box(cover_panel);
+	lv_obj_set_style_bg_opa(cover_art, LV_OPA_COVER, 0);
+	lv_obj_set_style_clip_corner(cover_art, true, 0);
+	cover_placeholder_icon = lv_image_create(cover_art);
 	lv_image_set_src(cover_placeholder_icon, &icon_music_note);
 	lv_obj_add_style(cover_placeholder_icon, &theme_style_text_dim, 0);
 	lv_obj_set_style_image_recolor(cover_placeholder_icon, lv_color_white(), 0);
@@ -6801,7 +6784,7 @@ void player_init(gui_config_t *cfg) {
 
 	// The album's 240 px thumbnail stretched over the artwork's place, while
 	// the picture itself is being decoded (handoff, cover pipeline step 5).
-	cover_thumb_img = lv_image_create(cover_panel);
+	cover_thumb_img = lv_image_create(cover_art);
 	lv_obj_set_size(cover_thumb_img, cover_box_w, cover_box_h);
 	lv_obj_center(cover_thumb_img);
 	lv_image_set_inner_align(cover_thumb_img, LV_IMAGE_ALIGN_COVER);
@@ -6812,7 +6795,7 @@ void player_init(gui_config_t *cfg) {
 	lv_obj_set_clickable(cover_thumb_img, false);
 	lv_obj_set_hidden(cover_thumb_img, true);
 
-	cover_img = lv_image_create(cover_panel);
+	cover_img = lv_image_create(cover_art);
 	lv_obj_center(cover_img);
 	lv_obj_set_hidden(cover_img, true);
 
@@ -6934,6 +6917,7 @@ void player_init(gui_config_t *cfg) {
 
 	// Over the artwork, at the top right: what comes next, and the way to the
 	// queue.
+	cover_art_layout();
 	np_upnext_build();
 
 	// Last, so it is above the artwork: an invisible strip exactly where the

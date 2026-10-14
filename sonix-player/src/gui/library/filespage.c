@@ -11,21 +11,23 @@
 
 #include "lvgl/lvgl.h"
 
-#include "src/gui/shell/sx_mini.h"
-#include "src/gui/shell/confirm.h"
 #include "src/gui/fonts/fonts.h"
-#include "src/gui/shell/gui.h"
-#include "src/gui/shell/icons.h"
-#include "src/gui/shell/keyboard.h"
 #include "src/gui/library/textview.h"
 #include "src/gui/nowplaying/coverflow.h"
 #include "src/gui/nowplaying/player.h"
+#include "src/gui/shell/confirm.h"
+#include "src/gui/shell/gui.h"
+#include "src/gui/shell/icons.h"
+#include "src/gui/shell/keyboard.h"
 #include "src/gui/shell/popover.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
+#include "src/gui/shell/sx_mini.h"
+#include "src/gui/shell/sx_palette.h"
+#include "src/gui/shell/sx_styles.h"
+#include "src/gui/shell/sx_tokens.h"
 #include "src/gui/shell/theme.h"
 #include "src/gui/shell/toast.h"
-#include "src/gui/shell/sx_styles.h"
 #include "src/gui/shell/touch.h"
 #include "src/system/core/lang.h"
 #include "src/system/core/utils.h"
@@ -63,7 +65,21 @@ static bool gesture_not_tap(void) {
 #define ROWS_FIRST 14
 #define ROWS_MORE 14
 
-#define ROW_HEIGHT 76
+#define ROW_HEIGHT SX_ROW_H
+
+static void entry_art(lv_obj_t *parent, const lv_image_dsc_t *source, const char *name) {
+	lv_obj_t *plate = sx_box(parent);
+	lv_obj_set_size(plate, SX_ROW_THUMB, SX_ROW_THUMB);
+	lv_obj_set_style_radius(plate, SX_ROW_THUMB_R, 0);
+	lv_obj_set_style_bg_color(plate, sx_placeholder_name(name), 0);
+	lv_obj_set_style_bg_opa(plate, LV_OPA_COVER, 0);
+	lv_obj_t *glyph = lv_image_create(plate);
+	lv_image_set_src(glyph, source);
+	if (source->header.w)
+		lv_image_set_scale(glyph, 28 * LV_SCALE_NONE / source->header.w);
+	sx_set_recolor(glyph, lv_color_white());
+	lv_obj_center(glyph);
+}
 
 typedef struct {
 	char *name;	 // in the pool
@@ -767,19 +783,15 @@ static void pick_rebuild(void) {
 		}
 		lv_obj_add_event_cb(row, pick_row_cb, LV_EVENT_CLICKED, kept);
 
-		lv_obj_t *glyph = lv_image_create(row);
-		lv_image_set_src(glyph, &icon_folder);
-		lv_obj_add_style(glyph, &theme_style_icon, 0);
-		lv_obj_set_style_image_recolor(glyph, theme()->accent, 0);
-		lv_obj_set_style_image_recolor_opa(glyph, LV_OPA_COVER, 0);
+		entry_art(row, &icon_folder, names[i]);
 
 		lv_obj_t *label = lv_label_create(row);
 		lv_label_set_text(label, names[i]);
 		lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
 		lv_obj_set_flex_grow(label, 1);
-		lv_obj_set_height(label, 32);
+		lv_obj_set_height(label, lv_font_get_line_height(&font_ui_26_bold));
 		lv_obj_add_style(label, &theme_style_text, 0);
-		lv_obj_set_style_text_font(label, &font_ui_22, 0);
+		lv_obj_set_style_text_font(label, &font_ui_26_bold, 0);
 	}
 	free(names);
 }
@@ -1010,13 +1022,7 @@ static void build_row(int index) {
 	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-	lv_obj_t *glyph = lv_image_create(row);
-	lv_image_set_src(glyph, glyph_for(entry));
-	lv_obj_add_style(glyph, &theme_style_icon, 0);
-	// A folder in the accent, everything else in the quiet text colour: the one
-	// thing worth telling apart at a glance is what can be entered.
-	lv_obj_set_style_image_recolor(glyph, entry->dir ? theme()->accent : theme()->text_secondary, 0);
-	lv_obj_set_style_image_recolor_opa(glyph, LV_OPA_COVER, 0);
+	entry_art(row, glyph_for(entry), entry->name);
 
 	lv_obj_t *label = lv_label_create(row);
 	lv_label_set_text(label, entry->name);
@@ -1024,9 +1030,9 @@ static void build_row(int index) {
 	lv_obj_set_flex_grow(label, 1);
 	// One line, then dots. Without a height the label wraps instead, and a long
 	// name then grows past the fixed row it lives in.
-	lv_obj_set_height(label, 32);
+	lv_obj_set_height(label, lv_font_get_line_height(&font_ui_26_bold));
 	lv_obj_add_style(label, &theme_style_text, 0);
-	lv_obj_set_style_text_font(label, &font_ui_22, 0);
+	lv_obj_set_style_text_font(label, &font_ui_26_bold, 0);
 
 	// The size, asked of the card only for the rows that are really built.
 	if (!entry->dir) {
@@ -1235,15 +1241,11 @@ void filespage_init(gui_config_t *cfg) {
 	lv_obj_set_scrollable(name_layer, false);
 	lv_obj_set_hidden(name_layer, true);
 
-	name_heading = lv_label_create(name_layer);
-	lv_label_set_text(name_heading, tr("files_new_folder"));
-	lv_obj_add_style(name_heading, &theme_style_text, 0);
-	lv_obj_set_style_text_font(name_heading, &font_ui_24, 0);
-	lv_obj_align(name_heading, LV_ALIGN_TOP_LEFT, cfg->padding + 56 + 14, cfg->padding + cfg->top_bar_height + 10);
+	name_heading = settingsrow_title(name_layer, cfg, "files_new_folder");
 
 	lv_obj_t *cancel = lv_btn_create(name_layer);
-	lv_obj_set_size(cancel, 56, 56);
-	lv_obj_align(cancel, LV_ALIGN_TOP_RIGHT, -cfg->padding, cfg->padding + cfg->top_bar_height);
+	lv_obj_set_size(cancel, SX_HEADER_BTN, SX_HEADER_H);
+	lv_obj_align(cancel, LV_ALIGN_TOP_RIGHT, 0, SX_STATUSBAR_H);
 	lv_obj_set_style_bg_opa(cancel, LV_OPA_TRANSP, 0);
 	lv_obj_set_style_border_width(cancel, 0, 0);
 	lv_obj_set_style_shadow_width(cancel, 0, 0);
@@ -1255,19 +1257,7 @@ void filespage_init(gui_config_t *cfg) {
 	lv_obj_add_style(cancel_icon, &theme_style_icon, 0);
 	lv_obj_center(cancel_icon);
 
-	name_field = lv_textarea_create(name_layer);
-	lv_textarea_set_one_line(name_field, true);
-	lv_textarea_set_max_length(name_field, NAME_MAX);
-	lv_textarea_set_placeholder_text(name_field, tr("name"));
-	lv_obj_set_size(name_field, cfg->screen_width - 2 * cfg->padding, 62);
-	lv_obj_set_scrollbar_mode(name_field, LV_SCROLLBAR_MODE_OFF);
-	lv_obj_align(name_field, LV_ALIGN_TOP_LEFT, cfg->padding, cfg->padding + cfg->top_bar_height + 60);
-	lv_obj_add_style(name_field, &theme_style_card, 0);
-	lv_obj_set_style_radius(name_field, 12, 0);
-	lv_obj_set_style_border_width(name_field, 0, 0);
-	lv_obj_set_style_shadow_width(name_field, 0, 0);
-	lv_obj_set_style_pad_all(name_field, 14, 0);
-	lv_obj_set_style_text_font(name_field, &font_ui_24, 0);
+	name_field = settingsrow_name_field(name_layer, cfg, NAME_MAX);
 	keyboard_style_caret(name_field);
 
 	name_keyboard = keyboard_create(name_layer, cfg->screen_width, 316, name_field, NULL, "ok", name_accept_cb, NULL);

@@ -1,0 +1,79 @@
+# Graphite 2 native UI
+
+Implementation on `codex/graphite-ui3`, based on `sonix-r1` commit
+`ab468170f146670a7d8109676ed98a4a96ddbcf8`. Build evidence and remaining hardware acceptance are distinguished below.
+
+## Implemented
+
+- Shared Graphite dark/light colours, readable accent foregrounds, consistent spacing, tiles and settings cards. Explicitly saved accent/tint choices remain intact.
+- An Accent mini-player with track/artist information; square artwork and a compact, right-aligned Up Next control in the standard player. Audio-chain details open from the menu independently of the summary-line setting.
+- Left swipe toggles a track's favourite state; right swipe queues it next. Album append, queue removal, selection and reorder controls keep their separate behavior.
+- Stable identity-based artwork placeholders across library, search, folders, queue and playback; distinct artist and category treatments. Missing-art glyphs give way to the playing indicator.
+- Search hides filter controls while typing, retaining two normal-sized track rows above the keyboard at 480x720. Long sheet descriptions scroll above their actions. Two-line Undo toasts pause their timeout while touched.
+- Existing Waveform, Studio, lyrics and service features remain available. No production polling timers or rendering dependencies were added.
+
+## Verification
+
+Ubuntu 26.04.1 under WSL: host and MIPS builds completed. Final compilation has no warnings. `check-abi` reports no symbol beyond glibc 2.22.
+
+The opt-in native LVGL runner passed with R1 and R3 Pro II resource overlays at 480x800 and 480x720. It captures 32 states per device and asserts swipe dispatch, selection behavior, queue removal, retained preferences, Up Next bounds, search-row visibility, long-message action bounds and Undo after a prolonged press. Zvuk uses the repository's local mock account; fixtures contain silent FLAC files and generated cover art.
+
+```sh
+cd sonix-player
+make host UI_TEST=1 -j4
+sudo bash tests/run_graphite_ui.sh /tmp/sonix-ui-evidence
+```
+
+Besides build dependencies, the runner needs Python Pillow, `flac`, `metaflac`, and mount namespaces. It uses disposable configuration/media roots and an exclusive localhost mock port, 18766. The test runner is excluded from the device binary.
+
+## Local R1 image
+
+`D:/Projects/Mediateka/firmware/1.3.0-ui3-alpha1/r1.upt` is an alpha image for HiBy R1. Its unpacked player/launcher match the final build; kernel, chunk MD5 chains, image sizes, translations, sealed service keys and Linux script endings were checked. No plaintext service keys are included. Details and SHA-256 are beside the image in `manifest.json` and `SHA256SUMS`.
+
+Native screenshots and logs are in `D:/Projects/Mediateka/output/native-ui-final-acceptance/`.
+
+## Remaining acceptance
+
+The user installed alpha1 and then alpha2 on an R1. ADB inspection confirmed real visual mismatches in alpha1: MiSans typography, tile content alignment and missing counts, different menu icons, player geometry and the old album hero. Alpha2's running process maps both Segoe UI faces. Alpha3 corrects the listed geometry/components in the working build, with prototype comparisons and native tests. These are not a claim of complete hardware/state acceptance; see `UI3_COVERAGE.md`.
+
+Physical touch comfort, device rendering/audio performance, standby, Bluetooth/LDAC, storage failure handling and a live Zvuk account still require hardware testing. The R3 Pro II interface was tested in the simulator; no R3 firmware image was packaged.
+
+## Prototype typography correction
+
+The prototype uses Segoe UI. Browser inspection resolves the tile's CSS weight 500 to Segoe UI Semibold. Optional `ui-regular.ttf` and `ui-semibold.ttf` now lead the shared native font chains; existing MiSans and script-specific fallbacks remain available. The page heading and player title use 32px Semibold, and player artist lines use 22px Regular.
+
+The two Windows font files are private build inputs in `D:/Projects/Mediateka/local-assets/fonts/`, outside this source checkout. They must accompany the executable in `/usr/resource/sonix/fonts/`; rebuilding the executable alone does not install the faces. The local packaging helper copies them. They are included in alpha2 and alpha3.
+
+Run the native tests with `SONIX_UI_FONTS_DIR` pointing to this directory. They verify Cyrillic resolution from both prototype faces and CJK fallback, and exercise both 480x800 and 480x720. The final typography run passed for both sizes; evidence is in `D:/Projects/Mediateka/output/native-ui-segoe-final/`. Host and target builds have no warnings; the ABI check passed. Rendering on the physical player remains unverified for the new font build.
+
+## Alpha3 fidelity pass
+
+The corrected R1 image is `D:/Projects/Mediateka/firmware/1.3.0-ui3-alpha3/r1.upt`; its manifest and checksum identify the final binary. Tile dimensions/baselines/icon sizes are asserted, descriptions refresh on library update events, and the approved SVG forms are rasterized by the existing generator. Player/mini-player/album geometry and shared navigation/settings components were adjusted without changing playback, queue or service APIs.
+
+Extended evidence is in `output/native-ui-fidelity-final/` under the workspace: 98 native captures per panel, including 31 additional pages in both themes. Large-text findings from this run were repaired and the affected core, alternate-layout, sheet, search, compact-album and large-text scenarios repeated in `output/native-ui-alpha3-release/`. Complete hardware, live-service and custom-screen acceptance remains open in the coverage checklist.
+
+## Alpha4 hardware-informed pass
+
+Alpha3 was inspected on the real R1. Real album artwork had square corners and scrolled track text could overlap Back. These are corrected in alpha4, alongside service tile glyphs, carousel rows/placeholders/grip, file-manager rows, ebook placeholders/captions and shared game-setting choices.
+
+`output/native-ui-alpha4-custom-release/` passed on both panels with 22 captures each. The final common regression in `output/native-ui-alpha4-accepted/` passed on both panels with 43 captures each, including actual two-colour fixture artwork, scrolling-header pixel checks, carousel dismissal, EPUB rendering and first boot. The tests resolve canonical album identity and verify hidden overlays; earlier placeholder/overlay captures were not accepted as proof.
+
+The R1 image is `D:/Projects/Mediateka/firmware/1.3.0-ui3-alpha4/r1.upt`, SHA256 `1e72c771622c34e267af69acbde4a4f4ae1237d9e26831932e52547e15e67053`. It was unpacked and checked against the final target build. Subsequent hardware inspection confirmed rounded real artwork, an opaque scrolling header and carousel behavior. Live Zvuk remains outstanding; the user will sign in after alpha5 installation.
+
+## Alpha5 hardware-informed pass
+
+The connected R1 reported alpha4, build `141020262014`. Captures under `output/device-audit/alpha4-*.png` informed the control-centre and naming-form changes. Preferences and timeout were restored and read back after the audit; temporary ADB helpers were removed.
+
+The alpha5 common regression passed on both panels in `output/native-ui-alpha5-core/`. Final targeted forms and service runs are recorded separately in the release manifest. They include real simulated pointer input for caption hold and long-error scrolling, cancellation without creating data, return after sign-in, Retry and action bounds above the mini-player. Service responses are local fixtures. No new production polling timer was added.
+
+Build and image evidence is recorded beside `D:/Projects/Mediateka/firmware/1.3.0-ui3-alpha5/r1.upt`. Complete physical-device and live-account acceptance is still required; see `UI3_COVERAGE.md`.
+
+## Alpha6 integrated release
+
+The final R1 image includes the compact neutral status bar, control/volume surfaces in the mini-player colours, flat standard playback canvas, atmospheric Rekkod Mod boot artwork and the Zvuk profile-redirect sign-in correction. The interactive reference is included under `prototype/graphite2/`.
+
+Status checks passed at both panel sizes with all clock positions, 12-hour time, three-digit volume, large text and artwork/theme transitions. Surface checks passed in both themes and with cover tint. The service mock confirmed sign-in through both 307 and 308 profile redirects and rejection of an invalid token. The final common regression is recorded in `output/native-ui-alpha6-release-core/`; detailed outcomes accompany the local firmware manifest.
+
+Host and MIPS builds completed without new warnings; ABI remains within glibc 2.22. The final image was unpacked and checked against the target executable, launcher, R1 kernel, translations, private font inputs and sealed service keys. All three startup JPEGs match the source overlay, are RGB/non-progressive and 480x800. R3 Pro II source assets are 480x720; no R3 image is supplied.
+
+Image SHA-256: `d2aa54b1333a7f49e7c7485f080f6541ae4c9b18c0ced2033d1ab2702fce64d7`. This identifies the complete alpha6, replacing earlier undelivered alpha6 candidates. Installation, boot rendering and live Zvuk session persistence on alpha6 are still pending.

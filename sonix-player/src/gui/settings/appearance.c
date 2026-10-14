@@ -25,9 +25,11 @@ static lv_obj_t *btn_light;
 static lv_obj_t *btn_clock[4]; // left / centre / right / hidden
 // The coloured circles: the cover's own first (ACCENT_SLOT_COVER), then the
 // six presets, preset i in slot i + 1.
-#define ACCENT_SLOT_COVER 0
-#define ACCENT_SLOTS (THEME_ACCENT_COUNT + 1)
+#define ACCENT_SLOT_GRAPHITE 0
+#define ACCENT_SLOT_COVER 1
+#define ACCENT_SLOTS (THEME_ACCENT_COUNT + 2)
 static lv_obj_t *btn_accent[ACCENT_SLOTS];
+static lv_obj_t *graphite_name;
 static lv_obj_t *cover_mark[2]; // the half moon on the cover's circle: disc, then the bite out of it
 static lv_obj_t *tint_toggle;
 static lv_obj_t *battery_percent_toggle;
@@ -99,13 +101,15 @@ static void refresh_buttons(void) {
 	settingsrow_pill_active(btn_light, !dark);
 }
 
-static int slot_accent(int slot) { return slot == ACCENT_SLOT_COVER ? THEME_ACCENT_COVER : slot - 1; }
+static int slot_accent(int slot) { return slot == ACCENT_SLOT_GRAPHITE ? THEME_ACCENT_GRAPHITE : slot == ACCENT_SLOT_COVER ? THEME_ACCENT_COVER : slot - 2; }
 
 // The active circle wears a ring in the text colour; the rest sit flat. The
 // cover's circle is in the colour the cover gives now -- it changes with the
 // album -- and carries a half moon, the handoff's "from the cover" mark.
 static void refresh_accent_buttons(void) {
 	int active_accent = theme_get_accent();
+	if (graphite_name)
+		lv_obj_set_hidden(graphite_name, active_accent != THEME_ACCENT_GRAPHITE);
 	for (int i = 0; i < ACCENT_SLOTS; i++) {
 		if (!btn_accent[i]) {
 			continue;
@@ -202,10 +206,11 @@ void appearance_init(gui_config_t *cfg) {
 	// the card in one line (seven 52 px circles fit 410 px with room between).
 	lv_obj_t *accent_card = sx_card_create(container);
 	sx_card_title(accent_card, tr("appearance_accent_colour"));
+	graphite_name = sx_card_subtitle(accent_card, tr("appearance_graphite"), false);
 	lv_obj_t *accent_row = sx_card_swatches(accent_card);
-	lv_obj_set_flex_flow(accent_row, LV_FLEX_FLOW_ROW);
-	lv_obj_set_flex_align(accent_row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-	lv_obj_set_style_pad_column(accent_row, 0, 0);
+	lv_obj_set_flex_flow(accent_row, LV_FLEX_FLOW_ROW_WRAP);
+	lv_obj_set_flex_align(accent_row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);
+	lv_obj_set_style_pad_gap(accent_row, 16, 0);
 	lv_obj_set_style_pad_bottom(accent_row, 4, 0);
 	for (int i = 0; i < ACCENT_SLOTS; i++) {
 		btn_accent[i] = make_accent_circle(accent_row, i);

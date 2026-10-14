@@ -550,7 +550,7 @@ static void list_bind(lv_obj_t *row, int index) {
 		if ((list_kind == JOB_ALBUM || list_kind == JOB_SAVED_ALBUM) && r.u.track.track_number > 0) {
 			sx_row_set_number(row, r.u.track.track_number);
 		} else {
-			sx_row_set_thumb(row, NULL, svcui_tone(r.u.track.album_id[0] ? r.u.track.album_id : r.u.track.title));
+			sx_row_set_thumb(row, NULL, svcui_tone(r.u.track.album[0] ? r.u.track.album : r.u.track.title));
 		}
 		// Signed out (the token expired), the saved tracks still play but a
 		// star could only fail: none is offered.
@@ -565,7 +565,7 @@ static void list_bind(lv_obj_t *row, int index) {
 	}
 	case ROW_ALBUM:
 		sx_row_set_subtitle(row, detail, row_saved(&r) ? tr("svc_badge_saved") : NULL, NULL);
-		sx_row_set_thumb(row, NULL, svcui_tone(r.u.album.id[0] ? r.u.album.id : r.u.album.title));
+		sx_row_set_thumb(row, NULL, svcui_tone(r.u.album.title));
 		sx_row_set_trail(row, SX_ROW_TRAIL_CHEVRON);
 		sx_row_set_swipes(row, true, true);
 		break;
@@ -803,6 +803,12 @@ static void retry_list(void) {
 	}
 }
 
+static void error_sign_in(void) {
+	if (zvuk_logged_in())
+		retry_list();
+	else switch_screen(zvuk_screen);
+}
+
 static void fill_list(void) {
 	int count = view_count();
 	playing_update();
@@ -810,12 +816,12 @@ static void fill_list(void) {
 	lv_obj_set_hidden(list_message, true);
 	update_album_bar();
 	if (count == 0 && shown && shown->error[0] && shown->error_class != STREAM_ERR_NONE) {
-		// The token's end is not a "sign in again" button here: the way in
-		// is the card, and the panel says so in its sentence.
-		const char *text = shown->error_class == STREAM_ERR_SIGN_IN && zvuk_session_expired()
-							   ? tr("zvuk_token_expired")
-							   : shown->error;
-		streamerror_show(list_error, shown->error_class, text, retry_list, NULL);
+		lv_obj_set_hidden(album_bar, true);
+		lv_obj_set_hidden(artist_bar, true);
+		lv_obj_set_hidden(search_bar, true);
+		// Open the existing file-import instructions when the session expires.
+		const char *text = shown->error_class == STREAM_ERR_SIGN_IN && zvuk_session_expired() ? tr("zvuk_token_expired") : shown->error;
+		streamerror_show(list_error, shown->error_class, text, retry_list, error_sign_in);
 		return;
 	}
 	streamerror_hide(list_error);
@@ -1272,6 +1278,10 @@ static void open_saved(void) { open_list(tr("zvuk_saved_on_card"), JOB_SAVED, NU
 
 static void list_loaded_cb(lv_event_t *e) {
 	(void)e;
+	if (shown && shown->error_class == STREAM_ERR_SIGN_IN && streamerror_visible(list_error) && zvuk_logged_in()) {
+		retry_list();
+		return;
+	}
 	if (list && playing_update()) {
 		svclist_rebind(list);
 	}
@@ -1417,6 +1427,7 @@ static void build_search_page(gui_config_t *cfg) {
 // ---------------------------------------------------------------------------
 
 static lv_obj_t *home_in, *home_out;
+static lv_obj_t *liked_card, *home_search;
 static lv_obj_t *account_card, *saved_card, *saved_out_card, *save_status, *import_note;
 static lv_obj_t *quality_pills[ZVUK_QUALITY_COUNT], *quality_format;
 static lv_timer_t *save_timer;
@@ -1552,13 +1563,17 @@ static void paint_home(void) {
 	bool in = zvuk_logged_in();
 	lv_obj_set_hidden(home_in, !in);
 	lv_obj_set_hidden(home_out, in);
+	lv_obj_set_hidden(home_search, !in);
 	int saved = zvukdl_saved_count();
 	char line[64] = "";
-	if (saved > 0) {
-		lv_snprintf(line, sizeof(line), tr("zvuk_n_tracks"), saved);
-	}
+	lv_snprintf(line, sizeof(line), tr("zvuk_n_tracks"), saved);
 	sx_card_subtitle(saved_card, line, false);
 	sx_card_subtitle(saved_out_card, line, false);
+	int liked = zvuk_liked_count(ZVUK_ITEM_TRACK);
+	line[0] = '\0';
+	if (liked >= 0)
+		lv_snprintf(line, sizeof(line), tr("zvuk_n_tracks"), liked);
+	sx_card_subtitle(liked_card, line, false);
 	lv_obj_set_hidden(saved_out_card, saved == 0);
 	char name[ZVUK_NAME_MAX], plan[64];
 	zvuk_account(name, sizeof(name), plan, sizeof(plan), NULL);
@@ -1569,13 +1584,19 @@ static void paint_home(void) {
 	import_note_refresh();
 }
 
+static void home_collection_paint(void *user) {
+	(void)user;
+	paint_home();
+}
+static void home_collection_changed(void) { gui_post(home_collection_paint, NULL); }
+
 // The import thread's word, on the GUI thread: the home repaints (the
 // toast is streaming.c's, for every service).
 static void import_async(void *user) {
 	(void)user;
 	paint_home();
 	if (zvuk_logged_in()) {
-		zvuksync_likes_refresh(NULL);
+		zvuksync_likes_refresh(home_collection_changed);
 	}
 }
 
@@ -1599,6 +1620,8 @@ static void home_loaded_cb(lv_event_t *e) {
 		profile_asked = true; // the name and the plan, once a session
 		run(JOB_PROFILE, NULL, NULL, 0);
 	}
+	if (zvuk_logged_in())
+		zvuksync_likes_refresh(home_collection_changed);
 }
 
 static void check_again_cb(lv_event_t *e) {
@@ -1747,14 +1770,15 @@ void zvukpage_init(gui_config_t *cfg) {
 	zvuk_screen = lv_obj_create(NULL);
 	lv_obj_add_style(zvuk_screen, &theme_style_screen, 0);
 	settingsrow_title(zvuk_screen, cfg, "zvuk");
+	home_search = svcui_header_button(zvuk_screen, cfg, 0, &icon_search, open_search_cb, NULL);
 
 	home_in = svcui_column(zvuk_screen, cfg);
-	svcui_nav_card(home_in, tr("zvuk_liked"), NULL, open_cb, (void *)(intptr_t)JOB_LIKED);
-	svcui_nav_card(home_in, tr("zvuk_albums"), NULL, open_cb, (void *)(intptr_t)JOB_ALBUMS);
-	svcui_nav_card(home_in, tr("zvuk_artists"), NULL, open_cb, (void *)(intptr_t)JOB_ARTISTS);
-	svcui_nav_card(home_in, tr("zvuk_playlists"), NULL, open_cb, (void *)(intptr_t)JOB_PLAYLISTS);
-	svcui_nav_card(home_in, tr("zvuk_search"), NULL, open_search_cb, NULL);
-	saved_card = svcui_nav_card(home_in, tr("zvuk_saved_on_card"), NULL, open_cb, (void *)(intptr_t)JOB_SAVED);
+	lv_obj_t *navigation = sx_card_nav_group(home_in);
+	liked_card = svcui_nav_card(navigation, tr("zvuk_liked"), NULL, open_cb, (void *)(intptr_t)JOB_LIKED);
+	svcui_nav_card(navigation, tr("zvuk_albums"), NULL, open_cb, (void *)(intptr_t)JOB_ALBUMS);
+	svcui_nav_card(navigation, tr("zvuk_artists"), NULL, open_cb, (void *)(intptr_t)JOB_ARTISTS);
+	svcui_nav_card(navigation, tr("zvuk_playlists"), NULL, open_cb, (void *)(intptr_t)JOB_PLAYLISTS);
+	saved_card = svcui_nav_card(navigation, tr("zvuk_saved_on_card"), NULL, open_cb, (void *)(intptr_t)JOB_SAVED);
 	save_status = svcui_note(home_in, "");
 	lv_label_set_long_mode(save_status, LV_LABEL_LONG_DOT);
 	lv_obj_set_hidden(save_status, true);

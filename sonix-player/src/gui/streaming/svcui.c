@@ -97,12 +97,7 @@ lv_obj_t *svcui_note(lv_obj_t *parent, const char *text) {
 	return label;
 }
 
-lv_color_t svcui_tone(const char *name) {
-	sx_lc_t lc = SX_T_COVER_TONE;
-	// The token's own chroma, not the playing cover's scale: a row's plaque
-	// is about the row, and a grey album playing must not grey the list.
-	return sx_oklch(lc.L, lc.C, sx_palette_hue_of_name(name && name[0] ? name : "?"));
-}
+lv_color_t svcui_tone(const char *name) { return sx_placeholder_name(name && name[0] ? name : "?"); }
 
 // ---------------------------------------------------------------------------
 // Queueing, with "Undo"

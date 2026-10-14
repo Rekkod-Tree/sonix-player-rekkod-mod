@@ -200,7 +200,7 @@ static void recent_note(const char *query) {
 	for (int i = at; i > 0; i--) {
 		memcpy(recent[i], recent[i - 1], sizeof(recent[0]));
 	}
-	snprintf(recent[0], sizeof(recent[0]), "%s", query);
+	snprintf(recent[0], sizeof(recent[0]), "%.*s", (int)sizeof(recent[0]) - 1, query);
 	recent_save();
 }
 
@@ -210,12 +210,15 @@ static void recent_note(const char *query) {
 
 static bool group_shown(int cat) { return cat_count[cat] > 0 && (filter == FILTER_ALL || filter == cat); }
 
-static int rows_top(int cat) { return group_top[cat] + GROUP_H; }
+static int group_height(void) { return keyboard_is_visible(keyboard) ? 24 : GROUP_H; }
+static int rows_top(int cat) { return group_top[cat] + group_height(); }
 
 // Lays the groups out under the pills card and sizes the body to hold them.
 static void layout_groups(void) {
 	lv_obj_update_layout(pills_card);
-	groups_top = lv_obj_get_height(pills_card) + SX_CARD_GAP;
+	bool typing = keyboard_is_visible(keyboard);
+	lv_obj_set_hidden(pills_card, typing);
+	groups_top = typing ? 0 : lv_obj_get_height(pills_card) + SX_CARD_GAP;
 	int y = groups_top;
 	for (int c = 0; c < CAT_COUNT; c++) {
 		if (!group_shown(c)) {
@@ -228,9 +231,11 @@ static void layout_groups(void) {
 		snprintf(text, sizeof(text), cat_count[c] >= LIBRARY_SEARCH_MAX ? "%s \xC2\xB7 %d+" : "%s \xC2\xB7 %d",
 				 tr(CAT_HEAD[c]), cat_count[c]);
 		lv_label_set_text(heading[c], text);
-		lv_obj_set_y(heading[c], y + GROUP_H - lv_font_get_line_height(&font_ui_17) - 8);
+		int head_h = group_height();
+		int line_h = lv_font_get_line_height(&font_ui_17);
+		lv_obj_set_y(heading[c], y + (typing ? (head_h - line_h) / 2 : head_h - line_h - 8));
 		lv_obj_set_hidden(heading[c], false);
-		y += GROUP_H + cat_count[c] * pitch;
+		y += head_h + cat_count[c] * pitch;
 	}
 	lv_obj_set_height(body, y);
 }
@@ -726,6 +731,7 @@ static void layout_results(void) {
 	int still = height - (kb ? 0 : sx_frame_body_bottom());
 	lv_obj_set_height(recent_box, still);
 	lv_obj_set_height(nothing_box, still);
+	layout_groups();
 	lv_obj_update_layout(results); // the new height, before the window is worked out from it
 	window_update();
 }

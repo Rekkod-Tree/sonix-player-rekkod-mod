@@ -1,6 +1,5 @@
 #include "sx_styles.h"
 
-#include <math.h>
 #include <string.h>
 
 #include "src/gui/shell/sx_palette.h"
@@ -11,8 +10,11 @@ lv_style_t sx_style_press;
 lv_style_t sx_style_active;
 lv_style_t sx_style_text;
 lv_style_t sx_style_text2;
+lv_style_t sx_style_album_text;
+lv_style_t sx_style_album_icon;
 lv_style_t sx_style_text_accent;
 lv_style_t sx_style_accent;
+lv_style_t sx_style_accent_press;
 lv_style_t sx_style_icon;
 lv_style_t sx_style_icon2;
 lv_style_t sx_style_icon_accent;
@@ -47,8 +49,11 @@ void sx_styles_init(void) {
 	init_bg(&sx_style_active);
 	lv_style_init(&sx_style_text);
 	lv_style_init(&sx_style_text2);
+	lv_style_init(&sx_style_album_text);
+	init_recolour(&sx_style_album_icon);
 	lv_style_init(&sx_style_text_accent);
 	init_bg(&sx_style_accent);
+	init_bg(&sx_style_accent_press);
 	lv_style_set_image_recolor_opa(&sx_style_accent, LV_OPA_COVER);
 	init_recolour(&sx_style_icon);
 	init_recolour(&sx_style_icon2);
@@ -73,38 +78,6 @@ void sx_styles_init(void) {
 	lv_style_set_pad_gap(&sx_style_flat, 0);
 }
 
-// WCAG relative luminance of an sRGB colour.
-static float luminance(lv_color_t c) {
-	const uint8_t channel[3] = {c.red, c.green, c.blue};
-	const float weight[3] = {0.2126f, 0.7152f, 0.0722f};
-	float sum = 0.0f;
-	for (int i = 0; i < 3; i++) {
-		float v = channel[i] / 255.0f;
-		v = v <= 0.04045f ? v / 12.92f : powf((v + 0.055f) / 1.055f, 2.4f);
-		sum += weight[i] * v;
-	}
-	return sum;
-}
-
-// The accent as writing. On the light theme the yellow preset (and the green
-// and orange, a little less) is a fill colour that text on white cannot be
-// read in -- the playing row's title, "24/96" -- so as text it is taken
-// towards the theme's ink until it stands 3:1 against a card, the large-text
-// minimum. Fills, pills and glyphs keep the accent itself; the dark theme and
-// the cover's own accent (made for it) are untouched. Runs on a palette
-// change only.
-static lv_color_t text_accent(const sx_palette_t *p) {
-	lv_color_t c = p->accent;
-	if (p->dark) {
-		return c;
-	}
-	float card = luminance(p->surface);
-	for (int pct = 90; pct >= 40 && (card + 0.05f) / (luminance(c) + 0.05f) < 3.0f; pct -= 10) {
-		c = sx_mix(p->accent, p->text, (uint8_t)pct);
-	}
-	return c;
-}
-
 void sx_styles_apply(void) {
 	const sx_palette_t *p = sx_pal();
 
@@ -115,13 +88,17 @@ void sx_styles_apply(void) {
 	lv_style_set_bg_color(&sx_style_active, p->active);
 	lv_style_set_text_color(&sx_style_text, p->text);
 	lv_style_set_text_color(&sx_style_text2, p->text2);
-	lv_style_set_text_color(&sx_style_text_accent, text_accent(p));
+	lv_style_set_text_color(&sx_style_album_text, p->tinted ? lv_color_white() : p->text);
+	lv_style_set_image_recolor(&sx_style_album_icon, p->tinted ? lv_color_white() : p->text);
+	lv_style_set_text_color(&sx_style_text_accent, p->accent_text);
 	lv_style_set_bg_color(&sx_style_accent, p->accent);
+	lv_style_set_bg_color(&sx_style_accent_press, sx_mix(lv_color_eq(p->on_accent, lv_color_white()) ? lv_color_black() : lv_color_white(), p->accent, 12));
+	lv_style_set_text_color(&sx_style_accent_press, p->on_accent);
 	lv_style_set_text_color(&sx_style_accent, p->on_accent);
 	lv_style_set_image_recolor(&sx_style_accent, p->on_accent);
 	lv_style_set_image_recolor(&sx_style_icon, p->text);
 	lv_style_set_image_recolor(&sx_style_icon2, p->text2);
-	lv_style_set_image_recolor(&sx_style_icon_accent, p->accent);
+	lv_style_set_image_recolor(&sx_style_icon_accent, p->accent_text);
 	lv_style_set_image_recolor(&sx_style_icon_on_accent, p->on_accent);
 	lv_style_set_bg_color(&sx_style_hairline, p->hairline);
 	lv_style_set_bg_opa(&sx_style_hairline, p->hairline_opa);
@@ -130,6 +107,7 @@ void sx_styles_apply(void) {
 	lv_style_set_image_recolor(&sx_style_swipe_end, p->text);
 	lv_style_set_bg_color(&sx_style_cover_tone, p->cover_tone);
 	lv_style_set_bg_color(&sx_style_mini, p->mini_bg);
+	lv_style_set_text_color(&sx_style_mini, p->mini_ink);
 	lv_style_set_bg_color(&sx_style_mini_tone, p->mini_cover_tone);
 	lv_style_set_bg_color(&sx_style_np_accent, p->np_accent);
 	lv_style_set_image_recolor(&sx_style_star_on, p->star_on);

@@ -8,16 +8,12 @@
 #include "lvgl/lvgl.h"
 
 // ---------------------------------------------------------------------------
-// Sonix UI 2.0: the mini player
+// Sonix UI 3.1: the mini player
 //
-// One object on lv_layer_top(), shared by every page: GUI_SX_MINI_H (72) tall in
-// the SX_MINI_SLOT_H (88) slot at the bottom of the screen, always dark in the
-// playing album's colour (sx_pal()->mini_bg), with a 1 px light line along its
-// top. Left to right: the cover (a plaque in the album's tone until a
-// thumbnail is handed over), the title and the signal chain under it
-// ("● LDAC 990 · 44.1 kHz", amber when the codec is not the one asked for --
-// sx_chain.h), and a white play/pause disc; a 3 px progress line along the
-// bottom edge.
+// One shared 112 px Accent card in a 128 px footer slot. Artwork, track title,
+// artist and a 64 px play disc inside an 88 px target. Foreground colours follow
+// the accent's contrast pair. A 3 px progress line sits along the bottom.
+// The detailed audio chain remains in the player's menu.
 //
 // Gestures (handoff matrix): a tap opens the player; a swipe left of
 // SX_MINI_SWIPE_PX plays the next track, right the previous one; a swipe up
@@ -31,7 +27,7 @@
 // The player feeds it (player.c): the track on a change, the state on every
 // change of it, the position on its poll. Nothing here has a timer: hidden or
 // still, it costs nothing; playing, a redraw of the 3 px line each time it
-// grows by a pixel, and of the chain line when its text changes.
+// grows by a pixel.
 //
 // Size: 14 objects, about 3 KB with their styles and texts (see the report
 // in the commit introducing it).
@@ -46,17 +42,13 @@ void sx_mini_init(gui_config_t *cfg);
 // `track_path` is the file (NULL for a stream), `live` a stream without a
 // position. NULL title with no path and not live: nothing is loaded, the mini
 // player goes (idle).
-void sx_mini_set_track(const char *title, const char *track_path, bool live);
+void sx_mini_set_track(const char *title, const char *track_path, const char *artist, bool live);
 
 void sx_mini_set_playing(bool playing);
 
 // Seconds in and the length; `total` 0 for a live stream (the line stays
 // full) or a length not known yet (empty).
 void sx_mini_set_progress(double position, double total);
-
-// Reads the signal chain again (sx_chain_short) and rewrites the line if it
-// changed. The player calls it with the track and now and then on its poll.
-void sx_mini_refresh_chain(void);
 
 // The cover's thumbnail, SX_MINI_COVER square (or larger: it is clipped to the
 // rounded plaque, centred). NULL goes back to the tone plaque. The image is

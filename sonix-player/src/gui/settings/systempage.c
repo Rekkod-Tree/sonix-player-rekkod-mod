@@ -1,4 +1,5 @@
 #include "systempage.h"
+#include "src/gui/shell/sx_card.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -307,6 +308,7 @@ void systempage_init(gui_config_t *cfg) {
 	build_sysinfo_page(cfg);
 
 	lv_obj_t *container = settingsrow_page(systempage_screen, cfg, "system");
+	container = sx_card_nav_group(container);
 
 	settingsrow_add(container, "system_about", NULL, switch_screen_cb, sysinfo_screen);
 	// Actions, not pages: settingsrow_action leaves off the chevron.

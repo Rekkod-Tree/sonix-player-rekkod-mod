@@ -24,7 +24,7 @@
 // A sentence longer than the line wraps, up to this many lines, and stays up
 // a little longer, as the old toasts did: this much per character past
 // QUICK_CHARS, up to MAX_MS.
-#define MAX_LINES 3
+#define MAX_LINES 2
 #define QUICK_CHARS 60
 #define MS_PER_CHAR 35
 #define MAX_MS 6000
@@ -48,12 +48,45 @@ static int bar_w;
 
 static lv_point_t press_at;
 static bool press_tracking;
+static bool held;
+static uint32_t deadline_ms;
+static uint32_t remaining_ms;
 
 bool sx_toast_showing(void) { return toast && !lv_obj_is_hidden(toast); }
 
 bool sx_toast_busy_showing(void) { return busy && sx_toast_showing(); }
 
 static void bar_exec_cb(void *obj, int32_t v) { lv_obj_set_width((lv_obj_t *)obj, v); }
+
+static void hold_cb(lv_event_t *e) {
+	if (busy || !sx_toast_showing())
+		return;
+	lv_event_code_t code = lv_event_get_code(e);
+	if (code == LV_EVENT_PRESSED || code == LV_EVENT_FOCUSED) {
+		if (held)
+			return;
+		held = true;
+		int32_t left = (int32_t)(deadline_ms - lv_tick_get());
+		remaining_ms = left > 0 ? (uint32_t)left : 1;
+		lv_timer_pause(end_timer);
+		lv_anim_delete(bar_fill, bar_exec_cb);
+	} else if (held && (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST || code == LV_EVENT_DEFOCUSED)) {
+		held = false;
+		deadline_ms = lv_tick_get() + remaining_ms;
+		lv_timer_set_period(end_timer, remaining_ms);
+		lv_timer_reset(end_timer);
+		lv_timer_resume(end_timer);
+		if (undo_cb) {
+			lv_anim_t a;
+			lv_anim_init(&a);
+			lv_anim_set_var(&a, bar_fill);
+			lv_anim_set_exec_cb(&a, bar_exec_cb);
+			lv_anim_set_values(&a, lv_obj_get_width(bar_fill), 0);
+			lv_anim_set_duration(&a, remaining_ms);
+			lv_anim_start(&a);
+		}
+	}
+}
 
 void sx_toast_dismiss(void) {
 	if (!toast) {
@@ -157,6 +190,7 @@ void sx_toast_init(void) {
 	lv_obj_set_flex_align(toast, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_set_clickable(toast, true);
 	lv_obj_set_event_bubble(toast, false);
+	lv_obj_add_event_cb(toast, hold_cb, LV_EVENT_ALL, NULL);
 	lv_obj_add_event_cb(toast, toast_event_cb, LV_EVENT_PRESSED, NULL);
 	lv_obj_add_event_cb(toast, toast_event_cb, LV_EVENT_RELEASED, NULL);
 	lv_obj_add_event_cb(toast, toast_event_cb, LV_EVENT_PRESS_LOST, NULL);
@@ -181,6 +215,7 @@ void sx_toast_init(void) {
 	lv_obj_set_style_bg_opa(undo_btn, LV_OPA_COVER, LV_STATE_PRESSED);
 	lv_obj_set_scrollable(undo_btn, false);
 	lv_obj_set_ext_click_area(undo_btn, 8);
+	lv_obj_add_event_cb(undo_btn, hold_cb, LV_EVENT_ALL, NULL);
 	lv_obj_add_event_cb(undo_btn, undo_clicked_cb, LV_EVENT_CLICKED, NULL);
 	undo_label = lv_label_create(undo_btn);
 	lv_obj_set_style_text_font(undo_label, &font_ui_22_bold, 0);
@@ -277,7 +312,7 @@ static void show(const lv_image_dsc_t *glyph, lv_color_t colour, const char *tex
 	// longer sentence wraps rather than losing its end, as the old centred
 	// card let it.
 	lv_label_set_long_mode(label, undo ? LV_LABEL_LONG_DOT : LV_LABEL_LONG_WRAP);
-	lv_obj_set_style_max_height(label, (undo ? 1 : MAX_LINES) * lv_font_get_line_height(&font_ui_22), 0);
+	lv_obj_set_style_max_height(label, MAX_LINES * lv_font_get_line_height(&font_ui_22), 0);
 	lv_label_set_text(label, shown);
 
 	lv_obj_set_hidden(undo_btn, undo == NULL);
@@ -286,6 +321,9 @@ static void show(const lv_image_dsc_t *glyph, lv_color_t colour, const char *tex
 	}
 
 	uint32_t ms = undo ? SX_TOAST_MS : shown_for(shown);
+	held = false;
+	remaining_ms = ms;
+	deadline_ms = lv_tick_get() + ms;
 	lv_obj_set_hidden(bar_track, undo == NULL);
 	if (undo) {
 		lv_obj_set_width(bar_fill, bar_w);

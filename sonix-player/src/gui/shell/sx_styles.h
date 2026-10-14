@@ -21,8 +21,11 @@ extern lv_style_t sx_style_press;	   // bg: under a finger (add with LV_STATE_PR
 extern lv_style_t sx_style_active;	   // bg: 16 % accent in surface, "on now"
 extern lv_style_t sx_style_text;	   // text: primary
 extern lv_style_t sx_style_text2;	   // text: secondary
+extern lv_style_t sx_style_album_text; // theme text, or white on the optional album tint
+extern lv_style_t sx_style_album_icon;
 extern lv_style_t sx_style_text_accent; // text: the accent
 extern lv_style_t sx_style_accent;	   // bg accent, text and glyphs in on_accent
+extern lv_style_t sx_style_accent_press;
 extern lv_style_t sx_style_icon;	   // image recolour: primary text
 extern lv_style_t sx_style_icon2;	   // image recolour: secondary text
 extern lv_style_t sx_style_icon_accent; // image recolour: the accent

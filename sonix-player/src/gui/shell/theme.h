@@ -16,6 +16,7 @@ typedef struct {
 	lv_color_t text_primary;
 	lv_color_t text_secondary;
 	lv_color_t accent;		   // the colour of active things: the cover's, or a preset
+	lv_color_t accent_text;	   // readable foreground, distinct from the action fill
 	lv_color_t on_accent;	   // text and glyphs on an accent fill (white, except on a pale accent)
 	bool dark;
 } theme_palette_t;
@@ -71,14 +72,11 @@ bool theme_is_dark(void);
 // Switches between the two presets and repaints the UI.
 void theme_toggle(void);
 
-// The accent colour (Appearance > Accent colour): THEME_ACCENT_COVER, the
-// cover's own -- the default since 2.0 for whoever never picked one -- or one
-// of the presets: 0 blue (the default before 2.0), 1 orange, 2 yellow,
-// 3 green, 4 purple, 5 pink. Applies to both dark and light palettes, persists
-// in the config. theme_accent_preset(THEME_ACCENT_COVER) is the cover accent
-// in force now, which moves with the track.
+// Graphite (-2) is the default when the setting is absent. Cover (-1) and the
+// six saved preset indices (0..5) keep their meanings. All choices persist.
 #define THEME_ACCENT_COUNT 6
 #define THEME_ACCENT_COVER (-1)
+#define THEME_ACCENT_GRAPHITE (-2)
 lv_color_t theme_accent_preset(int index);
 int theme_get_accent(void);
 void theme_set_accent(int index);
@@ -89,9 +87,8 @@ void theme_set_dark(bool dark);
 // "Tint from cover" (Appearance; called Dynamic tint before 2.0, same config
 // key): the neutral colours -- backgrounds, cards, the status bar -- take the
 // hue of the cover playing (or of the album page shown), at the lightness the
-// 2.0 tokens give each of them; see sx_palette.h. Off, they are Adwaita's
-// greys. On by default since 2.0 for whoever never switched it; persists in
-// the config.
+// cover tokens give each of them. Off by default for Graphite; a saved
+// preference is preserved.
 //
 // The hue itself moves without any call here: sx_palette_track_changed() and
 // sx_palette_push_hue() recolour the interface in place, running the refresh

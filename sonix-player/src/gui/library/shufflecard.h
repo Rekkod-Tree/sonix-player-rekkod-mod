@@ -26,5 +26,7 @@
 // Builds the card on `screen` (the home page, the Music page) and hands it to
 // the frame.
 void shufflecard_attach(lv_obj_t *screen, gui_config_t *cfg);
+void shufflecard_tracks_description(char *text, size_t size);
+void shufflecard_albums_description(char *text, size_t size);
 
 #endif /* SHUFFLECARD_H */

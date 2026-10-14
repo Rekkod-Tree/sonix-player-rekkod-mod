@@ -242,6 +242,18 @@ HOST_OBJS = $(APP_SRCS:src/%.c=build_host/%.o) $(APP_CXX_SRCS:src/%.cpp=build_ho
 TARGET_OBJS = $(APP_SRCS:src/%.c=build_target/%.o) $(APP_CXX_SRCS:src/%.cpp=build_target/%.opp) \
 			  $(LVGL_SRCS:$(LVGL_DIR)/%.c=build_target/lvgl/%.o)
 
+# Opt-in native UI regression runner; never linked into the device binary.
+ifeq ($(UI_TEST),1)
+HOST_BIN = sonix_player_host_ui_test
+HOST_OBJS := $(filter-out build_host/main.o,$(HOST_OBJS)) build_host/tests/main.o build_host/tests/graphite_ui_test.o
+build_host/tests/main.o: src/main.c
+	@mkdir -p $(dir $@)
+	$(CC) $(HOST_CFLAGS) -DSONIX_UI_TEST -c $< -o $@
+build_host/tests/graphite_ui_test.o: tests/graphite_ui_test.c
+	@mkdir -p $(dir $@)
+	$(CC) $(HOST_CFLAGS) -c $< -o $@
+endif
+
 .PHONY: all host target clean compile_commands.json
 
 all: host compile_commands.json

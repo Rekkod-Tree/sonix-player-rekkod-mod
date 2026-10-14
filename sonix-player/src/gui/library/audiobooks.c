@@ -346,7 +346,7 @@ static void row_show_plaque_as(row_t *row, const char *name, bool with_letter) {
 			letter[i] = name[i];
 		}
 	}
-	sx_row_set_letter(row->obj, letter, sx_tone(SX_T_COVER_TONE, sx_palette_hue_of_name(name ? name : "")), false);
+	sx_row_set_letter(row->obj, letter, sx_placeholder_name(name), false);
 }
 
 static void row_show_plaque(row_t *row, const char *name) { row_show_plaque_as(row, name, true); }
@@ -470,7 +470,7 @@ static void thumbs_update(booklist_t *bl) {
 			row->thumb = image;
 			row->has_thumb = true;
 			row->thumb_settled = true;
-			sx_row_set_thumb(row->obj, &row->thumb.dsc, sx_tone(SX_T_COVER_TONE, sx_palette_hue_of_name(w->name)));
+			sx_row_set_thumb(row->obj, &row->thumb.dsc, sx_placeholder_name(w->name));
 		} else if (finished) {
 			row->thumb_settled = true; // no jacket in this one; the plaque stays
 		} else {
@@ -931,7 +931,7 @@ static void name_row_bind(name_row_t *row, int index) {
 	for (int i = 0; i < n && name[i]; i++) {
 		letter[i] = name[i];
 	}
-	sx_row_set_letter(row->obj, letter, sx_tone(SX_T_COVER_TONE, sx_palette_hue_of_name(name)), names_kind == LIST_AUTHORS);
+	sx_row_set_letter(row->obj, letter, sx_placeholder_name(name), names_kind == LIST_AUTHORS);
 }
 
 static void names_window_update(void) {
@@ -1277,7 +1277,7 @@ static void build_empty_panel(gui_config_t *cfg) {
 	lv_obj_set_size(empty_button, LV_SIZE_CONTENT, SX_SHEET_BTN_H);
 	lv_obj_set_style_min_width(empty_button, 272, 0);
 	lv_obj_set_style_pad_hor(empty_button, 36, 0);
-	lv_obj_set_style_radius(empty_button, LV_RADIUS_CIRCLE, 0);
+	lv_obj_set_style_radius(empty_button, SX_CARD_R, 0);
 	lv_obj_add_style(empty_button, &sx_style_accent, 0);
 	lv_obj_add_style(empty_button, &sx_style_press, LV_STATE_PRESSED);
 	lv_obj_add_event_cb(empty_button, empty_scan_cb, LV_EVENT_CLICKED, NULL);

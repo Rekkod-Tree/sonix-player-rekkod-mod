@@ -457,6 +457,9 @@ static void update_note_cb(void *user) {
 		}
 		break;
 	}
+	if (note->event == LIBRARY_UPDATE_FINISHED || note->event == LIBRARY_UPDATE_SCANNED || note->event == LIBRARY_UPDATE_REORGANIZED || note->event == LIBRARY_UPDATE_STOPPED) {
+		lv_obj_send_event(lv_screen_active(), LV_EVENT_REFRESH, NULL);
+	}
 	free(note);
 }
 

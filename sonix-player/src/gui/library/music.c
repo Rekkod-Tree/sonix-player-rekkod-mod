@@ -58,6 +58,13 @@ static void open_recently_played(void) {
 static void open_browse(void) { switch_screen(browser_screen); }
 static void open_playlists(void) { playlistpage_open(); }
 
+static void playlists_description(char *text, size_t size) {
+	char **names = NULL;
+	int count = library_playlist_names(&names);
+	library_playlist_names_free(names, count);
+	snprintf(text, size, "%s: %d", tr("playlists"), count);
+}
+
 static lv_obj_t *tile_grid;
 static gui_config_t *grid_cfg;
 
@@ -76,25 +83,20 @@ static const struct {
 	const char *id; // its name in the config, never translated
 	grid_entry_t entry;
 } TILES[MUSIC_TILE_COUNT] = {
-	[MUSIC_TILE_ALL] = {"all", {"music_all_tracks", &icon_menu_all, NULL, open_all_tracks}},
-	[MUSIC_TILE_ALBUMS] = {"albums", {"albums", &icon_menu_album, NULL, open_albums}},
+	[MUSIC_TILE_ALL] = {"all", {"music_all_tracks", &icon_menu_all, NULL, open_all_tracks, shufflecard_tracks_description}},
+	[MUSIC_TILE_ALBUMS] = {"albums", {"albums", &icon_menu_album, NULL, open_albums, shufflecard_albums_description}},
 	[MUSIC_TILE_ARTISTS] = {"artists", {"artists", &icon_menu_artist, NULL, open_artists}},
-	[MUSIC_TILE_ALBUM_ARTISTS] = {"album_artists",
-								  {"music_album_artists", &icon_menu_album_artist, NULL, open_album_artists}},
+	[MUSIC_TILE_ALBUM_ARTISTS] = {"album_artists", {"music_album_artists", &icon_menu_album_artist, NULL, open_album_artists}},
 	[MUSIC_TILE_GENRES] = {"genres", {"music_genres", &icon_menu_genre, NULL, open_genres}},
 	[MUSIC_TILE_YEARS] = {"years", {"music_year", &icon_menu_year, NULL, open_years}},
 	[MUSIC_TILE_FAVOURITES] = {"favourites", {"favourites", &icon_menu_favourites, NULL, open_favourites}},
-	[MUSIC_TILE_MOST_PLAYED] = {"most_played",
-								{"music_most_played", &icon_menu_most_played, NULL, open_most_played}},
+	[MUSIC_TILE_MOST_PLAYED] = {"most_played", {"music_most_played", &icon_menu_most_played, NULL, open_most_played}},
 	// Pictures borrowed from elsewhere rather than drawn for these two: the
 	// transfer arrows for what has just come onto the card, the resume glyph
 	// for what was being listened to.
-	[MUSIC_TILE_RECENTLY_ADDED] = {"recent_added",
-								   {"music_recently_added", &icon_menu_wifi_transfer, NULL, open_recently_added}},
-	[MUSIC_TILE_RECENTLY_PLAYED] = {"recent_played",
-									{"music_recently_played", &icon_menu_audiobook_continue, NULL,
-									 open_recently_played}},
-	[MUSIC_TILE_PLAYLISTS] = {"playlists", {"playlists", &icon_menu_playlist, NULL, open_playlists}},
+	[MUSIC_TILE_RECENTLY_ADDED] = {"recent_added", {"music_recently_added", &icon_menu_wifi_transfer, NULL, open_recently_added}},
+	[MUSIC_TILE_RECENTLY_PLAYED] = {"recent_played", {"music_recently_played", &icon_menu_audiobook_continue, NULL, open_recently_played}},
+	[MUSIC_TILE_PLAYLISTS] = {"playlists", {"playlists", &icon_menu_playlist, NULL, open_playlists, playlists_description}},
 	[MUSIC_TILE_BROWSE] = {"browse", {"music_browse", &icon_menu_explorer, NULL, open_browse}},
 };
 

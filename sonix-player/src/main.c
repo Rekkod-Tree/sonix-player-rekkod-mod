@@ -2317,7 +2317,7 @@ int main(int argc, char **argv) {
 		.screen_width = (uint32_t)panel_w,
 		.screen_height = (uint32_t)panel_h,
 		.top_bar_height = 44,
-		.padding = 15,
+		.padding = SX_BODY_PAD_L,
 #ifdef HOST_BUILD
 		.sd_root_path = music_path,
 #else
@@ -2541,6 +2541,10 @@ int main(int argc, char **argv) {
 
 #ifdef HOST_BUILD
 	perfstat_ignore_timer(lv_timer_create(host_shot_poll_cb, 200, NULL)); // see host_shot_poll_cb; not the device's
+#ifdef SONIX_UI_TEST
+	extern void graphite_ui_test_init(void);
+	graphite_ui_test_init();
+#endif
 #endif
 
 	// The media player bluez shows to the headphones. After gui_init, because

@@ -1,5 +1,6 @@
 #include "musicsettings.h"
 #include "musictiles.h"
+#include "src/gui/shell/sx_card.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -2034,6 +2035,7 @@ static void musicsettings_loaded_cb(lv_event_t *e) {
 
 void musicsettings_init(gui_config_t *cfg) {
 	lv_obj_t *container = settingsrow_page(musicsettings_screen, cfg, "music");
+	container = sx_card_nav_group(container);
 
 	// The pages of behaviour first: how the index is built, what playback does
 	// around a track, how the library's lists and the now-playing page look,

@@ -1,4 +1,6 @@
 #include "sx_palette.h"
+#include "src/system/image/albumtone.h"
+#include "theme.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -22,13 +24,15 @@ static sx_palette_t pal;
 
 // The Appearance choices, as theme.c last handed them over.
 static bool cfg_dark = true;
-static int cfg_accent = -1; // -1: from the cover
+static int cfg_accent = THEME_ACCENT_GRAPHITE;
 static lv_color_t cfg_preset;
-static bool cfg_tint = true;
+static bool cfg_tint;
 
 // The playing track's tone, and an album page's while it is pushed.
 static float play_hue = DEFAULT_HUE;
 static float play_chroma = REFERENCE_CHROMA;
+static lv_color_t play_placeholder;
+static bool play_placeholder_known;
 static bool pushed;
 static float pushed_hue;
 static float pushed_chroma;
@@ -122,6 +126,53 @@ static float scale_for(float chroma) {
 	return s > 1.0f ? 1.0f : s;
 }
 
+static float luminance(lv_color_t c) {
+	const uint8_t channel[3] = {c.red, c.green, c.blue};
+	const float weight[3] = {0.2126f, 0.7152f, 0.0722f};
+	float sum = 0.0f;
+	for (int i = 0; i < 3; i++) {
+		float v = channel[i] / 255.0f;
+		v = v <= 0.04045f ? v / 12.92f : powf((v + 0.055f) / 1.055f, 2.4f);
+		sum += weight[i] * v;
+	}
+	return sum;
+}
+
+static float contrast(lv_color_t a, lv_color_t b) {
+	float x = luminance(a), y = luminance(b);
+	return (fmaxf(x, y) + 0.05f) / (fminf(x, y) + 0.05f);
+}
+
+static lv_color_t accent_foreground(lv_color_t accent) {
+	lv_color_t c = accent;
+	for (int pct = 90; pct >= 0 && contrast(c, pal.surface) < 4.5f; pct -= 10) {
+		c = sx_mix(accent, pal.text, (uint8_t)pct);
+	}
+	return c;
+}
+
+lv_color_t sx_placeholder_tone(float hue) {
+	static const uint32_t colours[] = {
+		0x984F47, 0x866329, 0x5A7139, 0x36715D, 0x3B6483, 0x4E5F8A, 0x6C5286, 0x884E71,
+	};
+	int index = ((int)hue % 360 + 360) % 360 / 45;
+	return sx_hex(colours[index]);
+}
+
+lv_color_t sx_placeholder_name(const char *name) { return sx_placeholder_tone(sx_palette_hue_of_name(name)); }
+
+lv_color_t sx_placeholder_file(const char *path, const char *album) {
+	if (album && album[0])
+		return sx_placeholder_name(album);
+	char folder[512];
+	snprintf(folder, sizeof(folder), "%s", path ? path : "");
+	char *slash = strrchr(folder, '/');
+	if (slash)
+		*slash = '\0';
+	const char *name = strrchr(folder, '/');
+	return sx_placeholder_name(name ? name + 1 : folder);
+}
+
 static void recompute(void) {
 	float hue = pushed ? pushed_hue : play_hue;
 	float page_scale = scale_for(pushed ? pushed_chroma : play_chroma);
@@ -129,7 +180,7 @@ static void recompute(void) {
 
 	pal.dark = cfg_dark;
 	pal.tinted = cfg_tint;
-	pal.accent_from_cover = cfg_accent < 0;
+	pal.accent_from_cover = cfg_accent == THEME_ACCENT_COVER;
 	pal.hue = hue;
 	pal.play_hue = play_hue;
 
@@ -167,18 +218,19 @@ static void recompute(void) {
 
 	// The accent comes from the cover whether or not the neutrals do: the
 	// tint is about the backgrounds, the accent choice about the highlights.
-	if (cfg_accent < 0) {
+	if (pal.accent_from_cover) {
 		pal.accent = sx_tone(cfg_dark ? SX_T_D_ACCENT : SX_T_L_ACCENT, hue);
 		pal.on_accent = cfg_dark ? sx_tone(SX_T_D_ON_ACC, hue) : lv_color_white();
 	} else {
 		pal.accent = cfg_preset;
-		// Yellow is the one preset white text does not read on.
-		pal.on_accent = lv_color_eq(cfg_preset, sx_hex(SX_ACC_YELLOW)) ? sx_hex(SX_ACC_YELLOW_INK) : lv_color_white();
+		lv_color_t ink = sx_hex(SX_L_TEXT);
+		pal.on_accent = contrast(ink, pal.accent) > contrast(lv_color_white(), pal.accent) ? ink : lv_color_white();
 	}
+	pal.accent_text = cfg_accent == THEME_ACCENT_GRAPHITE ? sx_hex(cfg_dark ? SX_D_ACCENT_TEXT : SX_L_ACCENT) : accent_foreground(pal.accent);
 
 	pal.active = sx_mix(pal.accent, pal.surface, 16);
 	pal.swipe_end = sx_tone(cfg_dark ? SX_T_D_SWIPE_L : SX_T_L_SWIPE_L, hue);
-	pal.cover_tone = sx_tone(SX_T_COVER_TONE, hue);
+	pal.cover_tone = sx_placeholder_tone(hue);
 	pal.star_on = sx_hex(cfg_dark ? SX_STAR_ON_DARK : SX_STAR_ON_LIGHT);
 	pal.hairline = cfg_dark ? lv_color_white() : lv_color_black();
 	pal.hairline_opa = cfg_dark ? SX_HAIRLINE_DARK_OPA : SX_HAIRLINE_LIGHT_OPA;
@@ -190,14 +242,14 @@ static void recompute(void) {
 	// The always-dark surfaces belong to the track playing, not to the page:
 	// the mini player over an album page still wears the song it plays.
 	chroma_scale = play_scale;
-	pal.np_accent = cfg_accent < 0 ? sx_tone(SX_T_NP_ACCENT, play_hue) : cfg_preset;
-	pal.np_ink = sx_tone(SX_T_NP_INK, play_hue);
-	pal.mini_bg = sx_tone(SX_T_MINI_BG, play_hue);
-	pal.mini_cover_tone = sx_tone(SX_T_COVER_TONE, play_hue);
-	pal.np_grad_top = sx_tone(SX_T_NP_GRAD_TOP, play_hue);
-	pal.np_grad_bot = sx_tone(SX_T_NP_GRAD_BOT, play_hue);
-	pal.np_panel_top = sx_tone(SX_T_NP_PANEL_T, play_hue);
-	pal.np_panel_bot = sx_tone(SX_T_NP_PANEL_B, play_hue);
+	pal.np_accent = pal.accent_text;
+	pal.np_ink = pal.accent;
+	pal.mini_bg = pal.accent;
+	pal.mini_ink = pal.on_accent;
+	pal.mini_cover_tone = play_placeholder_known ? play_placeholder : sx_placeholder_tone(DEFAULT_HUE);
+	if (!cfg_tint) {
+		pal.album_grad[0] = pal.album_grad[1] = pal.album_grad[2] = pal.bg;
+	}
 
 	// sx_tone() as called from outside works at the page's scale.
 	chroma_scale = page_scale;
@@ -233,16 +285,7 @@ static void hue_moved(void) {
 
 // FNV-1a: stable across builds and platforms, so an album keeps its colour
 // from one firmware to the next and on the device as in the emulator.
-float sx_palette_hue_of_name(const char *name) {
-	uint32_t h = 2166136261u;
-	for (const unsigned char *p = (const unsigned char *)(name ? name : ""); *p; p++) {
-		h ^= *p;
-		h *= 16777619u;
-	}
-	// The low bits of FNV are its weakest; fold the high half in first.
-	h ^= h >> 16;
-	return (float)(h % 360u);
-}
+float sx_palette_hue_of_name(const char *name) { return (float)albumtone_hash_hue(name); }
 
 // The default: no cover tone known, so the album's title is hashed -- the
 // album tag of the loaded track when this is it, the folder's name otherwise
@@ -290,6 +333,8 @@ static bool default_tone(const char *track_path, float *hue, float *chroma) {
 void sx_palette_set_tone_provider(sx_tone_provider_t provider) { tone_provider = provider; }
 
 void sx_palette_track_changed(const char *track_path, const char *name) {
+	play_placeholder = sx_placeholder_file(track_path, name);
+	play_placeholder_known = true;
 	float hue = DEFAULT_HUE;
 	float chroma = REFERENCE_CHROMA;
 	bool known = false;
@@ -319,6 +364,7 @@ void sx_palette_track_changed(const char *track_path, const char *name) {
 }
 
 void sx_palette_track_cleared(void) {
+	play_placeholder_known = false;
 	play_hue = DEFAULT_HUE;
 	play_chroma = REFERENCE_CHROMA;
 	hue_moved();

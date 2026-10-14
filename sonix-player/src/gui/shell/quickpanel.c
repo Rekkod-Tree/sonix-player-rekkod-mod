@@ -3,48 +3,50 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "src/gui/wireless/airplay.h"
 #include "src/gui/audio/dacpage.h"
-#include "src/gui/bluetooth/btsettings.h"
-#include "src/gui/shell/confirm.h"
-#include "src/gui/fonts/fonts.h"
-#include "src/gui/shell/gui.h"
-#include "src/gui/shell/icons.h"
-#include "src/gui/settings/musicsettings.h"
 #include "src/gui/audio/peqpage.h"
+#include "src/gui/bluetooth/btsettings.h"
+#include "src/gui/fonts/fonts.h"
 #include "src/gui/library/audiobooks.h"
 #include "src/gui/nowplaying/player.h"
-#include "src/gui/streaming/podcastpage.h"
-#include "src/gui/wireless/dlna.h"
-#include "src/gui/wireless/sonixlink.h"
-#include "src/gui/wireless/wifitransfer.h"
+#include "src/gui/settings/musicsettings.h"
+#include "src/gui/shell/confirm.h"
+#include "src/gui/shell/gui.h"
+#include "src/gui/shell/icons.h"
+#include "src/gui/shell/switcher.h"
 #include "src/gui/shell/sx_palette.h"
 #include "src/gui/shell/sx_sheet.h"
+#include "src/gui/shell/sx_styles.h"
 #include "src/gui/shell/sx_tokens.h"
 #include "src/gui/shell/theme.h"
-#include "src/system/bluetooth/btreceiver.h"
-#include "src/system/audio/usbdac.h"
-#include "src/system/net/wifitransfer.h"
-#include "src/gui/shell/switcher.h"
 #include "src/gui/shell/topbar.h"
+#include "src/gui/shell/touch.h"
+#include "src/gui/streaming/podcastpage.h"
+#include "src/gui/wireless/airplay.h"
+#include "src/gui/wireless/dlna.h"
+#include "src/gui/wireless/sonixlink.h"
 #include "src/gui/wireless/wifisettings.h"
-#include "src/system/remote/airplay.h"
+#include "src/gui/wireless/wifitransfer.h"
 #include "src/system/audio/alsa-controls.h"
+#include "src/system/audio/eq.h"
+#include "src/system/audio/usbdac.h"
 #include "src/system/bluetooth/bluetooth.h"
+#include "src/system/bluetooth/btreceiver.h"
 #include "src/system/core/config.h"
 #include "src/system/core/lang.h"
-#include "src/system/audio/eq.h"
-#include "src/system/playback/sleeptimer.h"
 #include "src/system/device/power.h"
+#include "src/system/net/wifi.h"
+#include "src/system/net/wifitransfer.h"
+#include "src/system/playback/sleeptimer.h"
+#include "src/system/remote/airplay.h"
 #include "src/system/remote/dlna.h"
 #include "src/system/remote/sonixlink.h"
-#include "src/system/net/wifi.h"
 
 // ---------------------------------------------------------------------------
 // Sonix UI 2.0: the control centre
 //
 // An overlay at the top of the screen, under the status bar: one card
-// (SX_CC_BG, dark in both themes) with the round buttons four to a line,
+// with themed surfaces and round buttons four to a line,
 // SX_CC_BTN across with their names under them, and the brightness slider.
 // A tap on a button switches what it stands for (lit in the accent while on);
 // a hold opens its page. It comes down from the status bar following the
@@ -70,21 +72,20 @@
 #define PANEL_ANIM_MS SX_ANIM_SHEET_MS
 #define PANEL_POLL_MS 700
 
-#define CC_MARGIN 14	   // from the screen's sides
-#define CC_TOP_GAP 12	   // under the status bar
+#define CC_MARGIN 0	 // from the screen's sides
+#define CC_TOP_GAP 0 // under the status bar
 #define CC_RADIUS 24
-#define CC_PAD 20
-#define CC_GAP 14		   // between the lines of buttons
-#define CC_LABEL_GAP 6	   // between a button and its name
+#define CC_PAD 16
+#define CC_BOTTOM_PAD 8
+#define CC_CELL_H 112
+#define CC_GAP 8	   // between the lines of buttons
+#define CC_LABEL_GAP 8 // between a button and its name
 #define CC_BUTTONS_PER_LINE 4
-#define BRIGHT_ROW_H 56
-#define BRIGHT_ROW_GAP 12
+#define BRIGHT_ROW_H 72
+#define BRIGHT_ROW_GAP 0
 #define HANDLE_ROOM 24 // added under the slider when the card has a handle
 
-// The card's own colours: dark in both themes, as on the prototype.
-#define CC_TEXT 0xFFFFFF
-#define CC_LABEL_OPA 204   // the names, white at 80 %
-#define CC_TRACK_OPA 51	   // the slider's track, white at 20 %
+// Colours follow the shared palette; the translucent full-screen pass is avoided.
 
 static lv_obj_t *veil;	// the full screen behind the card: a tap target, never drawn
 static lv_obj_t *panel; // the card, parked above the top edge
@@ -413,7 +414,8 @@ static void panel_prepare(void) {
 	}
 	lv_slider_set_value(brightness_slider, (int32_t)value, LV_ANIM_OFF);
 	// The accent may have changed since the card was last down (a new cover).
-	lv_obj_set_style_bg_color(brightness_slider, sx_pal()->accent, LV_PART_INDICATOR);
+	lv_obj_set_style_bg_color(brightness_slider, sx_pal()->mini_ink, LV_PART_INDICATOR);
+	lv_obj_set_style_bg_color(brightness_slider, sx_pal()->mini_ink, LV_PART_KNOB);
 
 	refresh_audio_buttons();
 
@@ -505,6 +507,7 @@ void quickpanel_drag_end(void) {
 		return;
 	}
 	drag_active = false;
+	lv_obj_update_layout(panel);
 
 	// A fixed stretch of travel decides the outcome: down from the status bar
 	// DRAG_OPEN_PX, up on the card the handoff's SX_CC_CLOSE_PX.
@@ -929,7 +932,7 @@ static void order_apply(void) {
 	// the second block, the same pitch as the lines above.
 	int extra = at > QP_SLOT_VISIBLE ? at - QP_SLOT_VISIBLE : 0;
 	int lines = (extra + CC_BUTTONS_PER_LINE - 1) / CC_BUTTONS_PER_LINE;
-	expand_full = lines * (SX_CC_BTN + CC_LABEL_GAP + lv_font_get_line_height(&font_ui_16) + CC_GAP);
+	expand_full = lines * (CC_CELL_H + CC_GAP);
 
 	// With a handle to show, the card is HANDLE_ROOM taller under the slider.
 	if (panel) {
@@ -1135,9 +1138,9 @@ static int cell_w;
 static lv_obj_t *make_circle_button(lv_obj_t *parent, const lv_image_dsc_t *glyph, quickpanel_button_t which) {
 	lv_obj_t *cell = lv_obj_create(parent);
 	lv_obj_remove_style_all(cell);
-	lv_obj_set_size(cell, cell_w, LV_SIZE_CONTENT);
+	lv_obj_set_size(cell, cell_w, CC_CELL_H);
 	lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_COLUMN);
-	lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_set_style_pad_row(cell, CC_LABEL_GAP, 0);
 	lv_obj_set_scrollable(cell, false);
 	lv_obj_set_event_bubble(cell, true);
@@ -1150,43 +1153,48 @@ static lv_obj_t *make_circle_button(lv_obj_t *parent, const lv_image_dsc_t *glyp
 	lv_obj_set_size(btn, SX_CC_BTN, SX_CC_BTN);
 	lv_obj_set_style_radius(btn, LV_RADIUS_CIRCLE, 0);
 	lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
-	lv_obj_set_style_bg_color(btn, lv_color_hex(SX_CC_BTN_OFF), 0);
+	lv_obj_add_style(btn, &sx_style_press, 0);
 	// The pressed fill at once (principle 2): a step lighter.
-	lv_obj_set_style_bg_color(btn, lv_color_hex(0x5A5A5A), LV_STATE_PRESSED);
+	lv_obj_add_style(btn, &sx_style_surface, LV_STATE_PRESSED);
 	// The name under it answers a tap too.
-	lv_obj_set_ext_click_area(btn, CC_LABEL_GAP + 10);
+	touch_pad(btn, (cell_w - SX_CC_BTN) / 2, (cell_w - SX_CC_BTN) / 2, 8, CC_LABEL_GAP + lv_font_get_line_height(&font_ui_20));
 
 	lv_obj_t *icon = lv_image_create(btn);
 	lv_image_set_src(icon, glyph);
-	lv_obj_set_style_image_recolor(icon, lv_color_hex(CC_TEXT), 0);
+	lv_obj_add_style(icon, &sx_style_icon, 0);
 	lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
-	// The 46 px glyphs drawn at 40, the prototype's weight in an 84 circle.
-	lv_image_set_scale(icon, 256 * 40 / 46);
+	// The prototype uses 32px glyphs inside 64px circles.
+	lv_image_set_scale(icon, glyph->header.w ? 256 * 32 / glyph->header.w : 256);
 	lv_obj_center(icon);
 
 	lv_obj_t *label = lv_label_create(cell);
 	lv_obj_set_width(label, cell_w);
 	lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
 	lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
-	lv_obj_set_style_text_font(label, &font_ui_16, 0);
-	lv_obj_set_style_text_color(label, lv_color_hex(CC_TEXT), 0);
-	lv_obj_set_style_text_opa(label, CC_LABEL_OPA, 0);
+	lv_obj_set_style_text_font(label, &font_ui_20, 0);
+	lv_obj_set_height(label, lv_font_get_line_height(&font_ui_20));
+	lv_obj_add_style(label, &sx_style_text2, 0);
+	lv_obj_set_style_text_opa(label, LV_OPA_COVER, 0);
 	lv_label_set_text(label, tr(button_label[which]));
 
 	return btn;
 }
 
-// Paints a quick button for its state: the accent with its own ink while on,
-// the neutral circle with a white glyph while off.
+// Selected controls reverse the mini-player's ink and fill. Unselected ones
+// use a quiet mix, preserving contrast for both pale and dark accents.
 static void circle_button_set_on(lv_obj_t *btn, bool on) {
 	if (!btn) {
 		return;
 	}
 	lv_obj_t *icon = lv_obj_get_child(btn, 0);
 	const sx_palette_t *p = sx_pal();
-	lv_obj_set_style_bg_color(btn, on ? p->accent : lv_color_hex(SX_CC_BTN_OFF), 0);
+	lv_obj_t *label = lv_obj_get_child(lv_obj_get_parent(btn), 1);
+	if (label)
+		lv_obj_set_style_text_color(label, p->mini_ink, 0);
+	lv_obj_set_style_bg_color(btn, on ? p->mini_ink : sx_mix(p->mini_ink, p->mini_bg, 16), 0);
+	lv_obj_set_style_bg_color(btn, sx_mix(p->mini_ink, p->mini_bg, on ? 85 : 28), LV_STATE_PRESSED);
 	if (icon) {
-		lv_obj_set_style_image_recolor(icon, on ? p->on_accent : lv_color_hex(CC_TEXT), 0);
+		lv_obj_set_style_image_recolor(icon, on ? p->mini_bg : p->mini_ink, 0);
 	}
 }
 
@@ -1197,6 +1205,17 @@ static bool sleep_timer_armed(sleeptimer_kind_t kind);
 // Repaints every round control from the state it switches, so the panel shows
 // the truth even when the setting was changed somewhere else.
 static void refresh_audio_buttons(void) {
+	const sx_palette_t *p = sx_pal();
+	if (bright_row && lv_obj_get_child_count(bright_row))
+		lv_obj_set_style_image_recolor(lv_obj_get_child(bright_row, 0), p->mini_ink, 0);
+	if (expand_handle && lv_obj_get_child_count(expand_handle))
+		lv_obj_set_style_bg_color(lv_obj_get_child(expand_handle, 0), p->mini_ink, 0);
+	if (brightness_slider) {
+		lv_obj_set_style_bg_color(brightness_slider, p->mini_ink, LV_PART_MAIN);
+		lv_obj_set_style_bg_opa(brightness_slider, LV_OPA_20, LV_PART_MAIN);
+		lv_obj_set_style_bg_color(brightness_slider, p->mini_ink, LV_PART_INDICATOR);
+		lv_obj_set_style_bg_color(brightness_slider, sx_pal()->mini_ink, LV_PART_KNOB);
+	}
 	circle_button_set_on(eq_btn, eq_get_enabled());
 	circle_button_set_on(mseb_btn, mseb_get_enabled());
 	circle_button_set_on(wifi_btn, wifi_get_enabled());
@@ -1672,7 +1691,7 @@ static void filter_page_cb(lv_event_t *e) {
 
 void quickpanel_init(gui_config_t *cfg) {
 	int card_w = cfg->screen_width - 2 * CC_MARGIN;
-	cell_w = (card_w - 2 * CC_PAD) / CC_BUTTONS_PER_LINE;
+	cell_w = (card_w - 2 * CC_PAD - (CC_BUTTONS_PER_LINE - 1) * CC_GAP) / CC_BUTTONS_PER_LINE;
 	open_y = SX_STATUSBAR_H + CC_TOP_GAP;
 
 	veil = lv_obj_create(lv_layer_top());
@@ -1686,21 +1705,22 @@ void quickpanel_init(gui_config_t *cfg) {
 
 	// One line of buttons with their names, and the card around two of them,
 	// the slider and the padding.
-	int line_h = SX_CC_BTN + CC_LABEL_GAP + lv_font_get_line_height(&font_ui_16);
+	int line_h = CC_CELL_H;
 	int lines = QP_SLOT_VISIBLE / CC_BUTTONS_PER_LINE;
 	int grid_h = lines * line_h + (lines - 1) * CC_GAP;
-	card_h_rest = 2 * CC_PAD + grid_h + BRIGHT_ROW_GAP + BRIGHT_ROW_H;
+	card_h_rest = CC_PAD + CC_BOTTOM_PAD + grid_h + BRIGHT_ROW_GAP + BRIGHT_ROW_H;
 	card_h_base = card_h_rest;
 
 	panel = lv_obj_create(veil);
 	lv_obj_remove_style_all(panel);
 	lv_obj_set_size(panel, card_w, card_h_rest);
 	lv_obj_set_pos(panel, CC_MARGIN, -card_h_rest - 4);
-	lv_obj_set_style_bg_color(panel, lv_color_hex(SX_CC_BG), 0);
+	lv_obj_add_style(panel, &sx_style_mini, 0);
 	lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, 0);
 	lv_obj_set_style_radius(panel, CC_RADIUS, 0);
 	lv_obj_set_style_clip_corner(panel, false, 0);
 	lv_obj_set_style_pad_all(panel, CC_PAD, 0);
+	lv_obj_set_style_pad_bottom(panel, CC_BOTTOM_PAD, 0);
 	lv_obj_set_style_pad_row(panel, BRIGHT_ROW_GAP, 0);
 	lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_scrollable(panel, false);
@@ -1714,7 +1734,7 @@ void quickpanel_init(gui_config_t *cfg) {
 	quick_row = lv_obj_create(panel);
 	lv_obj_remove_style_all(quick_row);
 	lv_obj_set_size(quick_row, lv_pct(100), grid_h);
-	lv_obj_set_style_pad_row(quick_row, CC_GAP, 0);
+	lv_obj_set_style_pad_gap(quick_row, CC_GAP, 0);
 	lv_obj_set_scrollable(quick_row, false);
 	lv_obj_set_event_bubble(quick_row, true);
 	lv_obj_set_flex_flow(quick_row, LV_FLEX_FLOW_ROW_WRAP);
@@ -1821,6 +1841,7 @@ void quickpanel_init(gui_config_t *cfg) {
 	bright_row = lv_obj_create(panel);
 	lv_obj_remove_style_all(bright_row);
 	lv_obj_set_size(bright_row, lv_pct(100), BRIGHT_ROW_H);
+	lv_obj_set_style_pad_right(bright_row, 10, 0);
 	lv_obj_set_style_pad_column(bright_row, 16, 0);
 	lv_obj_set_scrollable(bright_row, false);
 	lv_obj_set_event_bubble(bright_row, true);
@@ -1829,25 +1850,27 @@ void quickpanel_init(gui_config_t *cfg) {
 
 	lv_obj_t *sun = lv_image_create(bright_row);
 	lv_image_set_src(sun, &icon_sun);
-	lv_obj_set_style_image_recolor(sun, lv_color_hex(CC_TEXT), 0);
+	lv_obj_add_style(sun, &sx_style_icon2, 0);
 	lv_obj_set_style_image_recolor_opa(sun, LV_OPA_COVER, 0);
 
 	brightness_slider = lv_slider_create(bright_row);
-	lv_obj_set_height(brightness_slider, 10);
+	lv_obj_set_height(brightness_slider, 6);
 	lv_obj_set_flex_grow(brightness_slider, 1);
 	lv_slider_set_range(brightness_slider, 5, 100);
 	lv_obj_set_style_radius(brightness_slider, LV_RADIUS_CIRCLE, LV_PART_MAIN);
-	lv_obj_set_style_bg_color(brightness_slider, lv_color_hex(CC_TEXT), LV_PART_MAIN);
-	lv_obj_set_style_bg_opa(brightness_slider, CC_TRACK_OPA, LV_PART_MAIN);
+	lv_obj_add_style(brightness_slider, &sx_style_press, LV_PART_MAIN);
+	lv_obj_set_style_bg_opa(brightness_slider, LV_OPA_COVER, LV_PART_MAIN);
 	lv_obj_set_style_radius(brightness_slider, LV_RADIUS_CIRCLE, LV_PART_INDICATOR);
-	lv_obj_set_style_bg_color(brightness_slider, sx_pal()->accent, LV_PART_INDICATOR);
-	lv_obj_set_style_bg_opa(brightness_slider, LV_OPA_TRANSP, LV_PART_KNOB);
+	lv_obj_set_style_bg_color(brightness_slider, sx_pal()->mini_ink, LV_PART_INDICATOR);
+	lv_obj_set_style_bg_color(brightness_slider, sx_pal()->mini_ink, LV_PART_KNOB);
+	lv_obj_set_style_bg_opa(brightness_slider, LV_OPA_COVER, LV_PART_KNOB);
+	lv_obj_set_style_radius(brightness_slider, LV_RADIUS_CIRCLE, LV_PART_KNOB);
 	lv_obj_set_style_shadow_width(brightness_slider, 0, LV_PART_KNOB);
 	lv_obj_set_style_outline_width(brightness_slider, 0, LV_PART_KNOB);
 	lv_obj_set_style_border_width(brightness_slider, 0, LV_PART_KNOB);
-	lv_obj_set_style_pad_all(brightness_slider, 0, LV_PART_KNOB);
+	lv_obj_set_style_pad_all(brightness_slider, 7, LV_PART_KNOB);
 	// The whole row high, so a finger anywhere on the line takes it.
-	lv_obj_set_ext_click_area(brightness_slider, (BRIGHT_ROW_H - 10) / 2);
+	lv_obj_set_ext_click_area(brightness_slider, (BRIGHT_ROW_H - 6) / 2);
 	lv_obj_add_event_cb(brightness_slider, brightness_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
 	lv_obj_add_event_cb(brightness_slider, brightness_released_cb, LV_EVENT_RELEASED, NULL);
 
@@ -1869,7 +1892,7 @@ void quickpanel_init(gui_config_t *cfg) {
 	lv_obj_remove_style_all(extra_row);
 	lv_obj_set_size(extra_row, lv_pct(100), LV_SIZE_CONTENT);
 	lv_obj_set_pos(extra_row, 0, CC_GAP);
-	lv_obj_set_style_pad_row(extra_row, CC_GAP, 0);
+	lv_obj_set_style_pad_gap(extra_row, CC_GAP, 0);
 	lv_obj_set_scrollable(extra_row, false);
 	lv_obj_set_event_bubble(extra_row, true);
 	lv_obj_set_flex_flow(extra_row, LV_FLEX_FLOW_ROW_WRAP);
@@ -1883,7 +1906,7 @@ void quickpanel_init(gui_config_t *cfg) {
 	lv_obj_remove_style_all(expand_handle);
 	lv_obj_set_ignore_layout(expand_handle, true);
 	lv_obj_set_size(expand_handle, 160, HANDLE_ROOM + CC_PAD);
-	lv_obj_align(expand_handle, LV_ALIGN_BOTTOM_MID, 0, CC_PAD);
+	lv_obj_align(expand_handle, LV_ALIGN_BOTTOM_MID, 0, CC_BOTTOM_PAD);
 	lv_obj_set_scrollable(expand_handle, false);
 	lv_obj_set_event_bubble(expand_handle, true);
 	lv_obj_set_clickable(expand_handle, true);
@@ -1894,7 +1917,7 @@ void quickpanel_init(gui_config_t *cfg) {
 	lv_obj_set_size(pill, SX_SHEET_HANDLE_W, SX_SHEET_HANDLE_H);
 	lv_obj_center(pill);
 	lv_obj_set_style_radius(pill, LV_RADIUS_CIRCLE, 0);
-	lv_obj_set_style_bg_color(pill, lv_color_hex(CC_TEXT), 0);
+	lv_obj_add_style(pill, &sx_style_hairline, 0);
 	lv_obj_set_style_bg_opa(pill, LV_OPA_40, 0);
 	lv_obj_set_clickable(pill, false);
 
@@ -1903,6 +1926,7 @@ void quickpanel_init(gui_config_t *cfg) {
 	// exist to arrange.
 	order_load();
 	order_apply();
+	theme_register_refresh(refresh_audio_buttons);
 
 	poll_timer = lv_timer_create(poll_cb, PANEL_POLL_MS, NULL);
 	lv_timer_pause(poll_timer);

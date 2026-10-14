@@ -10,8 +10,8 @@
 #include "src/system/audio/alsa-controls.h"
 
 // The 2.0 volume bar (sx_tokens.h): a 64 x 300 pill against the right edge,
-// near-black whatever the theme, the level as a number at the top, a slim
-// vertical scale filled in the playing album's accent, the speaker glyph at
+// in the mini-player's colours, the level as a number at the top, a slim
+// vertical scale filled in the matching ink, the speaker glyph at
 // the bottom. It slides in from the edge, stays SX_VOL_OSD_MS after the last
 // key press, and slides out again: the page under it is not covered, only its
 // right edge for a moment.
@@ -41,21 +41,26 @@ static lv_timer_t *hide_timer;
 // number without having to be told the level again.
 static int shown_percent;
 
-// The number: white, or the warning red past the point where every further
-// step is loud.
+// A warning badge keeps the number readable on any chosen mini-player colour.
 static void apply_label_color(int percent) {
-	lv_color_t colour = percent > VOLUME_WARN_PERCENT ? VOLUME_WARN_COLOR : lv_color_white();
-	lv_obj_set_style_text_color(overlay_label, colour, 0);
+	bool warning = percent > VOLUME_WARN_PERCENT;
+	lv_obj_set_style_text_color(overlay_label, warning ? lv_color_white() : sx_pal()->mini_ink, 0);
+	lv_obj_set_style_bg_color(overlay_label, lv_color_hex(SX_DANGER_BG), 0);
+	lv_obj_set_style_bg_opa(overlay_label, warning ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+	lv_obj_set_style_radius(overlay_label, 6, 0);
+	lv_obj_set_style_pad_hor(overlay_label, 4, 0);
 }
 
-// The one colour from the palette, set by hand: the fill, in the accent of the
-// always-dark surfaces. Called when built, on every show and after a palette
-// change.
+// Follow the mini-player on creation, show and every palette change.
 static void apply_theme(void) {
 	if (!overlay) {
 		return;
 	}
-	lv_obj_set_style_bg_color(overlay_slider, sx_pal()->np_accent, LV_PART_INDICATOR);
+	const sx_palette_t *p = sx_pal();
+	lv_obj_set_style_bg_color(overlay, p->mini_bg, 0);
+	lv_obj_set_style_bg_color(overlay_slider, p->mini_ink, LV_PART_MAIN);
+	lv_obj_set_style_bg_color(overlay_slider, p->mini_ink, LV_PART_INDICATOR);
+	lv_obj_set_style_image_recolor(overlay_icon, p->mini_ink, 0);
 	apply_label_color(shown_percent);
 }
 
@@ -171,7 +176,7 @@ void volume_overlay_init(gui_config_t *cfg) {
 	lv_obj_set_pos(overlay, (int32_t)cfg->screen_width - SX_VOL_OSD_RIGHT - OVERLAY_WIDTH,
 				   ((int32_t)cfg->screen_height - OVERLAY_HEIGHT) / 2);
 	lv_obj_set_style_radius(overlay, OVERLAY_RADIUS, 0);
-	lv_obj_set_style_bg_color(overlay, lv_color_hex(SX_VOL_OSD_BG), 0);
+	lv_obj_set_style_bg_color(overlay, sx_pal()->mini_bg, 0);
 	lv_obj_set_style_bg_opa(overlay, LV_OPA_COVER, 0);
 	lv_obj_set_style_pad_ver(overlay, 16, 0);
 	lv_obj_set_style_pad_row(overlay, 12, 0);

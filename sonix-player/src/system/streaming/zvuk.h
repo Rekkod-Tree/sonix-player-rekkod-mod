@@ -202,6 +202,8 @@ bool zvuk_collection_refresh(void);
 // The mirrors. Cheap, any thread, never the network.
 bool zvuk_is_liked(zvuk_item_t kind, const char *id);
 bool zvuk_liked_known(zvuk_item_t kind);
+// Cached count, or -1 until the collection is known. Never touches the network.
+int zvuk_liked_count(zvuk_item_t kind);
 // Flips one id without asking anyone: what a tap shows at once, put back by
 // the caller if the write is refused.
 void zvuk_liked_mark(zvuk_item_t kind, const char *id, bool liked);

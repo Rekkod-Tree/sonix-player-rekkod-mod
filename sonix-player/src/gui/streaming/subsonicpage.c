@@ -775,7 +775,7 @@ static void list_bind(lv_obj_t *row, int index) {
 		if (list_kind == JOB_ALBUM_TRACKS && t->track_number > 0) {
 			sx_row_set_number(row, t->track_number);
 		} else {
-			sx_row_set_thumb(row, image, svcui_tone(t->album_id[0] ? t->album_id : t->title));
+			sx_row_set_thumb(row, image, svcui_tone(t->album[0] ? t->album : t->title));
 		}
 		sx_row_set_trail(row, SX_ROW_TRAIL_STAR);
 		sx_row_set_starred(row, subsonicsync_is_favorite(t->id));
@@ -789,7 +789,7 @@ static void list_bind(lv_obj_t *row, int index) {
 		const subsonic_album_t *a = &result_albums[index];
 		sx_row_set_title(row, a->title);
 		sx_row_set_subtitle(row, detail, NULL, NULL);
-		sx_row_set_thumb(row, image, svcui_tone(a->id));
+		sx_row_set_thumb(row, image, svcui_tone(a->title));
 		sx_row_set_trail(row, SX_ROW_TRAIL_CHEVRON);
 		sx_row_set_swipes(row, true, true);
 	} else if (kind_is_artists(list_kind)) {

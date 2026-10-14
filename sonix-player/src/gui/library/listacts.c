@@ -524,6 +524,4 @@ void listacts_first_letter(const char *name, char *out, size_t size) {
 
 // A plaque's colour for a name with no cover of its own: an artist, a genre,
 // a year.
-lv_color_t listacts_name_tone(const char *name) {
-	return sx_oklch(SX_T_COVER_TONE.L, SX_T_COVER_TONE.C, sx_palette_hue_of_name(name ? name : ""));
-}
+lv_color_t listacts_name_tone(const char *name) { return sx_placeholder_name(name); }

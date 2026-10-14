@@ -40,7 +40,8 @@
 // On the player the chevron keeps the place the 56 px button gave it before
 // 2.0 -- its centre 43 px in and 43 px down from the player's top -- because
 // the player's own layout (back_btn_centre_y) is drawn around that point.
-#define BACK_BTN_PLAYER_INSET 7
+#define BACK_BTN_PLAYER_INSET 16
+#define BACK_BTN_PLAYER_SIZE 72
 
 static lv_obj_t *back_btn;
 static lv_obj_t *back_btn_icon;
@@ -80,10 +81,12 @@ static void place_back_btn(bool below_top_bar) {
 	// own header row is aligned to, under the status bar when that stays up
 	// there (back_btn_player_below_bar).
 	if (below_top_bar) {
+		lv_obj_set_size(back_btn, BACK_BTN_SIZE, BACK_BTN_SIZE);
 		lv_obj_set_pos(back_btn, BACK_BTN_X, BACK_BTN_Y);
 		return;
 	}
-	lv_obj_set_pos(back_btn, BACK_BTN_PLAYER_INSET, player_top() + BACK_BTN_PLAYER_INSET);
+	lv_obj_set_size(back_btn, BACK_BTN_PLAYER_SIZE, BACK_BTN_PLAYER_SIZE);
+	lv_obj_set_pos(back_btn, BACK_BTN_PLAYER_INSET, player_top());
 }
 
 // Where the back button goes. A page can be reached by more than one route --
@@ -221,7 +224,7 @@ void back_btn_translate_y(int32_t y) {
 	}
 }
 
-int back_btn_centre_y(void) { return player_top() + BACK_BTN_PLAYER_INSET + BACK_BTN_SIZE / 2; }
+int back_btn_centre_y(void) { return player_top() + BACK_BTN_PLAYER_SIZE / 2; }
 
 void back_btn_player_below_bar(bool below) {
 	player_bar_shown = below;
@@ -323,7 +326,8 @@ static void back_underlay_build(void) {
 		// in the 72 px target.
 		int inset = (BACK_BTN_SIZE - 36) / 2;
 		if (going_to_player) {
-			lv_obj_set_pos(chevron, BACK_BTN_PLAYER_INSET + inset, player_top() + BACK_BTN_PLAYER_INSET + inset);
+			int player_inset = (BACK_BTN_PLAYER_SIZE - 36) / 2;
+			lv_obj_set_pos(chevron, BACK_BTN_PLAYER_INSET + player_inset, player_top() + player_inset);
 		} else {
 			lv_obj_set_pos(chevron, BACK_BTN_X + inset, BACK_BTN_Y + inset);
 		}

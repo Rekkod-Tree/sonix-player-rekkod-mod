@@ -1362,17 +1362,11 @@ void playlistpage_init(gui_config_t *cfg) {
 	lv_obj_set_scrollable(name_layer, false);
 	lv_obj_set_hidden(name_layer, true);
 
-	lv_obj_t *heading = lv_label_create(name_layer);
-	lv_label_set_text(heading, tr("playlist_name"));
-	lv_obj_add_style(heading, &theme_style_text, 0);
-	lv_obj_set_style_text_font(heading, &font_ui_24, 0);
-	// Offset clear of the floating back chevron, which sits on top of this
-	// layer; the same offset every page title uses.
-	lv_obj_align(heading, LV_ALIGN_TOP_LEFT, cfg->padding + 56 + 14, cfg->padding + cfg->top_bar_height + 10);
+	settingsrow_title(name_layer, cfg, "playlist_name");
 
 	lv_obj_t *cancel = lv_btn_create(name_layer);
-	lv_obj_set_size(cancel, 56, 56);
-	lv_obj_align(cancel, LV_ALIGN_TOP_RIGHT, -cfg->padding, cfg->padding + cfg->top_bar_height);
+	lv_obj_set_size(cancel, SX_HEADER_BTN, SX_HEADER_H);
+	lv_obj_align(cancel, LV_ALIGN_TOP_RIGHT, 0, SX_STATUSBAR_H);
 	lv_obj_set_style_bg_opa(cancel, LV_OPA_TRANSP, 0);
 	lv_obj_set_style_border_width(cancel, 0, 0);
 	lv_obj_set_style_shadow_width(cancel, 0, 0);
@@ -1384,19 +1378,7 @@ void playlistpage_init(gui_config_t *cfg) {
 	lv_obj_add_style(cancel_icon, &theme_style_icon, 0);
 	lv_obj_center(cancel_icon);
 
-	name_field = lv_textarea_create(name_layer);
-	lv_textarea_set_one_line(name_field, true);
-	lv_textarea_set_max_length(name_field, PLAYLIST_NAME_MAX);
-	lv_textarea_set_placeholder_text(name_field, tr("name"));
-	lv_obj_set_size(name_field, cfg->screen_width - 2 * cfg->padding, 62);
-	lv_obj_set_scrollbar_mode(name_field, LV_SCROLLBAR_MODE_OFF);
-	lv_obj_align(name_field, LV_ALIGN_TOP_LEFT, cfg->padding, cfg->padding + cfg->top_bar_height + 60);
-	lv_obj_add_style(name_field, &theme_style_card, 0);
-	lv_obj_set_style_radius(name_field, 12, 0);
-	lv_obj_set_style_border_width(name_field, 0, 0);
-	lv_obj_set_style_shadow_width(name_field, 0, 0);
-	lv_obj_set_style_pad_all(name_field, 14, 0);
-	lv_obj_set_style_text_font(name_field, &font_ui_24, 0);
+	name_field = settingsrow_name_field(name_layer, cfg, PLAYLIST_NAME_MAX);
 	keyboard_style_caret(name_field);
 
 	name_keyboard = keyboard_create(name_layer, cfg->screen_width, 316, name_field, NULL, "ok", name_accept_cb, NULL);

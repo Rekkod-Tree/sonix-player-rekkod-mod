@@ -109,15 +109,15 @@ lv_obj_t *medialist_albums_screen;
 // (24), a line of figures (20), and three buttons -- shuffle, a white "Play"
 // pill and the album's sheet. It scrolls away with the rows. A floating 64 px
 // back button stands over it, in place of the header row.
-#define HEAD_COVER_SIZE COVERTONE_THUMB_LARGE
-#define HEAD_GAP 12		   // between the head and the first row (or heading)
+#define HEAD_COVER_SIZE 156
+#define HEAD_GAP 24
 #define HEAD_TITLE_LINES 2
-#define HEAD_BTN_W 72
-#define HEAD_BTN_H 56
-#define HEAD_PLAY_HEIGHT 60
+#define HEAD_BTN_W 88
+#define HEAD_BTN_H 88
+#define HEAD_PLAY_HEIGHT 88
 #define HEAD_PLAY_PAD 52 // what the pill keeps either side of its word
-#define HEAD_BTN_GAP 16
-#define HEAD_BACK_SIZE 64
+#define HEAD_BTN_GAP 12
+#define HEAD_BACK_SIZE 88
 // The gradient's stops (the handoff's 0, 380 and 900 px) and the strip it is
 // drawn from, tiled across the width: narrow enough to cost little, wide
 // enough for the 4 x 4 dither to have both directions.
@@ -286,6 +286,7 @@ struct panel {
 	lv_obj_t *hint;		  // the first-visit card about the swipes (All tracks, Albums)
 	lv_obj_t *head;		  // the album page's head: cover, title, artist, figures, buttons
 	lv_obj_t *head_cover;
+	lv_obj_t *head_cover_glyph;
 	lv_obj_t *head_play_label;
 	// The album page: on its own gradient and in its own hue while it is on
 	// screen (sx_palette_push_hue), under the status bar, with a floating back
@@ -1686,7 +1687,7 @@ static void row_update_lead(panel_t *p, row_t *row, int index, const char *name,
 	} else {
 		listacts_first_letter(name, letter, sizeof(letter));
 	}
-	sx_row_set_letter(row->row, letter, listacts_name_tone(name), kind == RK_PERSON);
+	sx_row_set_letter(row->row, letter, (kind == RK_YEAR || kind == RK_GENRE) ? sx_hex(SX_CATEGORY_BG) : listacts_name_tone(name), kind == RK_PERSON);
 }
 
 static void row_bind(panel_t *p, row_t *row, int index) {
@@ -3361,7 +3362,7 @@ static void queue_random_track(panel_t *p) {
 		const char *one = path;
 		if (!library_track_title(path, title, sizeof(title))) {
 			const char *slash = strrchr(path, '/');
-			snprintf(title, sizeof(title), "%s", slash ? slash + 1 : path);
+			snprintf(title, sizeof(title), "%.255s", slash ? slash + 1 : path);
 		}
 		listacts_queue(&one, 1, PLAYLIST_QUEUE_NEXT, title);
 	}
@@ -3955,7 +3956,7 @@ static void album_places_load(panel_t *p) {
 // The first-visit hint
 // ---------------------------------------------------------------------------
 
-static bool hint_seen(void) { return config_get_int("ui", "list_hint_seen", 0) != 0; }
+static bool hint_seen(void) { return config_get_int("ui", "list_hint_graphite_seen", 0) != 0; }
 
 static void hint_clear(panel_t *p) {
 	if (p->hint) {
@@ -3968,7 +3969,7 @@ static void relayout_rows(panel_t *p);
 
 static void hint_done_cb(lv_event_t *e) {
 	(void)e;
-	config_set_int("ui", "list_hint_seen", 1);
+	config_set_int("ui", "list_hint_graphite_seen", 1);
 	config_save();
 	// Off both pages that may show it, at once.
 	panel_t *panels[] = {&panel_names, &panel_tracks, &panel_artist_albums};
@@ -4015,6 +4016,7 @@ static void head_cover_show(panel_t *p, const lv_image_dsc_t *dsc) {
 		return;
 	}
 	lv_image_set_src(p->head_cover, dsc);
+	lv_obj_set_hidden(p->head_cover_glyph, dsc != NULL);
 	int32_t w = dsc ? (int32_t)dsc->header.w : 0;
 	lv_image_set_scale(p->head_cover, w > 0 && w != HEAD_COVER_SIZE ? (uint32_t)(HEAD_COVER_SIZE * LV_SCALE_NONE / w)
 																	 : LV_SCALE_NONE);
@@ -4049,7 +4051,7 @@ static void show_corner(lv_obj_t *btn, bool shown);
 
 static void album_paint(panel_t *p) {
 	const sx_palette_t *pal = sx_pal();
-	if (!p->grad) {
+	if (!p->grad && pal->tinted) {
 		int h = (int)p->cfg->screen_height;
 		sx_grad_stop_t stops[3] = {
 			{pal->album_grad[0], 0},
@@ -4064,7 +4066,10 @@ static void album_paint(panel_t *p) {
 		lv_obj_set_style_bg_image_tiled(p->screen, true, 0);
 	}
 	lv_obj_set_style_bg_color(p->screen, pal->album_grad[1], 0);
-	topbar_tint_on_screen(p->screen, true, pal->album_grad[0], lv_color_white());
+	if (p->back_float) {
+		lv_obj_set_style_bg_opa(p->back_float, pal->tinted ? LV_OPA_30 : LV_OPA_TRANSP, 0);
+	}
+	topbar_tint_on_screen(p->screen, true, pal->album_grad[0], pal->tinted ? lv_color_white() : pal->text);
 	if (p->head_bar) {
 		lv_obj_set_style_bg_color(p->head_bar, pal->album_grad[0], 0);
 	}
@@ -4081,10 +4086,10 @@ static void album_paint(panel_t *p) {
 	}
 	lv_color_t around = pal->album_grad[1];
 	for (int i = 0; i < ROW_POOL; i++) {
-		sx_row_set_lift(p->rows[i].row, true, around);
+		sx_row_set_lift(p->rows[i].row, pal->tinted, around);
 	}
 	if (p->head_play_label) {
-		lv_obj_set_style_text_color(p->head_play_label, sx_oklch(0.42f, 0.08f, p->album_hue), 0);
+		lv_obj_set_style_text_color(p->head_play_label, pal->on_accent, 0);
 	}
 }
 
@@ -4149,6 +4154,7 @@ static void head_clear(panel_t *p) {
 		lv_obj_delete(p->head); // the picture goes before its pixels do
 		p->head = NULL;
 		p->head_cover = NULL;
+		p->head_cover_glyph = NULL;
 		p->head_play_label = NULL;
 	}
 	if (p->head_has_large) {
@@ -4225,7 +4231,7 @@ static lv_obj_t *head_glyph_button(lv_obj_t *parent, const lv_image_dsc_t *glyph
 	lv_obj_t *button = lv_btn_create(parent);
 	lv_obj_remove_style_all(button);
 	lv_obj_set_size(button, HEAD_BTN_W, HEAD_BTN_H);
-	lv_obj_set_style_radius(button, HEAD_BTN_H / 2, 0);
+	lv_obj_set_style_radius(button, SX_CARD_R, 0);
 	lv_obj_set_style_bg_color(button, lv_color_white(), LV_STATE_PRESSED);
 	lv_obj_set_style_bg_opa(button, 56, LV_STATE_PRESSED);
 	lv_obj_set_event_bubble(button, true); // a swipe across it still scrolls or goes back
@@ -4233,7 +4239,7 @@ static lv_obj_t *head_glyph_button(lv_obj_t *parent, const lv_image_dsc_t *glyph
 
 	lv_obj_t *image = lv_image_create(button);
 	lv_image_set_src(image, glyph);
-	lv_obj_set_style_image_recolor(image, lv_color_white(), 0);
+	lv_obj_add_style(image, &sx_style_album_icon, 0);
 	lv_obj_set_style_image_recolor_opa(image, LV_OPA_COVER, 0);
 	lv_obj_set_clickable(image, false);
 	lv_obj_center(image);
@@ -4242,11 +4248,12 @@ static lv_obj_t *head_glyph_button(lv_obj_t *parent, const lv_image_dsc_t *glyph
 
 static lv_obj_t *head_line(lv_obj_t *parent, const char *text, const lv_font_t *font, int lines, int width) {
 	lv_obj_t *label = lv_label_create(parent);
+	lv_obj_set_user_data(label, (void *)(intptr_t)lines);
 	lv_label_set_text(label, text);
 	lv_obj_set_width(label, LV_PCT(100));
 	lv_obj_set_style_text_font(label, font, 0);
-	lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
-	lv_obj_set_style_text_color(label, lv_color_white(), 0);
+	lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_LEFT, 0);
+	lv_obj_add_style(label, &sx_style_album_text, 0);
 	lv_obj_set_clickable(label, false);
 	// As many lines as the text needs, up to `lines`.
 	lv_point_t size;
@@ -4300,12 +4307,12 @@ static void head_build(panel_t *p) {
 		lv_obj_add_event_cb(p->back_float, back_float_cb, LV_EVENT_CLICKED, NULL);
 		lv_obj_t *chevron = lv_image_create(p->back_float);
 		lv_image_set_src(chevron, &icon_chevron_left);
-		lv_obj_set_style_image_recolor(chevron, lv_color_white(), 0);
+		lv_obj_add_style(chevron, &sx_style_album_icon, 0);
 		lv_obj_set_style_image_recolor_opa(chevron, LV_OPA_COVER, 0);
 		lv_obj_center(chevron);
 		sx_frame_exempt(p->back_float);
 	}
-	lv_obj_set_pos(p->back_float, 10, (int)p->cfg->top_bar_height + 8);
+	lv_obj_set_pos(p->back_float, 0, (int)p->cfg->top_bar_height);
 	lv_obj_set_hidden(p->back_float, false);
 	lv_obj_move_foreground(p->back_float);
 	lv_obj_move_foreground(p->corner);
@@ -4316,7 +4323,7 @@ static void head_build(panel_t *p) {
 	lv_obj_set_pos(p->head, 0, 0);
 	lv_obj_set_flex_flow(p->head, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_flex_align(p->head, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-	lv_obj_set_style_pad_top(p->head, 8, 0);
+	lv_obj_set_style_pad_top(p->head, SX_HEADER_H, 0);
 	lv_obj_set_style_pad_bottom(p->head, HEAD_GAP, 0);
 	lv_obj_set_scrollable(p->head, false);
 	// A part of the page, not a control: a swipe that starts on the cover
@@ -4327,17 +4334,29 @@ static void head_build(panel_t *p) {
 	// The plaque in the album's tone at once, the 56 px thumbnail stretched
 	// over it when there is one (a 6 KB read), the 240 px one read on the
 	// worker in its place.
-	p->head_cover = lv_image_create(p->head);
-	lv_obj_set_size(p->head_cover, HEAD_COVER_SIZE, HEAD_COVER_SIZE);
-	lv_obj_set_style_radius(p->head_cover, SX_ROW_THUMB_R, 0);
-	lv_obj_set_style_clip_corner(p->head_cover, true, 0);
-	lv_obj_set_style_bg_color(p->head_cover, sx_oklch(0.55f, p->album_chroma < 0 ? 0.10f : LV_MIN(p->album_chroma, 0.10f),
-													  p->album_hue),
-							  0);
-	lv_obj_set_style_bg_opa(p->head_cover, LV_OPA_COVER, 0);
+	lv_obj_t *heading = sx_box(p->head);
+	lv_obj_set_size(heading, lv_pct(100), LV_SIZE_CONTENT);
+	lv_obj_set_style_min_height(heading, HEAD_COVER_SIZE, 0);
+	lv_obj_set_flex_flow(heading, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(heading, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_style_pad_column(heading, 16, 0);
+	lv_obj_set_event_bubble(heading, true);
+	lv_obj_t *cover_frame = sx_box(heading);
+	lv_obj_set_size(cover_frame, HEAD_COVER_SIZE, HEAD_COVER_SIZE);
+	lv_obj_set_style_radius(cover_frame, SX_ROW_THUMB_R, 0);
+	lv_obj_set_style_clip_corner(cover_frame, true, 0);
+	char placeholder_title[256];
+	library_album_title(p->filter_value, placeholder_title, sizeof(placeholder_title));
+	lv_obj_set_style_bg_color(cover_frame, sx_placeholder_name(placeholder_title), 0);
+	lv_obj_set_style_bg_opa(cover_frame, LV_OPA_COVER, 0);
+	p->head_cover = lv_image_create(cover_frame);
+	lv_obj_center(p->head_cover);
 	lv_image_set_inner_align(p->head_cover, LV_IMAGE_ALIGN_CENTER);
 	lv_obj_set_clickable(p->head_cover, false);
-	lv_obj_set_style_margin_bottom(p->head_cover, 10, 0);
+	p->head_cover_glyph = lv_image_create(cover_frame);
+	lv_image_set_src(p->head_cover_glyph, &icon_album_big);
+	sx_set_recolor(p->head_cover_glyph, lv_color_white());
+	lv_obj_center(p->head_cover_glyph);
 	if (!p->head_small) {
 		p->head_small = malloc(COVERTONE_THUMB_BYTES(COVERTONE_THUMB_SMALL));
 	}
@@ -4349,12 +4368,18 @@ static void head_build(panel_t *p) {
 	}
 	p->head_ticket = covertone_thumb_async(p->album_id, COVERTONE_THUMB_LARGE, head_large_cb, p);
 
-	lv_obj_t *title = head_line(p->head, p->title, &font_ui_28_bold, HEAD_TITLE_LINES, width);
+	lv_obj_t *copy = sx_box(heading);
+	lv_obj_set_size(copy, width - HEAD_COVER_SIZE - 16, LV_SIZE_CONTENT);
+	lv_obj_set_flex_flow(copy, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_style_pad_row(copy, 0, 0);
+	lv_obj_set_event_bubble(copy, true);
+	int copy_width = width - HEAD_COVER_SIZE - 16;
+	lv_obj_t *title = head_line(copy, p->title, &font_ui_28_bold, HEAD_TITLE_LINES, copy_width);
 	(void)title;
 	const char *artist = info.artist[0] ? info.artist : p->album_artist;
 	if (artist && artist[0]) {
-		lv_obj_t *line = head_line(p->head, artist, &font_ui_24, 1, width);
-		lv_obj_set_style_margin_top(line, 2, 0);
+		lv_obj_t *line = head_line(copy, artist, &font_ui_22, 2, copy_width);
+		lv_obj_set_style_margin_top(line, 8, 0);
 	}
 
 	// The figures: genre, year, how many tracks and how long. The minutes only
@@ -4382,40 +4407,48 @@ static void head_build(panel_t *p) {
 		snprintf(meta + at, sizeof(meta) - at, "%s%s", at ? " \xC2\xB7 " : "", minutes);
 	}
 	if (meta[0]) {
-		lv_obj_t *line = head_line(p->head, meta, &font_ui_20, 1, width);
+		lv_obj_t *line = head_line(copy, meta, &font_ui_20, 3, copy_width);
 		lv_obj_set_style_text_opa(line, 199, 0); // .78
-		lv_obj_set_style_margin_top(line, 2, 0);
+		lv_obj_set_style_margin_top(line, 8, 0);
 	}
 
 	lv_obj_t *buttons = lv_obj_create(p->head);
 	lv_obj_remove_style_all(buttons);
-	lv_obj_set_size(buttons, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+	lv_obj_set_size(buttons, lv_pct(100), LV_SIZE_CONTENT);
 	lv_obj_set_flex_flow(buttons, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(buttons, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_set_style_pad_column(buttons, HEAD_BTN_GAP, 0);
-	lv_obj_set_style_margin_top(buttons, 12, 0);
+	lv_obj_set_style_margin_top(buttons, 24, 0);
 	lv_obj_set_scrollable(buttons, false);
 	lv_obj_set_clickable(buttons, false);
 	lv_obj_set_event_bubble(buttons, true);
-	head_glyph_button(buttons, &icon_shuffle, head_shuffle_cb, p);
 
 	// "Play": the white pill, its word in the album's ink.
 	lv_obj_t *play = lv_btn_create(buttons);
 	lv_obj_remove_style_all(play);
 	lv_obj_set_size(play, LV_SIZE_CONTENT, HEAD_PLAY_HEIGHT);
-	lv_obj_set_style_bg_color(play, lv_color_white(), 0);
+	lv_obj_add_style(play, &sx_style_accent, 0);
 	lv_obj_set_style_bg_opa(play, LV_OPA_COVER, 0);
-	lv_obj_set_style_bg_color(play, lv_color_hex(0xDCDCDC), LV_STATE_PRESSED);
-	lv_obj_set_style_radius(play, LV_RADIUS_CIRCLE, 0);
-	lv_obj_set_style_pad_hor(play, HEAD_PLAY_PAD, 0);
+	lv_obj_add_style(play, &sx_style_accent_press, LV_STATE_PRESSED);
+	lv_obj_set_style_radius(play, SX_CARD_R, 0);
+	lv_obj_set_width(play, width - 2 * HEAD_BTN_W - 2 * HEAD_BTN_GAP);
+	lv_obj_set_style_pad_hor(play, 12, 0);
+	lv_obj_set_flex_flow(play, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(play, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_style_pad_column(play, 8, 0);
+	lv_obj_t *play_glyph = lv_image_create(play);
+	lv_image_set_src(play_glyph, &icon_play_small);
+	lv_obj_add_style(play_glyph, &sx_style_icon_on_accent, 0);
 	lv_obj_set_event_bubble(play, true);
 	lv_obj_add_event_cb(play, head_play_cb, LV_EVENT_CLICKED, p);
 	p->head_play_label = lv_label_create(play);
 	lv_label_set_text(p->head_play_label, tr("medialist_play"));
 	lv_obj_set_style_text_font(p->head_play_label, &font_ui_24_bold, 0);
-	lv_obj_set_style_text_color(p->head_play_label, sx_oklch(0.42f, 0.08f, p->album_hue), 0);
-	lv_obj_center(p->head_play_label);
+	lv_obj_set_style_text_color(p->head_play_label, sx_pal()->on_accent, 0);
+	lv_obj_set_style_max_width(p->head_play_label, width - 2 * HEAD_BTN_W - 2 * HEAD_BTN_GAP - 64, 0);
+	lv_label_set_long_mode(p->head_play_label, LV_LABEL_LONG_DOT);
 
+	head_glyph_button(buttons, &icon_shuffle, head_shuffle_cb, p);
 	head_glyph_button(buttons, &icon_ellipsis_vertical, head_menu_cb, p);
 
 	// The real height of all that, for the rows to start under. The screen may
@@ -4427,17 +4460,20 @@ static void head_build(panel_t *p) {
 
 // The heading row on the album page stays empty (the head says it all); in
 // selection mode its bar stands behind the buttons.
-static void head_follow(panel_t *p) { (void)p; }
+static void head_follow(panel_t *p) { head_bar_update(p); }
 
 static void head_bar_update(panel_t *p) {
 	if (!p->head_bar) {
 		return;
 	}
-	bool bar = p->album_page && p->selecting;
+	bool bar = p->album_page;
+	bool was_hidden = lv_obj_is_hidden(p->head_bar);
 	lv_obj_set_hidden(p->head_bar, !bar);
-	if (bar) {
+	if (bar && was_hidden) {
 		lv_obj_move_foreground(p->head_bar);
 		lv_obj_move_foreground(p->corner);
+		if (p->back_float)
+			lv_obj_move_foreground(p->back_float);
 	}
 }
 
@@ -4485,6 +4521,26 @@ static void relayout_rows(panel_t *p) {
 		p->rows[i].index = -2;
 	}
 	window_update(p);
+}
+
+static void album_text_size_changed(void) {
+	panel_t *p = &panel_tracks;
+	if (p->head && p->ix) {
+		lv_obj_t *copy = lv_obj_get_child(lv_obj_get_child(p->head, 0), 1);
+		for (uint32_t i = 0; i < lv_obj_get_child_count(copy); i++) {
+			lv_obj_t *label = lv_obj_get_child(copy, (int)i);
+			const lv_font_t *font = lv_obj_get_style_text_font(label, 0);
+			int line = lv_font_get_line_height(font);
+			int limit = (int)(intptr_t)lv_obj_get_user_data(label);
+			lv_point_t text;
+			lv_text_get_size(&text, lv_label_get_text(label), font, 0, 0, lv_obj_get_content_width(copy), LV_TEXT_FLAG_NONE);
+			int lines = (text.y + line - 1) / line;
+			lv_obj_set_height(label, LV_CLAMP(1, lines, limit) * line);
+		}
+		lv_obj_update_layout(p->head);
+		p->head_height = lv_obj_get_height(p->head);
+		relayout_rows(p);
+	}
 }
 
 bool medialist_album_head(void) {
@@ -5082,6 +5138,7 @@ void medialist_init(gui_config_t *cfg) {
 	power_pause_in_standby(index_timer);
 	theme_register_refresh(index_theme_refresh);
 	theme_register_refresh(head_theme_refresh);
+	fonts_register_change(album_text_size_changed);
 	covertone_watch_add(covers_changed);
 	listacts_on_change(lists_changed);
 	sx_frame_on_body_change(index_fit_slot);

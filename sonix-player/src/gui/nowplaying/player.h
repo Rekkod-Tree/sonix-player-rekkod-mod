@@ -10,6 +10,9 @@
 
 extern lv_obj_t *player_screen;
 
+// Detailed audio chain, opened from the player's menu.
+void player_chain_open(void);
+
 void player_init(gui_config_t *cfg);
 
 // Start playing the given file and switch its now-playing info in the UI.

@@ -29,6 +29,19 @@ static void parts_free_cb(lv_event_t *e) { free(lv_event_get_user_data(e)); }
 
 static card_parts_t *parts_of(lv_obj_t *card) { return card ? lv_obj_get_user_data(card) : NULL; }
 
+lv_obj_t *sx_card_nav_group(lv_obj_t *parent) {
+	lv_obj_t *group = sx_box(parent);
+	lv_obj_set_size(group, lv_pct(100), LV_SIZE_CONTENT);
+	lv_obj_set_flex_flow(group, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_style_pad_row(group, 0, 0);
+	lv_obj_add_style(group, &sx_style_surface, 0);
+	lv_obj_set_style_radius(group, SX_CARD_R, 0);
+	lv_obj_set_style_clip_corner(group, true, 0);
+	lv_obj_set_user_flag(group, 3, true);
+	lv_obj_set_event_bubble(group, true);
+	return group;
+}
+
 // The same for a part of the head row: asked for one, the head is in use.
 static card_parts_t *head_parts(lv_obj_t *card) {
 	card_parts_t *p = parts_of(card);
@@ -69,6 +82,7 @@ void sx_pill_style(lv_obj_t *pill) {
 	lv_obj_set_style_bg_opa(pill, LV_OPA_COVER, 0);
 	lv_obj_add_style(pill, &sx_style_press, 0);
 	lv_obj_add_style(pill, &sx_style_text, 0);
+	lv_obj_add_style(pill, &sx_style_surface, LV_STATE_PRESSED);
 	lv_obj_set_style_transform_width(pill, 0, LV_STATE_PRESSED);
 	lv_obj_set_style_transform_height(pill, 0, LV_STATE_PRESSED);
 	// Half the gap each way: a tap between two pills goes to the nearer one.
@@ -79,11 +93,25 @@ void sx_pill_set_active(lv_obj_t *pill, bool active) {
 	if (!pill) {
 		return;
 	}
+	if (lv_obj_get_user_flag(lv_obj_get_parent(pill), 2)) {
+		lv_obj_t *label = lv_obj_get_child(pill, 0);
+		lv_obj_t *line = lv_obj_get_child(pill, 1);
+		lv_obj_remove_style(pill, &sx_style_accent, 0);
+		lv_obj_remove_style(pill, &sx_style_accent_press, LV_STATE_PRESSED);
+		lv_obj_remove_style(label, &sx_style_text, 0);
+		lv_obj_remove_style(label, &sx_style_text2, 0);
+		lv_obj_add_style(label, active ? &sx_style_text : &sx_style_text2, 0);
+		lv_obj_set_style_text_font(label, active ? &font_ui_22_bold : &font_ui_22, 0);
+		lv_obj_set_hidden(line, !active);
+		return;
+	}
 	// The accent's style goes on top of the neutral one, so it wins while
 	// there; both follow the palette by themselves.
 	lv_obj_remove_style(pill, &sx_style_accent, 0);
+	lv_obj_remove_style(pill, &sx_style_accent_press, LV_STATE_PRESSED);
 	if (active) {
 		lv_obj_add_style(pill, &sx_style_accent, 0);
+		lv_obj_add_style(pill, &sx_style_accent_press, LV_STATE_PRESSED);
 	}
 	// A label coloured by hand (the pages' own pills did that before 2.0)
 	// would hide the style's text colour.
@@ -91,6 +119,69 @@ void sx_pill_set_active(lv_obj_t *pill, bool active) {
 	if (label) {
 		lv_obj_remove_local_style_prop(label, LV_STYLE_TEXT_COLOR, 0);
 	}
+}
+
+static void choice_style_changed(lv_event_t *e) { sx_choice_reflow(lv_event_get_target(e)); }
+
+void sx_choice_reflow(lv_obj_t *row) {
+	static bool busy;
+	if (busy)
+		return;
+	// Compact service/search bars keep their own height and scrolling contract.
+	if (lv_obj_get_style_height(row, 0) != LV_SIZE_CONTENT || lv_obj_get_style_width(row, 0) != lv_pct(100)) {
+		return;
+	}
+	busy = true;
+	uint32_t count = lv_obj_get_child_count(row);
+	if (!lv_obj_get_user_flag(row, 2)) {
+		lv_obj_add_event_cb(row, choice_style_changed, LV_EVENT_STYLE_CHANGED, NULL);
+	}
+	lv_obj_set_user_flag(row, 2, true);
+	lv_obj_add_style(row, &sx_style_press, 0);
+	lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
+	lv_obj_set_style_radius(row, SX_CARD_R, 0);
+	lv_obj_set_style_pad_all(row, 0, 0);
+	lv_obj_set_style_pad_hor(row, 4, 0);
+	lv_obj_set_style_pad_gap(row, 4, 0);
+	bool single_row = count <= (fonts_large_text() ? 2U : 4U);
+	if (single_row && count > 2) {
+		int width = lv_obj_get_content_width(row);
+		if (width <= 0)
+			width = 400;
+		int label_width = (width - 4 * ((int)count - 1)) / (int)count - 16;
+		for (uint32_t i = 0; i < count && single_row; i++) {
+			lv_obj_t *label = lv_obj_get_child(lv_obj_get_child(row, (int)i), 0);
+			const lv_font_t *font = lv_obj_get_style_text_font(label, 0);
+			lv_point_t size;
+			lv_text_get_size(&size, lv_label_get_text(label), font, 0, 0, LV_MAX(1, label_width), LV_TEXT_FLAG_NONE);
+			if (size.y > 2 * lv_font_get_line_height(font))
+				single_row = false;
+		}
+	}
+	lv_obj_set_flex_flow(row, single_row ? LV_FLEX_FLOW_ROW : LV_FLEX_FLOW_ROW_WRAP);
+	for (uint32_t i = 0; i < count; i++) {
+		lv_obj_t *button = lv_obj_get_child(row, (int)i);
+		lv_obj_set_size(button, single_row ? 0 : lv_pct(48), 88);
+		lv_obj_set_flex_grow(button, single_row ? 1 : 0);
+		lv_obj_set_style_pad_hor(button, 8, 0);
+		lv_obj_set_style_radius(button, 12, 0);
+		lv_obj_set_style_bg_opa(button, LV_OPA_TRANSP, 0);
+		lv_obj_set_style_bg_opa(button, LV_OPA_40, LV_STATE_PRESSED);
+		lv_obj_set_ext_click_area(button, 0);
+		lv_obj_t *label = lv_obj_get_child(button, 0);
+		lv_obj_set_width(label, lv_pct(100));
+		lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+		lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+		lv_obj_set_style_translate_y(label, -4, 0);
+		if (lv_obj_get_child_count(button) == 1) {
+			lv_obj_t *line = sx_box(button);
+			lv_obj_set_size(line, lv_pct(90), 2);
+			lv_obj_align(line, LV_ALIGN_BOTTOM_MID, 0, -16);
+			lv_obj_add_style(line, &sx_style_accent, 0);
+			lv_obj_set_hidden(line, true);
+		}
+	}
+	busy = false;
 }
 
 void sx_switch_style(lv_obj_t *sw) {
@@ -184,7 +275,7 @@ lv_obj_t *sx_card_title(lv_obj_t *card, const char *text) {
 		p->title = lv_label_create(p->text);
 		lv_obj_set_width(p->title, lv_pct(100));
 		lv_label_set_long_mode(p->title, LV_LABEL_LONG_WRAP);
-		lv_obj_set_style_text_font(p->title, &font_ui_24, 0);
+		lv_obj_set_style_text_font(p->title, &font_ui_24_bold, 0);
 		lv_obj_add_style(p->title, &sx_style_text, 0);
 		lv_obj_move_to_index(p->title, 0);
 	}
@@ -205,7 +296,7 @@ lv_obj_t *sx_card_subtitle(lv_obj_t *card, const char *text, bool mono) {
 	lv_obj_remove_style(p->subtitle, &sx_style_text2, 0);
 	lv_obj_remove_style(p->subtitle, &sx_style_text_accent, 0);
 	lv_obj_add_style(p->subtitle, mono ? &sx_style_text_accent : &sx_style_text2, 0);
-	lv_obj_set_style_text_font(p->subtitle, mono ? &font_ui_17 : &font_ui_21, 0);
+	lv_obj_set_style_text_font(p->subtitle, mono ? &font_ui_17 : &font_ui_22, 0);
 	lv_label_set_text(p->subtitle, text ? text : "");
 	lv_obj_set_hidden(p->subtitle, !text || !text[0]);
 	return p->subtitle;
@@ -227,6 +318,22 @@ lv_obj_t *sx_card_value(lv_obj_t *card, const char *text) {
 	return p->value;
 }
 
+void sx_card_nav_item(lv_obj_t *card) {
+	lv_obj_t *parent = lv_obj_get_parent(card);
+	if (!lv_obj_get_user_flag(parent, 3))
+		return;
+	lv_obj_set_style_radius(card, 0, 0);
+	int index = lv_obj_get_index(card);
+	if (index > 0) {
+		lv_obj_t *previous = lv_obj_get_child(parent, index - 1);
+		lv_obj_t *line = sx_box(previous);
+		lv_obj_set_ignore_layout(line, true);
+		lv_obj_set_size(line, lv_pct(100), 1);
+		lv_obj_add_style(line, &sx_style_hairline, 0);
+		lv_obj_align(line, LV_ALIGN_BOTTOM_MID, 0, SX_CARD_PAD_V);
+	}
+}
+
 lv_obj_t *sx_card_chevron(lv_obj_t *card) {
 	card_parts_t *p = head_parts(card);
 	if (!p) {
@@ -237,6 +344,7 @@ lv_obj_t *sx_card_chevron(lv_obj_t *card) {
 		lv_image_set_src(p->chevron, &icon_chevron_right);
 		lv_obj_add_style(p->chevron, &sx_style_icon, 0);
 		lv_obj_set_style_image_opa(p->chevron, LV_OPA_60, 0);
+		sx_card_nav_item(card);
 	}
 	return p->chevron;
 }
@@ -317,13 +425,19 @@ lv_obj_t *sx_card_action(lv_obj_t *card, const char *text, lv_event_cb_t cb, voi
 	lv_obj_set_size(row, lv_pct(100), LV_SIZE_CONTENT);
 	lv_obj_t *btn = lv_btn_create(row);
 	sx_pill_style(btn);
-	lv_obj_set_width(btn, LV_SIZE_CONTENT);
-	lv_obj_set_style_pad_hor(btn, 24, 0);
+	lv_obj_set_size(btn, lv_pct(100), SX_SHEET_BTN_H);
+	lv_obj_set_style_radius(btn, SX_CARD_R, 0);
+	lv_obj_set_style_pad_hor(btn, 16, 0);
+	lv_obj_set_ext_click_area(btn, 0);
 	if (cb) {
 		lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, user);
 	}
 	lv_obj_t *label = lv_label_create(btn);
 	lv_obj_set_style_text_font(label, &font_ui_22, 0);
+	lv_obj_set_width(label, lv_pct(100));
+	lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+	lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+	lv_obj_set_style_max_height(label, 2 * lv_font_get_line_height(&font_ui_22), 0);
 	lv_label_set_text(label, text ? text : "");
 	lv_obj_center(label);
 	return btn;
@@ -356,6 +470,7 @@ lv_obj_t *sx_pill(lv_obj_t *row, const char *text, intptr_t value, lv_event_cb_t
 	lv_obj_set_style_text_font(label, &font_ui_22, 0);
 	lv_label_set_text(label, text ? text : "");
 	lv_obj_center(label);
+	sx_choice_reflow(row);
 	return btn;
 }
 

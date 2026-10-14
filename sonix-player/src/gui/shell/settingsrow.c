@@ -86,6 +86,27 @@ static void refit_titles(void) {
 	}
 }
 
+lv_obj_t *settingsrow_name_field(lv_obj_t *parent, gui_config_t *cfg, uint32_t max_length) {
+	lv_obj_t *field = lv_textarea_create(parent);
+	lv_textarea_set_one_line(field, true);
+	lv_textarea_set_max_length(field, max_length);
+	lv_textarea_set_placeholder_text(field, tr("name"));
+	lv_obj_set_size(field, cfg->screen_width - 2 * SX_BODY_PAD_L, 88);
+	lv_obj_set_scrollbar_mode(field, LV_SCROLLBAR_MODE_OFF);
+	lv_obj_align(field, LV_ALIGN_TOP_LEFT, SX_BODY_PAD_L, SX_BODY_TOP);
+	lv_obj_add_style(field, &theme_style_card, 0);
+	lv_obj_add_style(field, &sx_style_text2, LV_PART_TEXTAREA_PLACEHOLDER);
+	lv_obj_set_style_text_opa(field, LV_OPA_COVER, LV_PART_TEXTAREA_PLACEHOLDER);
+	lv_obj_set_style_radius(field, 12, 0);
+	lv_obj_set_style_border_width(field, 0, 0);
+	lv_obj_set_style_shadow_width(field, 0, 0);
+	lv_obj_set_style_pad_hor(field, 16, 0);
+	lv_obj_set_style_pad_top(field, (88 - lv_font_get_line_height(&font_ui_24)) / 2, 0);
+	lv_obj_set_style_pad_bottom(field, 0, 0);
+	lv_obj_set_style_text_font(field, &font_ui_24, 0);
+	return field;
+}
+
 // The heading's width with `buttons` header buttons at the right.
 static int title_width(gui_config_t *cfg, int buttons) {
 	int reserved = buttons > 0 ? buttons * HEADER_SLOT : TITLE_RIGHT_MARGIN;
@@ -102,7 +123,7 @@ lv_obj_t *settingsrow_title(lv_obj_t *screen, gui_config_t *cfg, const char *tex
 	lv_obj_t *label = lv_label_create(screen);
 	lv_label_set_text(label, tr(text));
 	lv_obj_add_style(label, &theme_style_text, 0);
-	lv_obj_set_style_text_font(label, &font_ui_34_bold, 0);
+	lv_obj_set_style_text_font(label, &font_ui_32_bold, 0);
 	lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
 
 	// Beside the back target, not above it: the two read as one header row.
@@ -114,7 +135,7 @@ lv_obj_t *settingsrow_title(lv_obj_t *screen, gui_config_t *cfg, const char *tex
 	// the end of the last line that fits, so a long album name would grow the
 	// header to two lines; pinning the height to one line makes it truncate
 	// instead.
-	lv_obj_set_height(label, lv_font_get_line_height(&font_ui_34_bold));
+	lv_obj_set_height(label, lv_font_get_line_height(&font_ui_32_bold));
 	fit_title(label, width);
 
 	if (title_count == 0) {
@@ -192,7 +213,7 @@ static void fit_title(lv_obj_t *label, int width) {
 	// 2.0: 34 bold, 30 bold for a title of more than 12 letters; past that it
 	// steps down further rather than ending in an ellipsis -- headings such as
 	// "Opzioni di visualizzazione" do not fit at 30 either.
-	static lv_font_t *const STEPS[] = {&font_ui_34_bold, &font_ui_30_bold, &font_ui_28_bold, &font_ui_26_bold};
+	static lv_font_t *const STEPS[] = {&font_ui_32_bold, &font_ui_30_bold, &font_ui_28_bold, &font_ui_26_bold};
 
 	// The text must be sized with the ellipsis out of the way: a
 	// LV_LABEL_LONG_DOT label does not keep the original string, so once LVGL
@@ -234,7 +255,7 @@ static void fit_title(lv_obj_t *label, int width) {
 // Anything that already fits is left alone: the size drops only when needed,
 // like the page title, so rows in other languages are untouched.
 static void fit_row_label(lv_obj_t *label, int32_t width) {
-	static lv_font_t *const STEPS[] = {&font_ui_24, &font_ui_22, &font_ui_20};
+	static lv_font_t *const STEPS[] = {&font_ui_24_bold, &font_ui_22_bold, &font_ui_20_bold};
 	const size_t count = sizeof(STEPS) / sizeof(STEPS[0]);
 
 	const char *text = lv_label_get_text(label);
@@ -524,7 +545,7 @@ static lv_obj_t *make_card(lv_obj_t *parent, const char *name, lv_obj_t **value_
 	lv_obj_t *label = lv_label_create(card);
 	lv_label_set_text(label, tr(name));
 	lv_obj_add_style(label, &theme_style_text, 0);
-	lv_obj_set_style_text_font(label, &font_ui_24, 0);
+	lv_obj_set_style_text_font(label, &font_ui_24_bold, 0);
 	lv_obj_align(label, LV_ALIGN_TOP_LEFT, 0, 0);
 
 	if (value_out) {
@@ -950,7 +971,7 @@ lv_obj_t *settingsrow_add(lv_obj_t *parent, const char *name, lv_obj_t **value_o
 	lv_obj_t *label = lv_label_create(row);
 	lv_label_set_text(label, tr(name));
 	lv_obj_add_style(label, &theme_style_text, 0);
-	lv_obj_set_style_text_font(label, &font_ui_24, 0);
+	lv_obj_set_style_text_font(label, &font_ui_24_bold, 0);
 	lv_obj_align(label, LV_ALIGN_LEFT_MID, 0, 0);
 
 	// The name steps down a size if it does not fit; see fit_row_label(). Hooked
@@ -976,6 +997,7 @@ lv_obj_t *settingsrow_add(lv_obj_t *parent, const char *name, lv_obj_t **value_o
 		lv_obj_align(chev, LV_ALIGN_RIGHT_MID, 0, 0);
 	}
 
+	sx_card_nav_item(row);
 	return row;
 }
 
@@ -1008,7 +1030,7 @@ void settingsrow_name_lines(lv_obj_t *row, int lines) {
 	}
 	// The name keeps its size and wraps instead of stepping down.
 	lv_obj_remove_event_cb(row, row_resized_cb);
-	lv_obj_set_style_text_font(label, &font_ui_24, 0);
+	lv_obj_set_style_text_font(label, &font_ui_24_bold, 0);
 	lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
 	lv_obj_set_height(label, LV_SIZE_CONTENT);
 	lv_obj_set_style_max_height(label,
@@ -1036,9 +1058,9 @@ lv_obj_t *settingsrow_toggle_pills(lv_obj_t *parent, const char *title, lv_event
 	lv_obj_remove_style(card, &sx_style_press, LV_STATE_PRESSED);
 	// The name sits in the middle of the card's 60 px head line, the pills
 	// 10 px under that line (the prototype's card()).
-	lv_obj_set_style_pad_top(card, SX_CARD_PAD_V + 14, 0);
-	lv_obj_set_style_pad_bottom(card, SX_CARD_PAD_V + 2, 0);
-	lv_obj_set_style_pad_row(card, 10 + 14, 0);
+	lv_obj_set_style_pad_top(card, SX_CARD_PAD_V, 0);
+	lv_obj_set_style_pad_bottom(card, SX_CARD_PAD_V, 0);
+	lv_obj_set_style_pad_row(card, 12, 0);
 	lv_obj_set_scrollable(card, false);
 	lv_obj_set_event_bubble(card, true);
 	lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
@@ -1058,7 +1080,7 @@ lv_obj_t *settingsrow_toggle_pills(lv_obj_t *parent, const char *title, lv_event
 	lv_obj_t *name = lv_label_create(head);
 	lv_label_set_text(name, tr(title));
 	lv_obj_add_style(name, &theme_style_text, 0);
-	lv_obj_set_style_text_font(name, &font_ui_24, 0);
+	lv_obj_set_style_text_font(name, &font_ui_24_bold, 0);
 	// The name takes what is left after the switch and wraps inside it. Without
 	// this a long title -- "Compensazione guadagno DSD" in Italian, longer still
 	// in German -- runs straight under the switch.
@@ -1095,9 +1117,9 @@ lv_obj_t *settingsrow_pills(lv_obj_t *parent, const char *title, lv_obj_t **pill
 	lv_obj_remove_style(card, &sx_style_press, LV_STATE_PRESSED);
 	// The name sits in the middle of the card's 60 px head line, the pills
 	// 10 px under that line (the prototype's card()).
-	lv_obj_set_style_pad_top(card, SX_CARD_PAD_V + 14, 0);
-	lv_obj_set_style_pad_bottom(card, SX_CARD_PAD_V + 2, 0);
-	lv_obj_set_style_pad_row(card, 10 + 14, 0);
+	lv_obj_set_style_pad_top(card, SX_CARD_PAD_V, 0);
+	lv_obj_set_style_pad_bottom(card, SX_CARD_PAD_V, 0);
+	lv_obj_set_style_pad_row(card, 12, 0);
 	lv_obj_set_scrollable(card, false);
 	lv_obj_set_event_bubble(card, true);
 	lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
@@ -1106,7 +1128,7 @@ lv_obj_t *settingsrow_pills(lv_obj_t *parent, const char *title, lv_obj_t **pill
 	lv_obj_t *name = lv_label_create(card);
 	lv_label_set_text(name, tr(title));
 	lv_obj_add_style(name, &theme_style_text, 0);
-	lv_obj_set_style_text_font(name, &font_ui_24, 0);
+	lv_obj_set_style_text_font(name, &font_ui_24_bold, 0);
 
 	lv_obj_t *pills = lv_obj_create(card);
 	lv_obj_set_size(pills, lv_pct(100), LV_SIZE_CONTENT);
@@ -1136,6 +1158,7 @@ static lv_obj_t *pill_make(lv_obj_t *parent, const char *label_text, int value, 
 	lv_label_set_text(label, label_text);
 	lv_obj_set_style_text_font(label, &font_ui_22, 0);
 	lv_obj_center(label);
+	sx_choice_reflow(parent);
 
 	return btn;
 }

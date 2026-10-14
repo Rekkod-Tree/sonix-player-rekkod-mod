@@ -31,8 +31,8 @@ static theme_palette_t palette_light = {.dark = false};
 static bool dark_selected = true;
 
 // "Tint from cover" (Appearance; was "Dynamic tint" before 2.0): the
-// backgrounds, cards and the status bar take the cover's hue. On unless the
-// user turned it off -- the 2.0 look -- remembered in the config.
+// backgrounds, cards and the status bar take the cover's hue when enabled.
+// Existing choices are retained; Graphite starts with neutral surfaces.
 static bool dynamic_tint;
 
 static theme_palette_t *active = &palette_dark;
@@ -49,9 +49,12 @@ static const lv_color_t ACCENT_COLORS[THEME_ACCENT_COUNT] = {
 	LV_COLOR_MAKE(145, 65, 172), // purple (#9141ac)
 	LV_COLOR_MAKE(213, 97, 153), // pink (#d56199)
 };
-static int accent_index = THEME_ACCENT_COVER;
+static int accent_index = THEME_ACCENT_GRAPHITE;
 
 lv_color_t theme_accent_preset(int index) {
+	if (index == THEME_ACCENT_GRAPHITE) {
+		return sx_hex(dark_selected ? SX_D_ACCENT : SX_L_ACCENT);
+	}
 	if (index == THEME_ACCENT_COVER) {
 		return sx_pal()->accent;
 	}
@@ -78,7 +81,7 @@ static int refresh_cb_capacity;
 // already worked out.
 static void rebuild_active(bool configure) {
 	if (configure) {
-		lv_color_t preset = ACCENT_COLORS[accent_index >= 0 && accent_index < THEME_ACCENT_COUNT ? accent_index : 0];
+		lv_color_t preset = theme_accent_preset(accent_index);
 		sx_palette_configure(dark_selected, accent_index, preset, dynamic_tint);
 	}
 	const sx_palette_t *p = sx_pal();
@@ -95,6 +98,7 @@ static void rebuild_active(bool configure) {
 	t->text_primary = p->text;
 	t->text_secondary = p->text2;
 	t->accent = p->accent;
+	t->accent_text = p->accent_text;
 	t->on_accent = p->on_accent;
 	t->dark = dark_selected;
 	active = t;
@@ -178,16 +182,14 @@ void theme_init(void) {
 	// Whatever was chosen last time. Dark is the default for a first boot.
 	dark_selected = config_get_bool("ui", "dark_theme", true);
 
-	// The accent as it was left. Absent -- nobody ever picked one -- means the
-	// 2.0 default, the cover's own; a preset chosen before 2.0 is kept.
-	accent_index = (int)config_get_int("ui", "accent", THEME_ACCENT_COVER);
-	if (accent_index != THEME_ACCENT_COVER && (accent_index < 0 || accent_index >= THEME_ACCENT_COUNT)) {
-		accent_index = THEME_ACCENT_COVER;
+	// A missing preference selects Graphite. Keep every explicitly saved accent.
+	accent_index = (int)config_get_int("ui", "accent", THEME_ACCENT_GRAPHITE);
+	if (accent_index != THEME_ACCENT_COVER && accent_index != THEME_ACCENT_GRAPHITE && (accent_index < 0 || accent_index >= THEME_ACCENT_COUNT)) {
+		accent_index = THEME_ACCENT_GRAPHITE;
 	}
 
-	// On by default since 2.0; someone who switched the old "Dynamic tint" off
-	// has it written down as off and keeps it so.
-	dynamic_tint = config_get_bool("ui", "dynamic_tint", true);
+	// Only change the default; preserve saved tint preferences.
+	dynamic_tint = config_get_bool("ui", "dynamic_tint", false);
 
 	rebuild_active(true);
 	apply_palette();
@@ -391,8 +393,8 @@ void theme_toggle(void) {
 }
 
 void theme_set_accent(int index) {
-	if (index != THEME_ACCENT_COVER && (index < 0 || index >= THEME_ACCENT_COUNT)) {
-		index = 0;
+	if (index != THEME_ACCENT_COVER && index != THEME_ACCENT_GRAPHITE && (index < 0 || index >= THEME_ACCENT_COUNT)) {
+		index = THEME_ACCENT_GRAPHITE;
 	}
 	accent_index = index;
 	rebuild_active(true);
