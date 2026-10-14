@@ -2590,7 +2590,7 @@ static uint64_t decoder_read_s32_inner(decoder_t *dec, uint64_t frame_count, int
 		uint64_t frames_read = decoder_read_pcm_frames_s16(dec, frame_count, narrow);
 		uint64_t got = frames_read * (uint64_t)dec->channels;
 		for (uint64_t i = got; i-- > 0;) {
-			int32_t wide = (int32_t)narrow[i] << 16;
+			int32_t wide = (int32_t)narrow[i] * 65536;
 			pBuffer[i] = wide;
 		}
 		return frames_read;

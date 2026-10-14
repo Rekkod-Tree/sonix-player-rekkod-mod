@@ -21,6 +21,10 @@
 #define MAX_RUNS 200000	   // ceiling on stsc/stts entries held in memory
 #define SIZE_WINDOW 1024   // sample sizes cached at a time
 #define MAX_SMALL_BOX (4 * 1024 * 1024)
+// A supported ALAC access unit holds at most 65536 stereo 24-bit samples
+// (under 400 KiB); AAC packets are smaller. Reject corrupt multi-megabyte
+// claims before a caller allocates, or a uint32 size enters the signed API.
+#define MAX_AUDIO_FRAME_SIZE (4 * 1024 * 1024)
 #define MAX_DEPTH 12
 #define MAX_FREEFORM 8
 #define MAX_FRAGMENTS 200000   // ~5 MB of index at the very worst; a song has a few dozen
@@ -2082,7 +2086,8 @@ uint32_t mp4_max_frame_size(const mp4_file_t *m) {
 	// finding the real maximum means reading the whole size table -- six
 	// megabytes for a long book, for a number the grow-on-demand path in
 	// mp4_read_audio_frame() supplies for free.
-	return (m && m->audio >= 0) ? m->tracks[m->audio].uniform_size : 0;
+	uint32_t size = (m && m->audio >= 0) ? m->tracks[m->audio].uniform_size : 0;
+	return size <= MAX_AUDIO_FRAME_SIZE ? size : 0;
 }
 
 int mp4_read_audio_frame(mp4_file_t *m, uint32_t index, unsigned char *buf, uint32_t buf_size) {
@@ -2092,7 +2097,7 @@ int mp4_read_audio_frame(mp4_file_t *m, uint32_t index, unsigned char *buf, uint
 	uint64_t offset = 0;
 	uint32_t size = 0;
 	bool found = m->fragmented ? frag_location(m, index, &offset, &size) : frame_location(m, m->audio, index, &offset, &size);
-	if (!found || size == 0) {
+	if (!found || size == 0 || size > MAX_AUDIO_FRAME_SIZE) {
 		return 0;
 	}
 	if (size > buf_size) {
