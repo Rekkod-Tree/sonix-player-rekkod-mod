@@ -21,7 +21,7 @@ def main():
             return stamp.read_text(), stamp.stat().st_mtime_ns
 
         current, first_time = flags()
-        assert "/freetype-target/2.15.0/" in current
+        assert "/freetype-target/2.14.3/" in current
         assert "/audio-target/ogg-1.3.6-opus-1.6.1-opusfile-0.12-wv-5.9.0/" in current
         time.sleep(0.02)
         assert flags() == (current, first_time), "unchanged build must not invalidate objects"

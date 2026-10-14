@@ -1,5 +1,15 @@
 # Graphite 2 native UI
 
+## Alpha10 typography compatibility
+
+The installed alpha9 used the same private Segoe UI files and saved text sizes as alpha8. The difference was FreeType 2.15.0 rasterization of Regular at 16-18 px: a target-run comparison found 378 changed glyphs. FreeType 2.14.3 restores the previous metrics and bitmap fingerprints in all 5,600 checked glyph records (two faces, 16 sizes, Latin/Cyrillic/digits/punctuation). The target archive was rebuilt and the comparison repeated against the final archive, again with zero differences. Font weights, sizes and layout were not adjusted.
+
+The common native regression passed at 480x800 and 480x720 with private prototype fonts. Version-cache change/rollback checks and the glibc 2.22 ABI check passed. The rebuild has no new warnings; the pre-existing upstream SQLite `strlen` diagnostic also appears in `output/sonix-baseline-build.log`.
+
+The final executable ran from an isolated SD directory on the physical R1. Captures `alpha10-home.png`, `alpha10-music-grid.png`, `alpha10-track-list.png`, `alpha10-music.png` (full player), `alpha10-settings.png` and `alpha10-wake.png` cover the typography and page geometry. Normal 24-bit/48 kHz playback reported zero ALSA recoveries in sampled windows, and a short screen-off/wake cycle returned to the settings page. Preferences were read back unchanged. Bluetooth did not regain its A2DP profile during this temporary restart, so this pass does not establish Bluetooth reconnect acceptance.
+
+Evidence is in workspace `output/native-ui-alpha10-core/`, `output/device-audit/alpha10-*.png` and `output/quality-review/{font-compat-final.csv,alpha10-device.log}`. This verifies the candidate executable on R1; the packaged alpha10 image still requires installation and boot. KA17 output, long standby/playback and full live-account coverage remain open in `RELEASE_QUALITY_REVIEW.md`.
+
 ## Post-alpha8 fixes and measured idle work
 
 The candidate corrects A8-01 through A8-04: the shade joins the status bar without upper corner cutouts, the scrolled album retains its title/menu, playback colours follow the playing track independently of the browsed album, and right-aligned metadata no longer starts with a separator. This includes the optional persistent status bar over the flat player. No new firmware image is claimed here.

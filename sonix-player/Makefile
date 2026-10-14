@@ -173,8 +173,9 @@ TARGET_LDFLAGS = $(FREETYPE_PREFIX)/lib/libfreetype.a $(AUDIO_LIBS) -lpthread -l
 # FreeType for the target, built static: the rootfs has no libfreetype.so. The
 # host uses the system one. The device's fonts are plain OTF/TTF, so zlib,
 # bzip2, png, harfbuzz and brotli are all off.
-FREETYPE_VER = 2.15.0
-FREETYPE_SHA256 = 93cd47eb719c325107f2d3cf087d06299e944c3b48a40b55537302304dea1dd5
+# Keep the approved Segoe UI rasterization; 2.15 changes it at 16-18 px.
+FREETYPE_VER = 2.14.3
+FREETYPE_SHA256 = 36bc4f1cc413335368ee656c42afca65c5a3987e8768cc28cf11ba775e785a5f
 FREETYPE_TARBALL = freetype-$(FREETYPE_VER).tar.xz
 FREETYPE_URL = https://download.savannah.gnu.org/releases/freetype/$(FREETYPE_TARBALL)
 FREETYPE_URL_MIRROR = https://downloads.sourceforge.net/project/freetype/freetype2/$(FREETYPE_VER)/$(FREETYPE_TARBALL)
