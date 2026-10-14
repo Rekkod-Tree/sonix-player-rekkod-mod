@@ -37,21 +37,23 @@ static bool dynamic_tint;
 
 static theme_palette_t *active = &palette_dark;
 
-// The accent presets, Adwaita's named accents, ordered as requested: blue
-// (the default before 2.0), then warm to cool -- orange, yellow, green,
-// purple, pink. The default since 2.0 is none of them but the cover's own
-// (THEME_ACCENT_COVER).
+// Existing preset indices remain stable; neutral gray is appended last.
+// Graphite and cover-derived colours use their own persisted identifiers.
 static const lv_color_t ACCENT_COLORS[THEME_ACCENT_COUNT] = {
-	LV_COLOR_MAKE(53, 132, 228), // blue (#3584e4)
-	LV_COLOR_MAKE(255, 120, 0),  // orange (#ff7800)
-	LV_COLOR_MAKE(229, 165, 10), // yellow (#e5a50a)
-	LV_COLOR_MAKE(46, 194, 126), // green (#2ec27e)
-	LV_COLOR_MAKE(145, 65, 172), // purple (#9141ac)
-	LV_COLOR_MAKE(213, 97, 153), // pink (#d56199)
+	LV_COLOR_MAKE(53, 132, 228),  // blue (#3584e4)
+	LV_COLOR_MAKE(255, 120, 0),	  // orange (#ff7800)
+	LV_COLOR_MAKE(229, 165, 10),  // yellow (#e5a50a)
+	LV_COLOR_MAKE(46, 194, 126),  // green (#2ec27e)
+	LV_COLOR_MAKE(145, 65, 172),  // purple (#9141ac)
+	LV_COLOR_MAKE(213, 97, 153),  // pink (#d56199)
+	LV_COLOR_MAKE(184, 184, 184), // gray; its light-theme counterpart is below
 };
 static int accent_index = THEME_ACCENT_GRAPHITE;
 
 lv_color_t theme_accent_preset(int index) {
+	if (index == THEME_ACCENT_GRAY) {
+		return sx_hex(dark_selected ? 0xB8B8B8 : 0x626262);
+	}
 	if (index == THEME_ACCENT_GRAPHITE) {
 		return sx_hex(dark_selected ? SX_D_ACCENT : SX_L_ACCENT);
 	}

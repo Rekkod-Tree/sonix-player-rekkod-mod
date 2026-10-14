@@ -137,7 +137,7 @@ certificate checking, and HLS.
 
 ## Settings
 
-- **Appearance** - Graphite 2 dark and light surfaces, a Graphite accent plus the six existing presets and cover accent. New configurations start without cover tint; saved choices are retained.
+- **Appearance** - Graphite 2 dark and light surfaces, a Graphite accent, seven colour presets including neutral Gray, and cover accent. Gray adapts to dark/light themes; saved preset indices remain compatible. New configurations start without cover tint; saved choices are retained.
 - **Status bar** - compact 20px type and glyphs, a 24px battery and one neutral ink for normal states. High volume and low battery keep readable warnings; idle radios are dimmed. Local play/pause and sleep indicators are omitted, with their controls retained. Left, centre, right and hidden clocks support both time formats.
 - **Playback surfaces** - the control centre and volume overlay share the mini-player's background and foreground, including cover accents. The standard player uses one flat canvas in both themes, also with cover tint; Studio and Waveform remain available.
 - **Startup identity** - an atmospheric Rekkod Mod splash credits Sonix. Baseline JPEG assets are supplied for both panels and all three boot-theme slots; the startup mechanism is unchanged.

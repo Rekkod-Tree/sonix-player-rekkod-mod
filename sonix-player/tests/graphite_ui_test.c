@@ -525,17 +525,37 @@ static void surface_states(void) {
 	int step = phase++;
 	if (step == 0) {
 		gui_init_rest();
+		if (getenv("SONIX_UI_TEST_GRAY"))
+			assert(theme_get_accent() == THEME_ACCENT_GRAY);
 		switch_screen(main_menu_screen);
 		player_play_file(getenv("SONIX_UI_TEST_TRACK"));
 		return;
 	}
-	int variant = (step - 1) / 4;
-	int action = (step - 1) % 4;
+	bool gray_mode = getenv("SONIX_UI_TEST_GRAY") != NULL;
+	int cycle = gray_mode ? 5 : 4;
+	int variant = (step - 1) / cycle;
+	int action = (step - 1) % cycle;
 	if (variant >= 4) {
 		printf("UI_TEST_PASS shared mini/control/volume colours and flat player in both themes with cover tint\n");
 		logging_flush();
 		exit(0);
 	}
+	if (gray_mode && action == 1) {
+		assert(lv_screen_active() == appearance_screen);
+		lv_obj_t *label = find_label(appearance_screen, tr("appearance_gray"));
+		lv_obj_t *card = lv_obj_get_parent(lv_obj_get_parent(lv_obj_get_parent(label)));
+		lv_area_t area;
+		lv_obj_get_coords(card, &area);
+		assert(area.y1 >= SX_BODY_TOP && area.y2 < lv_display_get_vertical_resolution(lv_display_get_default()) - 128);
+		char palette_name[40];
+		snprintf(palette_name, sizeof(palette_name), "gray-palette-%d", variant);
+		capture(palette_name);
+		switch_screen(main_menu_screen);
+		volume_overlay_show(variant < 2 ? 40 : 68);
+		return;
+	}
+	if (gray_mode && action > 1)
+		action--;
 	char name[80];
 	snprintf(name, sizeof(name), "surface-%d-%d", variant, action);
 	const sx_palette_t *p = sx_pal();
@@ -543,8 +563,18 @@ static void surface_states(void) {
 		player_sheet_close(false);
 		switch_screen(main_menu_screen);
 		theme_set_dark(variant % 2 == 0);
-		theme_set_accent(variant < 2 ? THEME_ACCENT_GRAPHITE : -1);
+		theme_set_accent(getenv("SONIX_UI_TEST_GRAY") ? THEME_ACCENT_GRAY : variant < 2 ? THEME_ACCENT_GRAPHITE : -1);
 		theme_set_dynamic_tint(variant >= 2);
+		if (getenv("SONIX_UI_TEST_GRAY")) {
+			assert(theme_get_accent() == THEME_ACCENT_GRAY);
+			assert(config_get_int("ui", "accent", -999) == THEME_ACCENT_GRAY);
+			assert(lv_color_eq(theme_accent_preset(THEME_ACCENT_GRAY), sx_hex(variant % 2 == 0 ? 0xB8B8B8 : 0x626262)));
+			switch_screen(appearance_screen);
+			lv_obj_t *gray = find_label(appearance_screen, tr("appearance_gray"));
+			assert(visible(gray));
+			lv_obj_scroll_to_view(lv_obj_get_parent(lv_obj_get_parent(lv_obj_get_parent(gray))), LV_ANIM_OFF);
+			return;
+		}
 		volume_overlay_show(variant < 2 ? 40 : 68);
 	} else if (action == 1) {
 		lv_obj_t *overlay = NULL;

@@ -24,12 +24,12 @@ static lv_obj_t *btn_dark;
 static lv_obj_t *btn_light;
 static lv_obj_t *btn_clock[4]; // left / centre / right / hidden
 // The coloured circles: the cover's own first (ACCENT_SLOT_COVER), then the
-// six presets, preset i in slot i + 1.
+// presets, preset i in slot i + 1.
 #define ACCENT_SLOT_GRAPHITE 0
 #define ACCENT_SLOT_COVER 1
 #define ACCENT_SLOTS (THEME_ACCENT_COUNT + 2)
 static lv_obj_t *btn_accent[ACCENT_SLOTS];
-static lv_obj_t *graphite_name;
+static lv_obj_t *accent_name;
 static lv_obj_t *cover_mark[2]; // the half moon on the cover's circle: disc, then the bite out of it
 static lv_obj_t *tint_toggle;
 static lv_obj_t *battery_percent_toggle;
@@ -108,8 +108,10 @@ static int slot_accent(int slot) { return slot == ACCENT_SLOT_GRAPHITE ? THEME_A
 // album -- and carries a half moon, the handoff's "from the cover" mark.
 static void refresh_accent_buttons(void) {
 	int active_accent = theme_get_accent();
-	if (graphite_name)
-		lv_obj_set_hidden(graphite_name, active_accent != THEME_ACCENT_GRAPHITE);
+	if (accent_name) {
+		lv_label_set_text(accent_name, tr(active_accent == THEME_ACCENT_GRAY ? "appearance_gray" : "appearance_graphite"));
+		lv_obj_set_hidden(accent_name, active_accent != THEME_ACCENT_GRAPHITE && active_accent != THEME_ACCENT_GRAY);
+	}
 	for (int i = 0; i < ACCENT_SLOTS; i++) {
 		if (!btn_accent[i]) {
 			continue;
@@ -202,11 +204,11 @@ void appearance_init(gui_config_t *cfg) {
 	btn_clock[TOPBAR_CLOCK_RIGHT] = settingsrow_pill(pills, "right", TOPBAR_CLOCK_RIGHT, clock_pos_cb);
 	btn_clock[TOPBAR_CLOCK_HIDDEN] = settingsrow_pill(pills, "hide", TOPBAR_CLOCK_HIDDEN, clock_pos_cb);
 
-	// The accent: the cover's own first, then the six presets, spread across
+	// The accent: the cover's own first, then the presets, spread across
 	// the card in one line (seven 52 px circles fit 410 px with room between).
 	lv_obj_t *accent_card = sx_card_create(container);
 	sx_card_title(accent_card, tr("appearance_accent_colour"));
-	graphite_name = sx_card_subtitle(accent_card, tr("appearance_graphite"), false);
+	accent_name = sx_card_subtitle(accent_card, tr("appearance_graphite"), false);
 	lv_obj_t *accent_row = sx_card_swatches(accent_card);
 	lv_obj_set_flex_flow(accent_row, LV_FLEX_FLOW_ROW_WRAP);
 	lv_obj_set_flex_align(accent_row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);

@@ -73,8 +73,9 @@ bool theme_is_dark(void);
 void theme_toggle(void);
 
 // Graphite (-2) is the default when the setting is absent. Cover (-1) and the
-// six saved preset indices (0..5) keep their meanings. All choices persist.
-#define THEME_ACCENT_COUNT 6
+// six saved preset indices (0..5) keep their meanings. Gray is appended at 6.
+#define THEME_ACCENT_COUNT 7
+#define THEME_ACCENT_GRAY 6
 #define THEME_ACCENT_COVER (-1)
 #define THEME_ACCENT_GRAPHITE (-2)
 lv_color_t theme_accent_preset(int index);

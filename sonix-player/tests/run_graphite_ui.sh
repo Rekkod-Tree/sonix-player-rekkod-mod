@@ -44,7 +44,9 @@ screen_off_seconds = 0
 base_url = http://127.0.0.1:18766
 EOF
     unset SONIX_UI_TEST_LEGACY
-    if [ "$height" = 720 ]; then
+    if [ -n "${SONIX_UI_TEST_GRAY:-}" ]; then
+        sed -i '/^language = Russian$/a accent = 6' "$run_root/config.ini"
+    elif [ "$height" = 720 ]; then
         sed -i '/^language = Russian$/a accent = 0\ndynamic_tint = 1' "$run_root/config.ini"
         export SONIX_UI_TEST_LEGACY=1
     fi
