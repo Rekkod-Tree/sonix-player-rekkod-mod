@@ -743,7 +743,7 @@ static void apply_playback_status(audio_status_t status) {
 	// This runs from every poll, twice a second: written only when it changes.
 	sx_set_src(play_btn_icon, live_mode ? (playing ? &icon_stop : &icon_play) : (playing ? &icon_pause : &icon_play));
 	// 2.0: the glyph on the white disc is the album's dark ink (np_ink).
-	sx_set_recolor(play_btn_icon, (layout_studio_now) ? sx_pal()->np_ink : sx_pal()->on_accent);
+	sx_set_recolor(play_btn_icon, (layout_studio_now) ? sx_pal()->np_ink : sx_pal()->mini_ink);
 	np_pause_badge_update(playing);
 
 	// Keep polling either way, just less often when nothing is playing. The
@@ -1022,7 +1022,7 @@ static void cover_art_layout(void) {
 	if (cover_thumb_img)
 		lv_obj_set_size(cover_thumb_img, full ? cover_box_w : side, full ? cover_box_h : side);
 	if (!layout_studio_now)
-		lv_obj_set_style_bg_color(cover_panel, sx_pal()->bg, 0);
+		lv_obj_set_style_bg_color(cover_panel, sx_pal()->np_bg, 0);
 }
 
 static void cover_show(bool have_cover) {
@@ -1049,7 +1049,7 @@ static void paint_seek_track(void) {
 	if (!progress_slider || layout_wave_now)
 		return;
 	bool dark_backdrop = layout_studio_now;
-	lv_obj_set_style_bg_color(progress_slider, dark_backdrop ? lv_color_white() : sx_pal()->text2, LV_PART_MAIN);
+	lv_obj_set_style_bg_color(progress_slider, dark_backdrop ? lv_color_white() : sx_pal()->np_text2, LV_PART_MAIN);
 	lv_obj_set_style_bg_opa(progress_slider, dark_backdrop ? LV_OPA_30 : theme_is_dark() ? LV_OPA_50 : LV_OPA_70, LV_PART_MAIN);
 }
 
@@ -1081,7 +1081,7 @@ static void set_over_cover(bool on) {
 			// The handoff's 75 % white over the dark panel.
 			lv_obj_set_style_text_color(dim_objs[i], lv_color_make(196, 196, 196), 0);
 		} else {
-			lv_obj_remove_local_style_prop(dim_objs[i], LV_STYLE_TEXT_COLOR, 0);
+			lv_obj_set_style_text_color(dim_objs[i], sx_pal()->np_text2, 0);
 		}
 	}
 	for (size_t i = 0; i < sizeof(icon_objs) / sizeof(icon_objs[0]); i++) {
@@ -1102,11 +1102,11 @@ static void set_over_cover(bool on) {
 	// light theme with no cover -- a white disc on a near-white panel is
 	// invisible.
 	if (play_btn) {
-		lv_obj_set_style_bg_color(play_btn, on ? lv_color_white() : sx_pal()->accent, 0);
+		lv_obj_set_style_bg_color(play_btn, on ? lv_color_white() : sx_pal()->mini_bg, 0);
 		lv_obj_set_style_bg_opa(play_btn, LV_OPA_COVER, 0);
 	}
 	if (play_btn_icon) {
-		lv_obj_set_style_image_recolor(play_btn_icon, on ? sx_pal()->np_ink : sx_pal()->on_accent, 0);
+		lv_obj_set_style_image_recolor(play_btn_icon, on ? sx_pal()->np_ink : sx_pal()->mini_ink, 0);
 		lv_obj_set_style_image_recolor_opa(play_btn_icon, LV_OPA_COVER, 0);
 	}
 
@@ -1228,7 +1228,7 @@ static void lyrics_repaint_lit(void);
 static void paint_transport_tint(void) {
 	bool on = layout_studio_now;
 	if (play_btn_icon) {
-		lv_obj_set_style_image_recolor(play_btn_icon, on ? sx_pal()->np_ink : sx_pal()->on_accent, 0);
+		lv_obj_set_style_image_recolor(play_btn_icon, on ? sx_pal()->np_ink : sx_pal()->mini_ink, 0);
 		lv_obj_set_style_image_recolor_opa(play_btn_icon, LV_OPA_COVER, 0);
 	}
 	if (repeat_btn_icon) {
@@ -3295,7 +3295,7 @@ static void player_refresh_theme(void) {
 	// and a white glyph on it. A new accent can change the palette, so the
 	// gradients are looked at again (made again only if their colours moved).
 	if (!studio_up && !lyrics_look_on) {
-		lv_obj_set_style_bg_color(cover_panel, sx_pal()->bg, 0);
+		lv_obj_set_style_bg_color(cover_panel, sx_pal()->np_bg, 0);
 	}
 	lv_obj_set_style_image_recolor(cover_placeholder_icon, lv_color_white(), 0);
 	np_paint_backgrounds();
@@ -4735,10 +4735,12 @@ static void bar_over_player_update(void) {
 		return;
 	}
 	topbar_set_hidden(false);
-	if (!current_cover.pixels) {
+	if ((!layout_alt_now && !layout_studio_now) || !current_cover.pixels) {
 		topbar_set_over_artwork(false, false);
+		topbar_set_playback(true);
 		return;
 	}
+	topbar_set_playback(false);
 	topbar_set_over_artwork(true, !layout_studio_now);
 }
 
@@ -4769,6 +4771,7 @@ void player_set_statusbar_always(bool on) {
 
 	if (!on) {
 		if (sheet_open) {
+			topbar_set_playback(false);
 			topbar_set_over_artwork(false, false);
 			topbar_set_hidden(true);
 		}
@@ -4848,6 +4851,7 @@ void player_sheet_close(bool animate) {
 	back_btn_player_mode(false);
 	sx_mini_player_shown(false);
 	lyrics_screen_hold_update();
+	topbar_set_playback(false);
 	topbar_set_over_artwork(false, false);
 	topbar_set_hidden(false);
 	// The tab does not travel with the page: coming back to a player with a
@@ -5109,17 +5113,21 @@ static void menu_style_for_layout(void) {
 }
 
 // ---------------------------------------------------------------------------
-// Flat playback surfaces follow the page palette, including cover tint.
+// Flat playback surfaces follow the playing cover, including cover tint.
 // Studio's artwork backdrop is handled separately by its existing layout.
 // ---------------------------------------------------------------------------
+static lv_obj_t *upnext_lead; // "Up next"
+
 static void np_paint_backgrounds(void) {
 	if (!player_screen || !player_menu)
 		return;
 	const sx_palette_t *pal = sx_pal();
-	lv_obj_set_style_bg_color(player_screen, pal->bg, 0);
-	lv_obj_set_style_bg_color(player_menu, pal->bg, 0);
+	lv_obj_set_style_bg_color(player_screen, pal->np_bg, 0);
+	lv_obj_set_style_bg_color(player_menu, pal->np_bg, 0);
 	if (cover_panel && !studio_up)
-		lv_obj_set_style_bg_color(cover_panel, pal->bg, 0);
+		lv_obj_set_style_bg_color(cover_panel, pal->np_bg, 0);
+	if (upnext_lead)
+		lv_obj_set_style_text_color(upnext_lead, pal->np_text2, 0);
 	cover_art_layout();
 }
 
@@ -5412,7 +5420,6 @@ static void cover_gesture_cb(lv_event_t *e) {
 
 static lv_obj_t *upnext_chip;
 static lv_obj_t *upnext_words;
-static lv_obj_t *upnext_lead; // "Up next"
 static lv_obj_t *upnext_name; // the track, or "Queue"
 static lv_obj_t *upnext_arrow;
 static unsigned upnext_revision;
@@ -5694,7 +5701,7 @@ static void np_chain_refresh(const device_state_t *state) {
 		snprintf(chain_shown, sizeof(chain_shown), "%s", text);
 		lv_label_set_text(chain_text, text);
 	}
-	lv_color_t c = warn ? sx_hex(sx_pal()->dark ? SX_D_WARNING_TEXT : SX_L_WARNING_TEXT) : sx_pal()->text2;
+	lv_color_t c = warn ? sx_hex(sx_pal()->dark ? SX_D_WARNING_TEXT : SX_L_WARNING_TEXT) : sx_pal()->np_text2;
 	if ((int)warn != chain_warn_shown || !lv_color_eq(c, lv_obj_get_style_bg_color(chain_dot, 0))) {
 		chain_warn_shown = warn;
 		lv_obj_set_style_bg_color(chain_dot, c, 0);
@@ -6299,14 +6306,14 @@ void player_init(gui_config_t *cfg) {
 	backdrop_studio_h = (int)cfg->screen_height;
 
 	// The page and controls share the flat canvas used by the prototype.
-	lv_obj_set_style_bg_color(player_screen, sx_pal()->bg, 0);
+	lv_obj_set_style_bg_color(player_screen, sx_pal()->np_bg, 0);
 	lv_obj_set_style_bg_opa(player_screen, LV_OPA_COVER, 0);
 
 	// The panel: title, chain, bar, clocks and transport on the same canvas.
 	player_menu = lv_obj_create(player_screen);
 	lv_obj_set_size(player_menu, cfg->screen_width, menu_height + SX_NP_PANEL_R);
 	lv_obj_set_pos(player_menu, 0, (int)cfg->screen_height - menu_height);
-	lv_obj_set_style_bg_color(player_menu, sx_pal()->bg, 0);
+	lv_obj_set_style_bg_color(player_menu, sx_pal()->np_bg, 0);
 	lv_obj_set_style_bg_opa(player_menu, LV_OPA_COVER, 0);
 	lv_obj_set_flex_flow(player_menu, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_style_border_width(player_menu, 0, 0);
@@ -6628,7 +6635,7 @@ void player_init(gui_config_t *cfg) {
 	play_btn = lv_btn_create(player_controls_buttons);
 	lv_obj_set_size(play_btn, SX_NP_PLAY, SX_NP_PLAY);
 	lv_obj_set_style_radius(play_btn, LV_RADIUS_CIRCLE, 0);
-	lv_obj_set_style_bg_color(play_btn, sx_pal()->accent, 0); // repainted by set_over_cover
+	lv_obj_set_style_bg_color(play_btn, sx_pal()->mini_bg, 0); // repainted by set_over_cover
 	lv_obj_set_style_bg_opa(play_btn, LV_OPA_COVER, 0);
 	lv_obj_set_style_shadow_width(play_btn, 0, 0);
 	lv_obj_add_event_cb(play_btn, play_btn_event_cb, LV_EVENT_CLICKED, NULL);
@@ -6666,7 +6673,7 @@ void player_init(gui_config_t *cfg) {
 	lv_obj_align(cover_panel, LV_ALIGN_TOP_MID, 0, 0);
 	// Until the picture (or its 240 px thumbnail) is up, the plaque in the
 	// album's tone, as every 2.0 cover is drawn first.
-	lv_obj_set_style_bg_color(cover_panel, sx_pal()->bg, 0);
+	lv_obj_set_style_bg_color(cover_panel, sx_pal()->np_bg, 0);
 	// A tap pauses, a swipe across skips; the pull down is the sheet's.
 	lv_obj_add_event_cb(cover_panel, cover_gesture_cb, LV_EVENT_PRESSED, NULL);
 	lv_obj_add_event_cb(cover_panel, cover_gesture_cb, LV_EVENT_PRESSING, NULL);

@@ -628,6 +628,14 @@ static void surface_states(void) {
 
 static void run(lv_timer_t *timer) {
 	(void)timer;
+	if (getenv("SONIX_UI_TEST_IDLE_PANEL_ONLY")) {
+		panel_idle_states();
+		return;
+	}
+	if (getenv("SONIX_UI_TEST_REFINEMENTS_ONLY")) {
+		refinement_states();
+		return;
+	}
 	if (getenv("SONIX_UI_TEST_COMPONENTS_ONLY")) {
 		component_states();
 		return;
@@ -977,10 +985,14 @@ static void run(lv_timer_t *timer) {
 				int w, h;
 				uint16_t *pixels = display_capture_frame(&w, &h);
 				assert(pixels);
-				for (int y = 50; y < 130; y++) {
-					for (int x = 90; x < 450; x++)
-						assert(pixels[y * w + x] == pixels[y * w + 10]);
-				}
+				lv_obj_t *heading = settingsrow_page_title(medialist_tracks_screen);
+				assert(heading && visible(heading));
+				assert(strcmp(lv_label_get_text(heading), "Artwork audit") == 0);
+				lv_area_t heading_box;
+				lv_obj_get_coords(heading, &heading_box);
+				assert(heading_box.y1 >= SX_STATUSBAR_H && heading_box.y2 < SX_BODY_TOP);
+				for (int x = 90; x < 450; x++)
+					assert(pixels[130 * w + x] == pixels[130 * w + 10]);
 				printf("UI_ALBUM_ART_PASS rounded loaded artwork and opaque scrolling header\n");
 				return;
 			}

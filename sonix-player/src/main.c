@@ -1757,8 +1757,8 @@ const char *panel_touch_device(void) { return fb_touch_node[0] ? fb_touch_node :
 // not reading, and the queue on this descriptor would fill up and stay
 // readable.
 //
-// Off by default until it has been checked on the device: [display]
-// touch_events=1 in device_config.ini turns it on, 0 keeps plain timer polling.
+// Default on for hardware-validated models. [display] touch_events=0 keeps
+// timed reading as a fallback; an explicit 1 opts other models in.
 // ---------------------------------------------------------------------------
 
 static int fb_touch_fd = -1;  // the descriptor lv_evdev reads; -1 without on-demand reading
@@ -2001,7 +2001,8 @@ static lv_display_t *init_target_display(void) {
 		// On-demand reading (see touch_read_timer_cb): the read timer gets
 		// this file's callback, which parks it when idle.
 		lv_timer_t *t = lv_indev_get_read_timer(touch);
-		if (t && fb_touch_fd >= 0 && config_get_int("display", "touch_events", 0)) {
+		const sysinfo_model_t *model = sysinfo_model();
+		if (t && fb_touch_fd >= 0 && config_get_int("display", "touch_events", model && model->event_touch)) {
 			lv_timer_set_cb(t, touch_read_timer_cb);
 		} else {
 			fb_touch_fd = -1;

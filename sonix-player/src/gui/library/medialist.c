@@ -301,6 +301,7 @@ struct panel {
 	// Behind the header row in selection mode on the album page: its buttons
 	// need ground of their own over the rows scrolling by.
 	lv_obj_t *head_bar;
+	lv_obj_t *head_menu_btn;
 	// The cover: the 56 px thumbnail stretched at once, then the 240 px one
 	// read on the worker (covertone_thumb_async).
 	uint8_t *head_small;
@@ -1083,11 +1084,7 @@ static void row_update_detail(panel_t *p, row_t *row, int index, const char *pat
 	char badge[24];
 	char length[16];
 	listacts_track_badge(path, badge, sizeof(badge), length, sizeof(length));
-	char badge_text[32] = "";
-	if (badge[0]) {
-		snprintf(badge_text, sizeof(badge_text), artist ? "\xC2\xB7 %s" : "%s", badge);
-	}
-	sx_row_set_subtitle(row->row, artist ? artist : "", badge_text, length);
+	sx_row_set_subtitle(row->row, artist ? artist : "", badge, length);
 }
 
 // ---------------------------------------------------------------------------
@@ -4165,6 +4162,7 @@ static void head_clear(panel_t *p) {
 		album_page_leave(p);
 		album_unpaint(p);
 		p->album_page = false;
+		lv_obj_remove_style(p->title_label, &sx_style_album_text, 0);
 		lv_label_set_text(p->title_label, p->title);
 		lv_obj_set_hidden(p->title_label, false);
 		list_place(p, false);
@@ -4180,6 +4178,8 @@ static void head_clear(panel_t *p) {
 	if (p->head_bar) {
 		lv_obj_set_hidden(p->head_bar, true);
 	}
+	if (p->head_menu_btn)
+		lv_obj_set_hidden(p->head_menu_btn, true);
 	p->head_height = 0;
 }
 
@@ -4294,8 +4294,15 @@ static void head_build(panel_t *p) {
 	// The list up to the status bar, no header row: the floating back button
 	// stands over the head instead.
 	list_place(p, true);
-	lv_label_set_text(p->title_label, "");
+	lv_label_set_text(p->title_label, p->title);
+	lv_obj_add_style(p->title_label, &sx_style_album_text, 0);
 	lv_obj_set_hidden(p->title_label, true);
+	if (!p->head_menu_btn) {
+		p->head_menu_btn = head_glyph_button(p->screen, &icon_ellipsis_vertical, head_menu_cb, p);
+		lv_obj_set_pos(p->head_menu_btn, p->cfg->screen_width - HEAD_BTN_W, p->cfg->top_bar_height);
+		sx_frame_exempt(p->head_menu_btn);
+	}
+	lv_obj_set_hidden(p->head_menu_btn, true);
 	if (!p->back_float) {
 		p->back_float = lv_btn_create(p->screen);
 		lv_obj_remove_style_all(p->back_float);
@@ -4458,8 +4465,7 @@ static void head_build(panel_t *p) {
 	p->head_height = lv_obj_get_height(p->head);
 }
 
-// The heading row on the album page stays empty (the head says it all); in
-// selection mode its bar stands behind the buttons.
+// Keep album context and its menu available after the hero scrolls away.
 static void head_follow(panel_t *p) { head_bar_update(p); }
 
 static void head_bar_update(panel_t *p) {
@@ -4474,6 +4480,18 @@ static void head_bar_update(panel_t *p) {
 		lv_obj_move_foreground(p->corner);
 		if (p->back_float)
 			lv_obj_move_foreground(p->back_float);
+	}
+	if (p->album_page) {
+		bool compact = !p->selecting && p->head_height > 0 && p->saved_scroll >= p->head_height - SX_HEADER_H;
+		bool title_hidden = lv_obj_is_hidden(p->title_label);
+		lv_obj_set_hidden(p->title_label, !compact);
+		if (p->head_menu_btn)
+			lv_obj_set_hidden(p->head_menu_btn, !compact);
+		if (compact && (title_hidden || was_hidden)) {
+			settingsrow_title_corner_slots(p->title_label, p->cfg, 1);
+			lv_obj_move_foreground(p->title_label);
+			lv_obj_move_foreground(p->head_menu_btn);
+		}
 	}
 }
 

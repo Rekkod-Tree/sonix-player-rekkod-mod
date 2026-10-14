@@ -79,6 +79,7 @@ body{margin:0;background:#f3f2ee!important;color:#252a28;font-family:'Segoe UI',
 .sx-row-title small{font-size:var(--type-compact);color:var(--sx-muted);font-weight:400}
 .sx-row-sub{display:flex;gap:var(--space-sm);align-items:baseline;line-height:1.2;margin-top:var(--space-xs);font-size:var(--type-secondary)}
 .sx-row-sub>span:first-child{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sx-row-badge,.sx-duration{flex:none;white-space:nowrap;font-size:var(--type-compact)}
 .sx-duration{font-size:var(--type-compact);font-variant-numeric:tabular-nums}
 .sx-artwork{display:grid;place-items:center;overflow:hidden;flex:none}
 .sx-row-art,.sx-row-number{width:var(--size-thumb);height:var(--size-thumb);flex:none;display:flex;align-items:center;justify-content:center;font-size:var(--type-control);overflow:hidden}

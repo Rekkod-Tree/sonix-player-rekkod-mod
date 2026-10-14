@@ -1184,6 +1184,12 @@ static lv_obj_t *make_circle_button(lv_obj_t *parent, const lv_image_dsc_t *glyp
 
 // Selected controls reverse the mini-player's ink and fill. Unselected ones
 // use a quiet mix, preserving contrast for both pale and dark accents.
+static void panel_set_color(lv_obj_t *obj, lv_style_prop_t prop, lv_color_t color, lv_style_selector_t selector) {
+	lv_style_value_t old;
+	if (lv_obj_get_local_style_prop(obj, prop, &old, selector) != LV_STYLE_RES_FOUND || !lv_color_eq(old.color, color))
+		lv_obj_set_local_style_prop(obj, prop, (lv_style_value_t){.color = color}, selector);
+}
+
 static void circle_button_set_on(lv_obj_t *btn, bool on) {
 	if (!btn) {
 		return;
@@ -1192,11 +1198,11 @@ static void circle_button_set_on(lv_obj_t *btn, bool on) {
 	const sx_palette_t *p = sx_pal();
 	lv_obj_t *label = lv_obj_get_child(lv_obj_get_parent(btn), 1);
 	if (label)
-		lv_obj_set_style_text_color(label, p->mini_ink, 0);
-	lv_obj_set_style_bg_color(btn, on ? p->mini_ink : sx_mix(p->mini_ink, p->mini_bg, 16), 0);
-	lv_obj_set_style_bg_color(btn, sx_mix(p->mini_ink, p->mini_bg, on ? 85 : 28), LV_STATE_PRESSED);
+		panel_set_color(label, LV_STYLE_TEXT_COLOR, p->mini_ink, 0);
+	panel_set_color(btn, LV_STYLE_BG_COLOR, on ? p->mini_ink : sx_mix(p->mini_ink, p->mini_bg, 16), 0);
+	panel_set_color(btn, LV_STYLE_BG_COLOR, sx_mix(p->mini_ink, p->mini_bg, on ? 85 : 28), LV_STATE_PRESSED);
 	if (icon) {
-		lv_obj_set_style_image_recolor(icon, on ? p->mini_bg : p->mini_ink, 0);
+		sx_set_recolor(icon, on ? p->mini_bg : p->mini_ink);
 	}
 }
 
@@ -1209,14 +1215,15 @@ static bool sleep_timer_armed(sleeptimer_kind_t kind);
 static void refresh_audio_buttons(void) {
 	const sx_palette_t *p = sx_pal();
 	if (bright_row && lv_obj_get_child_count(bright_row))
-		lv_obj_set_style_image_recolor(lv_obj_get_child(bright_row, 0), p->mini_ink, 0);
+		sx_set_recolor(lv_obj_get_child(bright_row, 0), p->mini_ink);
 	if (expand_handle && lv_obj_get_child_count(expand_handle))
-		lv_obj_set_style_bg_color(lv_obj_get_child(expand_handle, 0), p->mini_ink, 0);
+		panel_set_color(lv_obj_get_child(expand_handle, 0), LV_STYLE_BG_COLOR, p->mini_ink, 0);
 	if (brightness_slider) {
-		lv_obj_set_style_bg_color(brightness_slider, p->mini_ink, LV_PART_MAIN);
-		lv_obj_set_style_bg_opa(brightness_slider, LV_OPA_20, LV_PART_MAIN);
-		lv_obj_set_style_bg_color(brightness_slider, p->mini_ink, LV_PART_INDICATOR);
-		lv_obj_set_style_bg_color(brightness_slider, sx_pal()->mini_ink, LV_PART_KNOB);
+		panel_set_color(brightness_slider, LV_STYLE_BG_COLOR, p->mini_ink, LV_PART_MAIN);
+		if (lv_obj_get_style_bg_opa(brightness_slider, LV_PART_MAIN) != LV_OPA_20)
+			lv_obj_set_style_bg_opa(brightness_slider, LV_OPA_20, LV_PART_MAIN);
+		panel_set_color(brightness_slider, LV_STYLE_BG_COLOR, p->mini_ink, LV_PART_INDICATOR);
+		panel_set_color(brightness_slider, LV_STYLE_BG_COLOR, p->mini_ink, LV_PART_KNOB);
 	}
 	circle_button_set_on(eq_btn, eq_get_enabled());
 	circle_button_set_on(mseb_btn, mseb_get_enabled());
@@ -1240,7 +1247,7 @@ static void refresh_audio_buttons(void) {
 	if (gain_btn) {
 		lv_obj_t *icon = lv_obj_get_child(gain_btn, 0);
 		if (icon) {
-			lv_image_set_src(icon, high ? &icon_high_gain : &icon_low_gain);
+			sx_set_src(icon, high ? &icon_high_gain : &icon_low_gain);
 		}
 	}
 	circle_button_set_on(gain_btn, high);
@@ -1252,7 +1259,7 @@ static void refresh_audio_buttons(void) {
 	if (gapless_btn) {
 		lv_obj_t *icon = lv_obj_get_child(gapless_btn, 0);
 		if (icon) {
-			lv_image_set_src(icon, gapless ? &icon_gapless_on_quick : &icon_gapless_off_quick);
+			sx_set_src(icon, gapless ? &icon_gapless_on_quick : &icon_gapless_off_quick);
 		}
 	}
 	circle_button_set_on(gapless_btn, gapless);
@@ -1694,7 +1701,9 @@ static void filter_page_cb(lv_event_t *e) {
 void quickpanel_init(gui_config_t *cfg) {
 	int card_w = cfg->screen_width - 2 * CC_MARGIN;
 	cell_w = (card_w - 2 * CC_PAD - (CC_BUTTONS_PER_LINE - 1) * CC_GAP) / CC_BUTTONS_PER_LINE;
-	open_y = SX_STATUSBAR_H + CC_TOP_GAP;
+	// Hide the upper radius behind the opaque status bar. Content and the
+	// lower edge keep their positions, including during a partial pull.
+	open_y = SX_STATUSBAR_H + CC_TOP_GAP - CC_RADIUS;
 
 	veil = lv_obj_create(lv_layer_top());
 	lv_obj_remove_style_all(veil);
@@ -1710,7 +1719,7 @@ void quickpanel_init(gui_config_t *cfg) {
 	int line_h = CC_CELL_H;
 	int lines = QP_SLOT_VISIBLE / CC_BUTTONS_PER_LINE;
 	int grid_h = lines * line_h + (lines - 1) * CC_GAP;
-	card_h_rest = CC_PAD + CC_BOTTOM_PAD + grid_h + BRIGHT_ROW_GAP + BRIGHT_ROW_H;
+	card_h_rest = CC_RADIUS + CC_PAD + CC_BOTTOM_PAD + grid_h + BRIGHT_ROW_GAP + BRIGHT_ROW_H;
 	card_h_base = card_h_rest;
 
 	panel = lv_obj_create(veil);
@@ -1722,6 +1731,7 @@ void quickpanel_init(gui_config_t *cfg) {
 	lv_obj_set_style_radius(panel, CC_RADIUS, 0);
 	lv_obj_set_style_clip_corner(panel, false, 0);
 	lv_obj_set_style_pad_all(panel, CC_PAD, 0);
+	lv_obj_set_style_pad_top(panel, CC_PAD + CC_RADIUS, 0);
 	lv_obj_set_style_pad_bottom(panel, CC_BOTTOM_PAD, 0);
 	lv_obj_set_style_pad_row(panel, BRIGHT_ROW_GAP, 0);
 	lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_COLUMN);

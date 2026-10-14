@@ -1,11 +1,160 @@
 // Included by the isolated native UI runner; never linked into target builds.
 #include "src/gui/nowplaying/trackmenu.h"
 #include "src/gui/settings/timeset.h"
+#include "src/gui/shell/settingsrow.h"
 #include "src/system/bluetooth/bluetooth.h"
 #include "src/system/device/clock.h"
 #include "src/system/streaming/zvukcache.h"
 #include "src/system/streaming/zvukdl.h"
 #include <sys/stat.h>
+
+static unsigned panel_flushes;
+static void panel_flush_cb(lv_event_t *e) {
+	(void)e;
+	panel_flushes++;
+}
+
+static void panel_idle_states(void) {
+	static lv_obj_t *button;
+	static lv_color_t before;
+	switch (phase++) {
+	case 0:
+		gui_init_rest();
+		switch_screen(main_menu_screen);
+		break;
+	case 1:
+		quickpanel_open();
+		break;
+	case 2:
+		capture("panel-idle-before");
+		topbar_set_hidden(true); // Exclude a minute boundary from this panel-only check.
+		lv_display_add_event_cb(lv_display_get_default(), panel_flush_cb, LV_EVENT_FLUSH_START, NULL);
+		break;
+	case 3:
+		panel_flushes = 0;
+		break;
+	case 6:
+		assert(panel_flushes == 0);
+		button = lv_obj_get_parent(find_image(lv_layer_top(), &icon_mseb));
+		assert(button);
+		before = lv_obj_get_style_bg_color(button, 0);
+		lv_obj_send_event(button, LV_EVENT_CLICKED, NULL);
+		break;
+	case 7:
+		assert(panel_flushes > 0);
+		assert(!lv_color_eq(before, lv_obj_get_style_bg_color(button, 0)));
+		capture("panel-idle-toggle");
+		printf("UI_TEST_PASS unchanged panel does not flush; changed toggle repaints\n");
+		logging_flush();
+		exit(0);
+	}
+}
+
+static void refinement_states(void) {
+	static lv_color_t playing_accent, playing_bg;
+	static lv_obj_t *album_menu;
+	switch (phase++) {
+	case 0:
+		gui_init_rest();
+		assert(library_scan_start(getenv("SONIX_SD_ROOT")));
+		theme_set_accent(THEME_ACCENT_COVER);
+		theme_set_dynamic_tint(true);
+		player_play_file(getenv("SONIX_UI_TEST_TRACK"));
+		switch_screen(main_menu_screen);
+		break;
+	case 1: {
+		playing_accent = sx_pal()->mini_bg;
+		playing_bg = sx_pal()->np_bg;
+		char path[512];
+		snprintf(path, sizeof(path), "%s/Graphite/Audit-01.flac", getenv("SONIX_SD_ROOT"));
+		medialist_set_album_head(true);
+		open_fixture_album(path, "Artwork audit");
+		break;
+	}
+	case 2: {
+		assert(lv_color_eq(sx_pal()->mini_bg, playing_accent));
+		assert(lv_color_eq(sx_pal()->np_bg, playing_bg));
+		capture("refine-album-playing-colours");
+		lv_obj_t *scroller = NULL;
+		for (uint32_t i = 0; i < lv_obj_get_child_count(medialist_tracks_screen); i++) {
+			lv_obj_t *child = lv_obj_get_child(medialist_tracks_screen, i);
+			if (lv_obj_is_scrollable(child) && lv_obj_get_height(child) > 300 && lv_obj_get_width(child) >= 400)
+				scroller = child;
+		}
+		assert(scroller);
+		lv_obj_scroll_to_y(scroller, 420, LV_ANIM_OFF);
+		break;
+	}
+	case 3: {
+		capture("refine-album-header");
+		lv_obj_t *title = settingsrow_page_title(medialist_tracks_screen);
+		lv_area_t area;
+		assert(title && visible(title));
+		assert(strcmp(lv_label_get_text(title), "Artwork audit") == 0);
+		lv_obj_get_coords(title, &area);
+		assert(area.y1 >= SX_STATUSBAR_H && area.y2 < SX_BODY_TOP);
+		for (uint32_t i = 0; i < lv_obj_get_child_count(medialist_tracks_screen); i++) {
+			lv_obj_t *child = lv_obj_get_child(medialist_tracks_screen, i);
+			lv_obj_get_coords(child, &area);
+			if (visible(child) && area.y1 == SX_STATUSBAR_H && area.x1 >= 350 && find_image(child, &icon_ellipsis_vertical))
+				album_menu = child;
+		}
+		assert(album_menu);
+		lv_obj_send_event(album_menu, LV_EVENT_CLICKED, NULL);
+		break;
+	}
+	case 4:
+		assert(sx_sheet_is_open());
+		capture("refine-sticky-album-menu");
+		sx_sheet_close();
+		player_set_statusbar_always(true);
+		player_sheet_open(false);
+		break;
+	case 5: {
+		assert(lv_color_eq(lv_obj_get_style_bg_color(player_screen, 0), playing_bg));
+		assert(lv_color_eq(sx_pal()->mini_bg, playing_accent));
+		capture("refine-player-over-album");
+		int w, h;
+		uint16_t *pixels = display_capture_frame(&w, &h);
+		assert(pixels && pixels[43 * w + 240] == pixels[140 * w + 8]);
+		player_sheet_close(false);
+		quickpanel_open();
+		break;
+	}
+	case 6: {
+		capture("refine-shade-joined");
+		int w, h;
+		uint16_t *pixels = display_capture_frame(&w, &h);
+		assert(pixels);
+		for (int x = 1; x < w - 1; x++)
+			assert(pixels[SX_STATUSBAR_H * w + x] == pixels[(SX_STATUSBAR_H - 1) * w + w / 2]);
+		quickpanel_close();
+		switch_screen(main_menu_screen);
+		break;
+	}
+	case 7:
+		for (int dark = 0; dark < 2; dark++) {
+			for (int tint = 0; tint < 2; tint++) {
+				theme_set_dark(dark);
+				theme_set_dynamic_tint(tint);
+				for (int preset = THEME_ACCENT_GRAPHITE; preset <= THEME_ACCENT_GRAY; preset++) {
+					theme_set_accent(preset);
+					sx_palette_t before = *sx_pal();
+					sx_palette_push_hue(45, 0.09f);
+					assert(lv_color_eq(sx_pal()->mini_bg, before.mini_bg));
+					assert(lv_color_eq(sx_pal()->mini_ink, before.mini_ink));
+					assert(lv_color_eq(sx_pal()->np_accent, before.np_accent));
+					assert(lv_color_eq(sx_pal()->np_bg, before.np_bg));
+					assert(lv_color_eq(sx_pal()->np_text2, before.np_text2));
+					sx_palette_pop_hue();
+				}
+			}
+		}
+		printf("UI_TEST_PASS album header/menu, stable playback palette and joined shade\n");
+		logging_flush();
+		exit(0);
+	}
+}
 
 static lv_obj_t *visible_label(lv_obj_t *root, const char *text) {
 	if (lv_obj_is_hidden(root))

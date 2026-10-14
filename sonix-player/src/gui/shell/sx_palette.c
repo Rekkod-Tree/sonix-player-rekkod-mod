@@ -143,10 +143,10 @@ static float contrast(lv_color_t a, lv_color_t b) {
 	return (fmaxf(x, y) + 0.05f) / (fminf(x, y) + 0.05f);
 }
 
-static lv_color_t accent_foreground(lv_color_t accent) {
+static lv_color_t readable_accent(lv_color_t accent, lv_color_t surface, lv_color_t text) {
 	lv_color_t c = accent;
-	for (int pct = 90; pct >= 0 && contrast(c, pal.surface) < 4.5f; pct -= 10) {
-		c = sx_mix(accent, pal.text, (uint8_t)pct);
+	for (int pct = 90; pct >= 0 && contrast(c, surface) < 4.5f; pct -= 10) {
+		c = sx_mix(accent, text, (uint8_t)pct);
 	}
 	return c;
 }
@@ -226,7 +226,7 @@ static void recompute(void) {
 		lv_color_t ink = sx_hex(SX_L_TEXT);
 		pal.on_accent = contrast(ink, pal.accent) > contrast(lv_color_white(), pal.accent) ? ink : lv_color_white();
 	}
-	pal.accent_text = cfg_accent == THEME_ACCENT_GRAPHITE ? sx_hex(cfg_dark ? SX_D_ACCENT_TEXT : SX_L_ACCENT) : accent_foreground(pal.accent);
+	pal.accent_text = cfg_accent == THEME_ACCENT_GRAPHITE ? sx_hex(cfg_dark ? SX_D_ACCENT_TEXT : SX_L_ACCENT) : readable_accent(pal.accent, pal.surface, pal.text);
 
 	pal.active = sx_mix(pal.accent, pal.surface, 16);
 	pal.swipe_end = sx_tone(cfg_dark ? SX_T_D_SWIPE_L : SX_T_L_SWIPE_L, hue);
@@ -239,13 +239,16 @@ static void recompute(void) {
 	pal.album_grad[1] = sx_tone(SX_T_AL_GRAD_1, hue);
 	pal.album_grad[2] = sx_tone(SX_T_AL_GRAD_2, hue);
 
-	// The always-dark surfaces belong to the track playing, not to the page:
-	// the mini player over an album page still wears the song it plays.
+	// Playback surfaces stay tied to the playing track while an album page
+	// borrows a different hue. Reuse the existing fields in all consumers.
 	chroma_scale = play_scale;
-	pal.np_accent = pal.accent_text;
-	pal.np_ink = pal.accent;
-	pal.mini_bg = pal.accent;
-	pal.mini_ink = pal.on_accent;
+	pal.np_bg = cfg_tint ? sx_tone(cfg_dark ? SX_T_D_BG : SX_T_L_BG, play_hue) : pal.bg;
+	pal.np_text2 = cfg_tint ? sx_tone(cfg_dark ? SX_T_D_TEXT2 : SX_T_L_TEXT2, play_hue) : pal.text2;
+	pal.mini_bg = pal.accent_from_cover ? sx_tone(cfg_dark ? SX_T_D_ACCENT : SX_T_L_ACCENT, play_hue) : pal.accent;
+	pal.mini_ink = pal.accent_from_cover && cfg_dark ? sx_tone(SX_T_D_ON_ACC, play_hue) : pal.on_accent;
+	lv_color_t play_surface = cfg_tint && cfg_dark ? sx_tone(SX_T_D_SURFACE, play_hue) : pal.surface;
+	pal.np_accent = cfg_accent == THEME_ACCENT_GRAPHITE ? pal.accent_text : readable_accent(pal.mini_bg, play_surface, pal.text);
+	pal.np_ink = pal.mini_bg;
 	pal.mini_cover_tone = play_placeholder_known ? play_placeholder : sx_placeholder_tone(DEFAULT_HUE);
 	if (!cfg_tint) {
 		pal.album_grad[0] = pal.album_grad[1] = pal.album_grad[2] = pal.bg;

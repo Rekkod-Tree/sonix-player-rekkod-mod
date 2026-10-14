@@ -59,6 +59,8 @@ typedef struct {
 	// Always dark, whatever the theme, at the playing track's hue: the player,
 	// the mini player.
 	lv_color_t np_accent;
+	lv_color_t np_bg;
+	lv_color_t np_text2;
 	lv_color_t np_ink; // the glyph on the white play disc
 	lv_color_t mini_bg;
 	lv_color_t mini_ink;

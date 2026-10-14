@@ -1,5 +1,15 @@
 # Graphite 2 native UI
 
+## Post-alpha8 fixes and measured idle work
+
+The candidate corrects A8-01 through A8-04: the shade joins the status bar without upper corner cutouts, the scrolled album retains its title/menu, playback colours follow the playing track independently of the browsed album, and right-aligned metadata no longer starts with a separator. This includes the optional persistent status bar over the flat player. No new firmware image is claimed here.
+
+`output/native-ui-alpha9-refinements-final/`, `native-ui-alpha9-components/`, `native-ui-alpha9-regression/` and `native-ui-alpha9-idle-panel/` passed at both panel sizes. The last check counts real flush events: a settled shade does not draw unchanged controls, while toggling MSEB causes a visible repaint. The prototype metadata layout was checked in Chromium with no JavaScript errors. R1 captures `alpha9-shade-joined.png`, `alpha9-album-sticky.png`, `alpha9-album-sticky-menu.png`, `alpha9-player-over-album.png` and `alpha9-events-scroll.png` verify the corrected device states.
+
+Existing on-demand touch reading was verified on R1 with first taps, scrolling, long press, screen-off/wake and an edge-back gesture; it is now the R1 default, preserving explicit configuration and the old default on other models. The final temporary candidate started in on-demand mode without a configuration override. With diagnostics enabled in both runs, settled paused-player windows dropped from about 72 loop passes/s and 3.9% process CPU to 12/s and 3.0%. Shade polling still checks live state, but avoids unchanged style/source writes: hardware windows dropped from roughly 15 large redraws per 10 seconds to one small status-region redraw. These are workload measurements, not battery-life or end-to-end touch-latency claims.
+
+The wider reliability, audio, energy and dependency review remains active in `RELEASE_QUALITY_REVIEW.md`.
+
 ## Alpha8 component and playback-menu pass
 
 The current work is on `main`, following gray-accent commit `f04be22`. Filled choices, title/switch alignment, full-width notes, named accents, two-line quick captions and shared date/time actions address the component review. The user explicitly retained the existing 64x300 volume pill; the prototype now follows it. The status bar adopts the open shade's palette and restores its page/artwork state on dismissal. List rows reserve 12px on the right and preserve complete format/duration text before truncating a long artist name.

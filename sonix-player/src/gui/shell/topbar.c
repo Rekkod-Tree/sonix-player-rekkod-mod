@@ -183,6 +183,7 @@ static lv_style_t tint_icon_style;
 // picture, whatever the theme or the page underneath says.
 static bool over_art;
 static bool control_panel_palette;
+static bool playback_palette;
 static bool over_art_blur;	   // asked for a blur behind the bar
 static bool over_art_blur_held; // ...and topbar_hold_backdrop_blur() holds it off
 
@@ -192,6 +193,8 @@ static lv_color_t shell_color(bool known) {
 	if (over_art) {
 		return known ? lv_color_white() : lv_color_make(200, 200, 200);
 	}
+	if (playback_palette)
+		return sx_pal()->np_text2;
 	if (tint_active) {
 		return known ? tint_ink : lv_color_mix(tint_ink, tint_bg, 140);
 	}
@@ -206,6 +209,9 @@ static lv_color_t warning_color(void) {
 static void refresh_status_ink(void) {
 	if (control_panel_palette) {
 		lv_obj_set_style_bg_color(top_bar, sx_pal()->mini_bg, 0);
+		lv_obj_set_style_bg_opa(top_bar, LV_OPA_COVER, 0);
+	} else if (playback_palette && !over_art) {
+		lv_obj_set_style_bg_color(top_bar, sx_pal()->np_bg, 0);
 		lv_obj_set_style_bg_opa(top_bar, LV_OPA_COVER, 0);
 	}
 	lv_color_t ink = shell_color(true);
@@ -1083,7 +1089,7 @@ void topbar_set_battery_percent(bool shown) {
 
 // Puts the bar in the tint or back in the theme, for the page now shown.
 static void tint_apply(void) {
-	if (!top_bar || over_art || control_panel_palette) {
+	if (!top_bar || over_art || control_panel_palette || playback_palette) {
 		return; // the artwork's look holds for as long as the player is up
 	}
 	bool active = tint_screen && tint_page == tint_screen;
@@ -1198,6 +1204,18 @@ void topbar_set_control_panel(bool shown) {
 	} else if (over_art) {
 		over_art_backdrop(over_art_blur);
 	} else {
+		lv_obj_remove_local_style_prop(top_bar, LV_STYLE_BG_OPA, 0);
+		tint_active = true;
+		tint_apply();
+	}
+	refresh_status_ink();
+}
+
+void topbar_set_playback(bool shown) {
+	if (!top_bar || playback_palette == shown)
+		return;
+	playback_palette = shown;
+	if (!shown && !over_art && !control_panel_palette) {
 		lv_obj_remove_local_style_prop(top_bar, LV_STYLE_BG_OPA, 0);
 		tint_active = true;
 		tint_apply();

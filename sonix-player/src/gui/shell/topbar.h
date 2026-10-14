@@ -75,6 +75,9 @@ void topbar_bring_to_front(void);
 // Match the control centre while it is visible, then restore the page/artwork.
 void topbar_set_control_panel(bool shown);
 
+// Flat playback canvas, independent of an album page underneath the player.
+void topbar_set_playback(bool shown);
+
 // Shows or hides the charge percentage next to the battery shell (config
 // "screen"/"battery_percent", on by default). The shell itself always stays --
 // it is what says how much is left at a glance.
