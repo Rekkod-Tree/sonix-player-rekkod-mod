@@ -52,6 +52,7 @@
 - **Sorting across alphabets** - a collation that groups by script, folds case and accents, and skips leading articles unless you turn that off.
 - **A–Z strip** - shown when scrolling a list.
 - **Search** across tracks, albums and artists.
+- Search results reflow around the on-screen keyboard; recent queries and category filters retain distinct, readable rows.
 - **Albums with the same name stay apart** - an album is its name and whose it is: the album artist, the artist when there is none, and the folder when there is neither.
 - **Quality badges** under a title: lossy, CD, Hi-Fi, DSD.
 - **Playlists** - create, rename, reorder, delete. A long press on a row of All tracks, Albums, Artists or Album artists starts a selection, and the chosen tracks, albums or artists go into the queue, the favourites or a playlist together. Inside a playlist or the favourites the selection also takes the chosen tracks out, after asking. In the file browser the same works on tracks and folders, a folder bringing everything under it. A backup writes an extended M3U to the card that other players can read; import reads one back, resolves missing entries by file name, and reports what it found.
@@ -179,3 +180,4 @@ certificate checking, and HLS.
 - **Developer options** - unlocked by tapping the build number: ADB, log to the
   card, database log, disabling the software volume attenuation, and a page of
   running processes and memory.
+- **Bounded SD logging** - the main player log rotates at 8 MiB and retains one previous file; explicit diagnostic log destinations keep their existing behavior.

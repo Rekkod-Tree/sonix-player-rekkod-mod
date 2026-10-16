@@ -21,6 +21,10 @@
 // Writing to the card can be turned off (Settings > Developer options): it is
 // a constant trickle of writes to the user's music card, worth having only
 // while something is being debugged.
+// The background writer keeps up to 8 MiB in sonix_player.log and one previous
+// file, sonix_player.log.1. An older oversized log is reduced to its newest
+// 8 MiB using a temporary copy; a failed copy leaves the original intact.
+// Explicit SONIX_LOG paths are not rotated.
 
 // Starts the stamping and redirects output to the tmpfs. Call first thing in
 // main(), before anything can print: it replaces stdout and stderr.

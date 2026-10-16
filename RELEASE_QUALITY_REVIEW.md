@@ -1,5 +1,25 @@
 # Release quality review
 
+## 16 October: alpha11 candidate and card diagnosis
+
+The search layout, Recent heading and T9 field-switch corrections are documented in `UI3_VALIDATION.md`. Independent review also identified two streaming-cache defects: the caller could read a worker-owned path after the worker freed it, and output-write errors lost their cause. Both Yandex and Zvuk now copy the returned path before starting the worker and preserve write/flush/close/rename errors. `tests/stream_cache_io_test.c` includes the production implementations and covers successful output, full storage, fast worker completion and failed thread creation; both service variants pass AddressSanitizer. Async playback still uses its existing generic error message, while the log retains the cause.
+
+The main SD log now rotates at 8 MiB with one previous log. The existing writer performs rotation; ordinary writes do not hold the destination mutex. `tests/logging_rotation_test.c` passes 11 cases, including USB handoff, contention, failed storage operations, oversized old logs and explicit `SONIX_LOG` overrides. Migrating an already oversized log temporarily needs up to 8 MiB extra storage and holds the destination lock while copying its tail. If this cannot be saved, the original is retained and new excess output is dropped. Startup/USB-held output can briefly add up to 32 KiB beyond the active threshold before writer normalization. The separate held-output tmpfs growth risk remains open; this change bounds the normal SD destination.
+
+Read-only inspection of the connected alpha10 R1 found **8.40 GiB free** on a 29.26 GiB FAT32 card, 71% used. The main log was about 262 KiB, and both service cache directories were empty. No current storage exhaustion is established. However, the preserved log contains 20 invalid FAT cluster-chain errors and an explicit read-only remount at `2026-10-16 09:55:43` device time (UTC). That state prevents either service from writing its cache. The card is currently writable after a later boot, but current kernel messages still report an unclean previous unmount; filesystem health has not been established. Important files need backup and an offline FAT check before using this card for firmware installation. No repair, formatting, cache deletion or radio-setting change was performed in this inspection. Private evidence is in workspace `output/diagnostics-20261016/`.
+
+Wi-Fi startup emits transient control-socket/duplicate-interface messages followed by scan acknowledgements; missing `wlan0` during parked-radio sleep alone is not a proven Wi-Fi fault. An older log session records roughly five-second UI stalls with the log writer waiting on dirty-buffer I/O and no system idle time. The new fixes are not claimed to resolve those historical stalls. Additional review notes: already-loaded row thumbnails can remain stale after replacing artwork; large-library synchronous search latency requires measurement.
+
+## Stock HiBy OS 2.0 assessment
+
+HiBy's [official R1 2.0 changelog](https://store.hiby.com/apps/help-center#hc-r1-firmware-v20-update) lists PEQ, games, scheduled pause, playlist changes and unspecified fixes. On 16 October the entry directs users to OTA and provides no separate image link. No 2.0 image has been obtained or compared here.
+
+The current local stock input matches the retained 1.6 image byte for byte (SHA-256 `9aada81995d8d2b2ed80d6cf292c62bc5f0f705e51e4f69c7e766ee67536ba60`). The packer removes `hiby_player` and its UI assets, overlays Sonix system files and drivers, and installs the supplied Sonix R1 kernel. Consequently, changing the stock input does not automatically import HiBy's application features or all of its driver fixes. Sonix already implements its own PEQ, games, playlists and sleep timer.
+
+Decision: keep the verified current base for alpha11. A 2.0 rebase is useful only after comparing the actual root filesystem/kernel/modules and identifying retained system fixes, followed by ABI, boot, suspend, radio and audio checks. Updating just the stock filename would not establish a benefit or compatibility.
+
+## Earlier review baseline
+
 Updated 15 October 2026. The R1 now runs alpha9 (`151020260143`), from `main` at `d3d5842`. UI and idle-work changes are committed in `73b52bb`, atomic software volume in `1c98cb5`, decoder bounds in `f8958c6`, and versioned dependency builds in `d3d5842`. Alpha10 restores the approved small-text rasterization. A completed build or targeted hardware check does not close the wider release review.
 
 ## Evidence and acceptance still required
