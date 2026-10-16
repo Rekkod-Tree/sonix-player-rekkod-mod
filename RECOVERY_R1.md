@@ -33,9 +33,11 @@ Before an authorized apply, retain and rehash the original full rootfs2/kernel2 
 
 ## Verification and remaining acceptance
 
+The user explicitly authorized the one-time repair after preparation. The utility applied eraseblock 34 on the R1, verified the complete raw partition, and a separate `--check` reported the repaired image already present. The full SHA-256 matched `259b7d112b0bb49277dbf2dc9008411ddd839563601d17169dd97a428b8e56a0`; bad-block and ECC-failure counters remained zero. The normal boot selector was unchanged and alpha12 kept running. No reboot was requested; the temporary helper and replacement block were removed. Evidence: workspace `output/recovery-ro-patch/helper-device-{preapply,apply,postapply}.log` and `application-result.json`.
+
 Native fixtures cover update preparation/rollback, selector failures, the R1 image guard and 24 repair scenarios using real offline image/block hashes; all privileged operations are intercepted. MIPS compilation and ABI checks pass. Full extraction of both recovery images compared 1693 file paths, 134 directories and 482 symlinks; metadata and all content except the one byte match.
 
-On the physical R1, the exact stock BusyBox loop command successfully read the real `.upt` from an isolated read-only card bind; `LO_FLAGS_READ_ONLY`, OTA metadata and cleanup were checked. The original card mount remained read/write. The compiled repair helper subsequently passed its actual `--check`: the raw original image, normal selector, exact geometry and all 192 good blocks matched. No erase/write or recovery boot was performed. This is not a complete update-cycle test.
+On the physical R1, the exact stock BusyBox loop command successfully read the real `.upt` from an isolated read-only card bind; `LO_FLAGS_READ_ONLY`, OTA metadata and cleanup were checked. The original card mount remained read/write. The compiled repair helper also passed its actual pre-apply `--check`: the raw original image, normal selector, exact geometry and all 192 good blocks matched. The repaired recovery has not yet been booted. This is not a complete update-cycle test.
 
 The already-set FAT flag is not silently cleared. [Linux 4.4 deliberately preserves a volume that was dirty when mounted](https://github.com/torvalds/linux/blob/v4.4/fs/fat/inode.c#L533); a fresh offline filesystem check is needed to establish a clean baseline. After applying the repair, validate an actual update and subsequent mounts against that baseline. Preserve the earlier raw backup. Battery/long-playback acceptance remains separate.
 
