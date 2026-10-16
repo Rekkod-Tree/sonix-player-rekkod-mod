@@ -1233,7 +1233,8 @@ bool keyboard_shown_on(lv_obj_t *screen) {
 }
 
 void keyboard_set_field(keyboard_t *kb, lv_obj_t *field) {
-	if (kb) {
+	if (kb && kb->field != field) {
+		kb_t9_commit(kb);
 		kb->field = field;
 	}
 }

@@ -628,6 +628,10 @@ static void surface_states(void) {
 
 static void run(lv_timer_t *timer) {
 	(void)timer;
+	if (getenv("SONIX_UI_TEST_KEYBOARD_FIELDS_ONLY")) {
+		keyboard_field_states();
+		return;
+	}
 	if (getenv("SONIX_UI_TEST_IDLE_PANEL_ONLY")) {
 		panel_idle_states();
 		return;
@@ -813,12 +817,25 @@ static void run(lv_timer_t *timer) {
 			input(438, height - 40, true);
 			input(438, height - 40, false);
 			capture("search-results");
+			lv_obj_t *all = find_label(search_screen, tr("lists_filter_all"));
+			assert(visible(all));
+			lv_obj_t *filters = lv_obj_get_parent(lv_obj_get_parent(lv_obj_get_parent(all)));
+			lv_area_t filters_box;
+			lv_obj_get_coords(filters, &filters_box);
+			const char *titles[] = {"Time", "Echoes"};
+			for (int i = 0; i < 2; i++) {
+				lv_obj_t *label = find_label(search_screen, titles[i]);
+				assert(visible(label));
+				lv_area_t title_box;
+				lv_obj_get_coords(label, &title_box);
+				assert(title_box.y1 > filters_box.y2);
+			}
 			lv_area_t box;
 			lv_obj_get_coords(field, &box);
 			input(180, (box.y1 + box.y2) / 2, true);
 			input(180, (box.y1 + box.y2) / 2, false);
 			capture("search-typing-results");
-			const char *titles[] = {"Time", "Echoes"};
+			assert(!visible(all));
 			for (int i = 0; i < 2; i++) {
 				lv_obj_t *label = find_label(search_screen, titles[i]);
 				assert(label);
@@ -827,8 +844,38 @@ static void run(lv_timer_t *timer) {
 					r = lv_obj_get_parent(r);
 				assert(r);
 				lv_obj_get_coords(r, &box);
+				lv_area_t field_box;
+				lv_obj_get_coords(field, &field_box);
+				assert(box.y1 > field_box.y2);
 				assert(box.y2 < height - 316);
 			}
+			// A recent query follows a different callback, with existing rows.
+			lv_obj_t *clear = find_image(search_screen, &icon_clear);
+			assert(clear);
+			lv_obj_get_coords(lv_obj_get_parent(clear), &box);
+			input((box.x1 + box.x2) / 2, (box.y1 + box.y2) / 2, true);
+			input((box.x1 + box.x2) / 2, (box.y1 + box.y2) / 2, false);
+			capture("search-recent");
+			lv_obj_t *recent_head = find_label(search_screen, tr("lists_head_recent"));
+			assert(visible(recent_head));
+			assert(lv_obj_get_content_height(recent_head) >= lv_font_get_line_height(lv_obj_get_style_text_font(recent_head, 0)));
+			lv_obj_t *recent = find_label(lv_obj_get_parent(recent_head), "Pink Floyd");
+			assert(visible(recent));
+			lv_obj_get_coords(lv_obj_get_parent(recent), &box);
+			theme_set_dark(true);
+			input((box.x1 + box.x2) / 2, (box.y1 + box.y2) / 2, true);
+			input((box.x1 + box.x2) / 2, (box.y1 + box.y2) / 2, false);
+			capture("search-recent-results-dark");
+			assert(visible(all));
+			lv_obj_get_coords(filters, &filters_box);
+			for (int i = 0; i < 2; i++) {
+				lv_obj_t *label = find_label(search_screen, titles[i]);
+				assert(visible(label));
+				lv_obj_get_coords(label, &box);
+				assert(box.y1 > filters_box.y2);
+			}
+			theme_set_dark(false);
+			printf("UI_SEARCH_REFLOW_PASS keyboard, filters and recent query geometry\n");
 		}
 		switch_screen(streaming_screen);
 		break;

@@ -215,9 +215,9 @@ static int rows_top(int cat) { return group_top[cat] + group_height(); }
 
 // Lays the groups out under the pills card and sizes the body to hold them.
 static void layout_groups(void) {
-	lv_obj_update_layout(pills_card);
 	bool typing = keyboard_is_visible(keyboard);
 	lv_obj_set_hidden(pills_card, typing);
+	lv_obj_update_layout(pills_card);
 	groups_top = typing ? 0 : lv_obj_get_height(pills_card) + SX_CARD_GAP;
 	int y = groups_top;
 	for (int c = 0; c < CAT_COUNT; c++) {
@@ -238,6 +238,14 @@ static void layout_groups(void) {
 		y += head_h + cat_count[c] * pitch;
 	}
 	lv_obj_set_height(body, y);
+	// Bound rows keep their data when the keyboard changes the group offsets.
+	// Move them too: window_update only binds hits that are not already held.
+	for (int i = 0; i < POOL; i++) {
+		row_t *r = &rows[i];
+		if (r->cat >= 0 && group_top[r->cat] >= 0) {
+			lv_obj_set_y(r->row, rows_top(r->cat) + r->index * pitch);
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -318,12 +326,9 @@ static void row_bind(row_t *r, int cat, int index, const char *name, const char 
 		r->picture_shown = rowart_picture(&r->art) != NULL;
 		sx_row_set_thumb(r->row, rowart_picture(&r->art), rowart_tone(&r->art));
 		if (cat == CAT_TRACKS) {
-			char badge[24], length[16], badge_text[32] = "";
+			char badge[24], length[16];
 			listacts_track_badge(r->path, badge, sizeof(badge), length, sizeof(length));
-			if (badge[0]) {
-				snprintf(badge_text, sizeof(badge_text), r->artist[0] ? "\xC2\xB7 %s" : "%s", badge);
-			}
-			sx_row_set_subtitle(r->row, r->artist, badge_text, length);
+			sx_row_set_subtitle(r->row, r->artist, badge, length);
 			sx_row_set_starred(r->row, library_fav_contains(r->path));
 			sx_row_set_trail(r->row, SX_ROW_TRAIL_STAR);
 		} else {
@@ -905,7 +910,7 @@ static lv_obj_t *recent_build(lv_obj_t *parent) {
 	lv_obj_t *head = sx_label(box, &font_ui_17, &sx_style_text2);
 	lv_obj_set_style_text_letter_space(head, 2, 0);
 	lv_obj_set_style_pad_left(head, 6, 0);
-	lv_obj_set_style_pad_top(head, 12, 0);
+	lv_obj_set_style_margin_top(head, 12, 0);
 	lv_label_set_text(head, tr("lists_head_recent"));
 
 	lv_obj_t *card = sx_card_create(box);

@@ -8,6 +8,50 @@
 #include "src/system/streaming/zvukdl.h"
 #include <sys/stat.h>
 
+static void keyboard_field_states(void) {
+	if (phase++ == 0) {
+		gui_init_rest();
+		return;
+	}
+	int previous = config_get_int("other", "keyboard_t9", 0);
+	config_set_int("other", "keyboard_t9", 1);
+	lv_obj_t *screen = lv_obj_create(NULL);
+	lv_obj_t *first = lv_textarea_create(screen);
+	lv_obj_t *second = lv_textarea_create(screen);
+	lv_textarea_set_text(first, "");
+	lv_textarea_set_text(second, "keep");
+	lv_obj_set_pos(first, 16, 80);
+	lv_obj_set_pos(second, 16, 220);
+	keyboard_t *kb = keyboard_create(screen, 480, 316, first, NULL, "ok", NULL, NULL);
+	lv_obj_t *panel = NULL;
+	for (uint32_t i = 0; i < lv_obj_get_child_count(keyboard_obj(kb)); i++) {
+		lv_obj_t *child = lv_obj_get_child(keyboard_obj(kb), (int)i);
+		if (!lv_obj_is_hidden(child))
+			panel = child;
+	}
+	assert(panel);
+	lv_obj_t *key = lv_obj_get_child(lv_obj_get_child(panel, 0), 1);
+	assert(key && lv_obj_check_type(key, &lv_button_class));
+	lv_obj_send_event(key, LV_EVENT_CLICKED, NULL);
+	char initial[16], expected[32];
+	snprintf(initial, sizeof(initial), "%s", lv_textarea_get_text(first));
+	assert(initial[0]);
+	keyboard_set_field(kb, second);
+	lv_obj_send_event(key, LV_EVENT_CLICKED, NULL);
+	snprintf(expected, sizeof(expected), "keep%s", initial);
+	assert(strcmp(lv_textarea_get_text(second), expected) == 0);
+	assert(strcmp(lv_textarea_get_text(first), initial) == 0);
+	keyboard_set_field(kb, second);
+	lv_obj_send_event(key, LV_EVENT_CLICKED, NULL);
+	assert(strncmp(lv_textarea_get_text(second), "keep", 4) == 0);
+	assert(strlen(lv_textarea_get_text(second)) == strlen(expected));
+	assert(strcmp(lv_textarea_get_text(second), expected) != 0);
+	config_set_int("other", "keyboard_t9", previous);
+	printf("UI_TEST_PASS T9 commits on field change and still cycles within the same field\n");
+	logging_flush();
+	exit(0);
+}
+
 static unsigned panel_flushes;
 static void panel_flush_cb(lv_event_t *e) {
 	(void)e;

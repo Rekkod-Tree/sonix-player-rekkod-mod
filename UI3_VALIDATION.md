@@ -1,5 +1,15 @@
 # Graphite 2 native UI
 
+## Alpha11 search and keyboard corrections
+
+The search overlap was reproduced in the native simulator with the alpha10 implementation: `search-results.png` in workspace `output/native-ui-search-before/800/` shows track rows over the filter card, and the new geometry assertion failed. Opening/closing the keyboard moved group headings but left already-bound row objects at their old positions. Search now measures the visible filter card before positioning groups and moves retained rows with their group. Format badges also use the shared metadata layout without a leading separator.
+
+The Recent heading had a separate clipping defect: a fixed one-line label received 12 pixels of internal top padding. That spacing is now a margin. The regression checks results below filters, two rows above the keyboard, Recent heading content height, and replaying a query from history in the other theme. The history test initially found a hidden subtitle from the old results; its lookup is now scoped to the Recent container.
+
+Independent review also found that T9 kept its pending character when switching input fields. The focused regression failed on the old implementation, then passed with commit-on-field-change; selecting the same field still permits cycling through the key's letters. These are native UI checks, not physical-device acceptance of alpha11. The user postponed the real-device screenshot sheets, and the connected R1 remains on alpha10.
+
+The integrated alpha11 host/MIPS build and glibc 2.22 ABI check pass without compiler warnings. The core UI run passed at both 480x800 and 480x720 (50 captures each), including search reflow and Recent checks; the separate T9 field-switch run also passed at both sizes. Evidence: workspace `output/native-ui-alpha11-core/` and `output/native-ui-alpha11-keyboard/`. The service-cache AddressSanitizer fixtures and 11 logging rotation/storage/USB scenarios passed. Independent review of the final production changes has no blocking findings; remaining limitations are recorded in `RELEASE_QUALITY_REVIEW.md`.
+
 ## Alpha10 typography compatibility
 
 The installed alpha9 used the same private Segoe UI files and saved text sizes as alpha8. The difference was FreeType 2.15.0 rasterization of Regular at 16-18 px: a target-run comparison found 378 changed glyphs. FreeType 2.14.3 restores the previous metrics and bitmap fingerprints in all 5,600 checked glyph records (two faces, 16 sizes, Latin/Cyrillic/digits/punctuation). The target archive was rebuilt and the comparison repeated against the final archive, again with zero differences. Font weights, sizes and layout were not adjusted.
