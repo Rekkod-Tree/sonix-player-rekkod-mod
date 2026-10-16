@@ -28,6 +28,7 @@
 
 #include <sched.h>
 #include <poll.h>
+#include <sys/eventfd.h>
 #include <sys/prctl.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
@@ -2526,6 +2527,63 @@ static void playback_wrote(snd_pcm_t *pcm, snd_pcm_uframes_t frames) {
 	playback_follow(pcm);
 }
 
+// Commands interrupt the hardware wait instead of waiting for another period.
+// Bluetooth keeps its separate bounded wait and transport-stall handling.
+static int playback_wake_fd = -1;
+
+static void playback_wake(void) {
+	uint64_t one = 1;
+	if (playback_wake_fd >= 0) {
+		while (write(playback_wake_fd, &one, sizeof(one)) < 0 && errno == EINTR) {
+		}
+		// EAGAIN means a wake-up is already pending.
+	}
+}
+
+// One poll only: ALSA plugins can report readiness without actual PCM room.
+// A command takes precedence when both the PCM and the eventfd are ready.
+static int pcm_wait_or_wake(snd_pcm_t *pcm, int timeout_ms) {
+	struct pollfd fds[9];
+	int n = snd_pcm_poll_descriptors_count(pcm);
+	if (playback_wake_fd < 0 || n <= 0 || n >= (int)(sizeof(fds) / sizeof(fds[0]))) {
+		return snd_pcm_wait(pcm, timeout_ms);
+	}
+	n = snd_pcm_poll_descriptors(pcm, fds, (unsigned int)n);
+	if (n <= 0 || n >= (int)(sizeof(fds) / sizeof(fds[0]))) {
+		return snd_pcm_wait(pcm, timeout_ms);
+	}
+	fds[n] = (struct pollfd){.fd = playback_wake_fd, .events = POLLIN};
+	int r = poll(fds, (nfds_t)n + 1, timeout_ms);
+	if (r < 0) {
+		return errno == EINTR ? 0 : -errno;
+	}
+	if (!r) {
+		return 0;
+	}
+	if (fds[n].revents & POLLIN) {
+		uint64_t count;
+		if (read(playback_wake_fd, &count, sizeof(count)) < 0) {
+			// A concurrent drain or signal leaves the command check authoritative.
+		}
+		return 0;
+	}
+	unsigned short revents = 0;
+	int err = snd_pcm_poll_descriptors_revents(pcm, fds, (unsigned int)n, &revents);
+	if (err < 0) {
+		return err;
+	}
+	if (revents & (POLLERR | POLLNVAL | POLLHUP)) {
+		return -EIO;
+	}
+	if (revents & POLLOUT) {
+		return 1;
+	}
+	// A plugin can keep its event fd ready without PCM room. Yield the single
+	// core before retrying, just as the Bluetooth-specific wait already does.
+	usleep(BT_SPURIOUS_SLEEP_US);
+	return 0;
+}
+
 static snd_pcm_sframes_t pcm_write_recover(snd_pcm_t **pcm, const void *buf, snd_pcm_uframes_t frames, int channels,
 										   int rate, int bits, snd_pcm_uframes_t *period) {
 	for (int attempt = 0; attempt < 8; attempt++) {
@@ -2557,13 +2615,18 @@ static snd_pcm_sframes_t pcm_write_recover(snd_pcm_t **pcm, const void *buf, snd
 				if (playback_reader_should_abort()) {
 					return -EINTR; // a command is pending: the main loop handles it
 				}
-				int r = bluetooth ? pcm_wait_bluetooth(*pcm, 100) : snd_pcm_wait(*pcm, 100);
+				int r = bluetooth ? pcm_wait_bluetooth(*pcm, 100) : pcm_wait_or_wake(*pcm, 100);
 				if (r != 0) {
 					room = true; // ready (1) or error (<0): the writei will say which
 				}
 			}
 		}
 
+		// Readiness and a command can arrive together. Do not feed another block
+		// after pause/seek/stop merely because the PCM also reported room.
+		if (playback_reader_should_abort()) {
+			return -EINTR;
+		}
 		snd_pcm_sframes_t written;
 		if (!room) {
 			fprintf(stderr, "audio[%ld]: buffer never free in 2 s: device wedged, rebuilding it\n", log_ms());
@@ -2825,6 +2888,17 @@ static void seek_flush(snd_pcm_t *pcm, bool already_dropped) {
 	snd_pcm_prepare(pcm);
 }
 
+// Only input that reached the sink advances bytes_played. After an interrupted
+// or short write the file may already be one decoded block ahead of that point.
+static bool rewind_wav_input(FILE *file, int64_t data_offset, int64_t played, int64_t *read_pos) {
+	if (fseeko(file, (off_t)(data_offset + played), SEEK_SET) != 0) {
+		return false;
+	}
+	*read_pos = played;
+	crossfeed_reset();
+	return true;
+}
+
 static void play_wav_file(const char *filepath) {
 	FILE *f = NULL;
 	wav_info_t info;
@@ -2921,6 +2995,7 @@ static void play_wav_file(const char *filepath) {
 	// own mid-book.
 	int64_t bytes_played = 0;
 	int64_t read_pos = 0; // bytes of the data chunk already read, ahead of bytes_played by what is queued
+	bool input_needs_rewind = false;
 	bool is_paused = false;
 	bool played_to_the_end = false;
 	int route_check = 0;
@@ -2947,6 +3022,7 @@ static void play_wav_file(const char *filepath) {
 
 			fseeko(f, (off_t)(info.data_offset + target_byte_pos), SEEK_SET);
 			read_pos = target_byte_pos;
+			input_needs_rewind = false; // the explicit seek supersedes discarded input
 
 			// The device may have been handed back during a long pause (see the
 			// PAUSE branch below), and then there is no stream to flush. It has
@@ -2980,20 +3056,24 @@ static void play_wav_file(const char *filepath) {
 
 			if (entering) {
 				int64_t rewind_bytes = pause_stop_stream(pcm_handle, src_frame_bytes);
-				if (rewind_bytes > 0) {
+				if (rewind_bytes > 0 || input_needs_rewind) {
 					// What was still in the buffer was never heard: wind the
 					// file back over it so resuming picks up where the sound
 					// actually stopped.
-					bytes_played -= rewind_bytes;
-					if (bytes_played < 0) {
-						bytes_played = 0;
+					int64_t resume_bytes = bytes_played - rewind_bytes;
+					if (resume_bytes < 0) {
+						resume_bytes = 0;
 					}
-					fseeko(f, (off_t)(info.data_offset + bytes_played), SEEK_SET);
-					read_pos = bytes_played;
-					pthread_mutex_lock(&audio_mutex);
-					progress_floor_secs = progress_current_secs; // the bar stays put
-					progress_current_secs = (double)bytes_played / bytes_per_sec;
-					pthread_mutex_unlock(&audio_mutex);
+					if (rewind_wav_input(f, info.data_offset, resume_bytes, &read_pos)) {
+						bytes_played = resume_bytes;
+						pthread_mutex_lock(&audio_mutex);
+						progress_floor_secs = progress_current_secs; // the bar stays put
+						progress_current_secs = (double)bytes_played / bytes_per_sec;
+						pthread_mutex_unlock(&audio_mutex);
+					} else {
+						fprintf(stderr, "Audio: WAV input cannot rewind after pause; continuing without rewind\n");
+					}
+					input_needs_rewind = false;
 				}
 			}
 
@@ -3136,6 +3216,14 @@ static void play_wav_file(const char *filepath) {
 			}
 		}
 
+		// A quick pause/resume can replace PAUSE before its branch runs. Also
+		// retain the unwritten tail of a short write, including a Bluetooth one.
+		if (input_needs_rewind) {
+			if (!rewind_wav_input(f, info.data_offset, bytes_played, &read_pos)) {
+				fprintf(stderr, "Audio: WAV input cannot restore an unwritten block; continuing without rewind\n");
+			}
+			input_needs_rewind = false;
+		}
 		playback_follow(pcm_handle);
 		// Up to the end of the data chunk and no further: what follows it is
 		// metadata, not audio.
@@ -3237,6 +3325,7 @@ static void play_wav_file(const char *filepath) {
 		health_lap(&health, STAGE_WRITE);
 
 		if (written == -EINTR) {
+			input_needs_rewind = true;
 			continue; // a command is pending: the top of the loop handles it
 		}
 		if (written < 0 || !pcm_handle) {
@@ -3255,6 +3344,7 @@ static void play_wav_file(const char *filepath) {
 		bt_start_probe_note(pcm_handle, written, info.sample_rate);
 
 		bytes_played += (int64_t)written * src_frame_bytes;
+		input_needs_rewind = (snd_pcm_uframes_t)written < frames_to_write;
 		health_tick(&health, info.sample_rate, info.sample_rate, info.bits_per_sample);
 		host_pace(written, info.sample_rate);
 		pthread_mutex_lock(&audio_mutex);
@@ -3869,6 +3959,22 @@ static uint64_t read_s16_block(speed_t *stretch, decoder_t *dec, decoder_fill_t 
 	return got;
 }
 
+static bool rewind_decoded_input(decoder_t *dec, uint64_t frame, speed_t *stretch, decimator_t *decim,
+								 bt_resample_t *resampler) {
+	if (!decoder_seek_to_frame(dec, frame)) {
+		return false;
+	}
+	// These buffers contain the discarded input's future samples. Keep the
+	// user's EQ/PEQ/MSEB settings: their reset APIs reset controls, not history.
+	speed_reset(stretch);
+	crossfeed_reset();
+	if (decim) {
+		decimate_reset(decim);
+	}
+	bt_resample_reset(resampler);
+	return true;
+}
+
 static void play_decoded_file(const char *filepath, decode_format_t format) {
 	decoder_t *dec = decoder_open(filepath, format);
 	if (!dec) {
@@ -4196,6 +4302,7 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 	// own mid-book.
 	int64_t bytes_played = 0;
 	bool is_paused = false;
+	bool input_needs_rewind = false;
 	bool played_to_the_end = false;
 	int route_check = 0;
 	int track_route = alsa_output_key(); // the output auto_set_output just applied
@@ -4313,6 +4420,7 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 			}
 
 			bytes_played = (int64_t)(target_frame * frame_bytes);
+			input_needs_rewind = false; // the explicit seek supersedes discarded input
 			pthread_mutex_lock(&audio_mutex);
 			progress_current_secs = (double)bytes_played / bytes_per_sec;
 			pthread_mutex_unlock(&audio_mutex);
@@ -4332,24 +4440,25 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 					// What is queued is at the link's rate.
 					rewind_bytes = rewind_bytes * out_rate / dev_rate;
 				}
-				if (rewind_bytes > 0) {
+				if (rewind_bytes > 0 || input_needs_rewind) {
 					// The frames still queued were never heard: put the decoder
 					// back over them so resuming carries on from where the
 					// sound actually stopped instead of skipping a beat.
 					uint64_t played_frames = (uint64_t)(bytes_played / frame_bytes);
 					uint64_t rewind_frames = (uint64_t)(rewind_bytes / frame_bytes);
 					uint64_t resume_frame = played_frames > rewind_frames ? played_frames - rewind_frames : 0;
-					if (decoder_seek_to_frame(dec, resume_frame)) {
-						if (decim_factor > 1) {
-							decimate_reset(&decim);
-						}
-						bt_resample_reset(&resampler);
+					if (rewind_decoded_input(dec, resume_frame, stretch, decim_factor > 1 ? &decim : NULL, &resampler)) {
 						bytes_played = (int64_t)(resume_frame * frame_bytes);
 						pthread_mutex_lock(&audio_mutex);
 						progress_floor_secs = progress_current_secs; // the bar stays put
 						progress_current_secs = (double)bytes_played / bytes_per_sec;
 						pthread_mutex_unlock(&audio_mutex);
+					} else {
+						// A live/growing decoder may not support rewinding. Keep its
+						// previous continuation behavior instead of stopping the source.
+						fprintf(stderr, "Audio: decoded input cannot rewind after pause; continuing without rewind\n");
 					}
+					input_needs_rewind = false;
 				}
 			}
 
@@ -4471,6 +4580,16 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 					break;
 				}
 			}
+		}
+
+		// PAUSE may already have been replaced by RESUME. Rebuild discarded
+		// input before decoding again, also after a positive partial BT write.
+		if (input_needs_rewind) {
+			if (!rewind_decoded_input(dec, (uint64_t)(bytes_played / frame_bytes), stretch,
+									 decim_factor > 1 ? &decim : NULL, &resampler)) {
+				fprintf(stderr, "Audio: decoded input cannot restore an unwritten block; continuing without rewind\n");
+			}
+			input_needs_rewind = false;
 		}
 
 		// --- the reserve of a track that is still downloading ----------------
@@ -4705,8 +4824,9 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 		if (written == -EINTR) {
 			// Not an error: a command (pause, stop, another track, a seek)
 			// arrived while waiting for room in the buffer. The top of the
-			// loop handles it; this block of samples is lost, which is right --
-			// whoever pressed the key did not want to hear it.
+			// loop handles it. A pause/resume must retain the unwritten input,
+			// even when the PCM was empty and has no queued frames to rewind.
+			input_needs_rewind = true;
 			continue;
 		}
 		if (written < 0 || !pcm_handle) {
@@ -4729,6 +4849,10 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 		// the block the card actually took, for the rare partial write.
 		if (out_frames > 0) {
 			bytes_played += (int64_t)((double)written * frame_bytes * (double)input_frames / (double)out_frames);
+		}
+		input_needs_rewind = (uint64_t)written < out_frames;
+		if (input_needs_rewind) {
+			bytes_played -= bytes_played % frame_bytes; // decoder seeks whole source frames
 		}
 		health_tick(&health, sample_rate, dev_rate, source_bits);
 		host_pace(written, dev_rate);
@@ -5004,6 +5128,10 @@ int audio_init(void) {
 		return 0;
 
 	growfile_set_reader_abort_cb(playback_reader_should_abort);
+	playback_wake_fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+	if (playback_wake_fd < 0) {
+		fprintf(stderr, "audio: eventfd unavailable, using bounded PCM waits: %s\n", strerror(errno));
+	}
 
 	set_volume_percent(40); // a sane, audible default on the new dB taper
 	auto_set_output();
@@ -5019,6 +5147,10 @@ int audio_init(void) {
 	int err = pthread_create(&playback_thread, NULL, playback_thread_func, NULL);
 	if (err != 0) {
 		fprintf(stderr, "Audio: Failed to create background thread\n");
+		if (playback_wake_fd >= 0) {
+			close(playback_wake_fd);
+			playback_wake_fd = -1;
+		}
 		return -1;
 	}
 
@@ -5071,6 +5203,7 @@ int audio_play(const char *filepath) {
 	track_completed = false; // fresh playback; any prior completion is consumed
 	pthread_cond_signal(&audio_cond);
 	pthread_mutex_unlock(&audio_mutex);
+	playback_wake();
 	return 0;
 }
 
@@ -5104,6 +5237,7 @@ int audio_play_at(const char *filepath, double start_secs) {
 	pthread_mutex_unlock(&audio_mutex);
 
 	pthread_cond_signal(&audio_cond);
+	playback_wake();
 	return 0;
 }
 
@@ -5129,6 +5263,7 @@ int audio_play_paused(const char *filepath, double start_secs) {
 	pthread_mutex_unlock(&audio_mutex);
 
 	pthread_cond_signal(&audio_cond);
+	playback_wake();
 	return 0;
 }
 
@@ -5224,6 +5359,7 @@ bool audio_suspend_freeze(int timeout_ms) {
 	hold_flush_request = true;
 	pthread_cond_broadcast(&audio_cond);
 	pthread_mutex_unlock(&audio_mutex);
+	playback_wake();
 
 	// Wait for the real teardown: context dead, PCM closed, gapless empty.
 	bool clean = false;
@@ -5270,6 +5406,7 @@ void audio_pause(void) {
 	// resume, leaving the button stuck on the play glyph.
 	playback_status = AUDIO_STATUS_PAUSED;
 	pthread_mutex_unlock(&audio_mutex);
+	playback_wake();
 }
 
 void audio_resume(void) {
@@ -5312,6 +5449,7 @@ void audio_stop(void) {
 	seek_target_secs = -1.0;
 	track_completed = false; // deliberate stop is not a natural completion
 	pthread_mutex_unlock(&audio_mutex);
+	playback_wake();
 }
 
 audio_status_t audio_get_status(void) {
@@ -5429,9 +5567,15 @@ void audio_seek(double seconds) {
 	pthread_mutex_lock(&audio_mutex);
 	progress_current_secs = seconds; // the bar follows the finger, not the decoder
 	progress_floor_secs = -1.0;		// and a deliberate jump outranks the pause floor
-	seek_target_secs = seconds;
-	seek_request = true;
+	if (restart_fresh_pending) {
+		// Suspend discarded the track context. Resume rebuilds it at this point.
+		restart_fresh_pos = seconds;
+	} else {
+		seek_target_secs = seconds;
+		seek_request = true;
+	}
 	pthread_mutex_unlock(&audio_mutex);
+	playback_wake();
 }
 
 // ---------------------------------------------------------------------------

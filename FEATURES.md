@@ -12,6 +12,14 @@
 
 **WAV and AIFF tags** are read from the ID3 chunk taggers add to them, so titles in any script and the cover come through; a WAV's own INFO list fills in whatever that leaves empty.
 
+**Metadata compatibility** includes chained, compressed and data-length-indicator
+ID3 frames, UTF-8 text from older taggers, APEv2 tags on MP3, AIFF NAME/AUTH and
+CAF info. Native FLAC skips cover blocks while scanning, retains STREAMINFO and
+uses leading ID3/trailing ID3v1 only to fill missing fields. Opus R128 and explicit
+ReplayGain keep their priority. For supported named formats, the file signature
+can correct a misleading extension; ALAC inside MP4 keeps its original bit depth.
+A CUE referencing a converted WAV can find a neighboring FLAC, WavPack or APE.
+
 ## Audio
 
 - **Volume** - The same volume curve as the stock player is used.
