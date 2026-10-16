@@ -200,6 +200,22 @@ static lv_obj_t *find_image(lv_obj_t *root, const lv_image_dsc_t *source) {
 	return NULL;
 }
 
+static bool has_service_thumbnail(lv_obj_t *root) {
+	if (lv_obj_check_type(root, &lv_image_class) && lv_obj_is_visible(root)) {
+		const void *source = lv_image_get_src(root);
+		if (source && lv_image_src_get_type(source) == LV_IMAGE_SRC_VARIABLE) {
+			const lv_image_dsc_t *image = source;
+			if (image->header.w == 56 && image->header.h == 56 && image->header.cf == LV_COLOR_FORMAT_RGB565)
+				return true;
+		}
+	}
+	for (uint32_t i = 0; i < lv_obj_get_child_count(root); i++) {
+		if (has_service_thumbnail(lv_obj_get_child(root, (int)i)))
+			return true;
+	}
+	return false;
+}
+
 static void open_fixture_album(const char *path, const char *title) {
 	char value[768];
 	assert(library_track_album_value(path, value, sizeof(value)));
@@ -391,10 +407,22 @@ static void service_states(void) {
 		assert(zvuk_sign_in("invalid-fixture-token-0000000000", message, sizeof(message)) == CARDIMPORT_REFUSED);
 		printf("UI_REDIRECT_LOGIN_PASS 307/308 profile fallback and invalid token rejection\n");
 		mock_mode("ok");
+		assert(fonts_set_large_text(false));
+		switch_screen(zvuk_screen);
+		lv_obj_t *albums = find_label(zvuk_screen, tr("zvuk_albums"));
+		assert(albums);
+		lv_obj_send_event(lv_obj_get_parent(albums), LV_EVENT_CLICKED, NULL);
+		break;
+	}
+	case 29:
+		break;
+	case 30:
+		capture("service-album-thumbnails");
+		assert(has_service_thumbnail(lv_screen_active()));
+		printf("UI_LIST_ART_PASS page binding, real local HTTP, production decoder and LVGL image\n");
 		printf("UI_TEST_PASS service states: expired, subscription, faults and recovery\n");
 		logging_flush();
 		exit(0);
-	}
 	}
 }
 static void status_layout(lv_obj_t *bar, lv_obj_t *left, lv_obj_t *right) {
