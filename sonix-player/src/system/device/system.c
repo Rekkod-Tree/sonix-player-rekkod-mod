@@ -1,3 +1,6 @@
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include "system.h"
 
 #include <dirent.h>
@@ -915,6 +918,7 @@ static pthread_mutex_t card_lock = PTHREAD_MUTEX_INITIALIZER;
 static storage_config_t *g_storage_cfg;
 static system_runtime_t *g_runtime;
 static bool card_released; // under card_lock: set for the power-off, never cleared
+static bool card_update_claimed; // only an aborted update may undo its own release
 static bool card_usb_claimed; // under card_lock: supervisor/hotplug must not mount
 
 bool storage_release_for_usb(void) {
@@ -1097,6 +1101,62 @@ static void log_open_on_card(void) {
 		}
 	}
 	closedir(proc);
+}
+
+void storage_cancel_update(void) {
+	pthread_mutex_lock(&card_lock);
+	bool ours = card_update_claimed;
+	if (ours) {
+		card_update_claimed = false;
+		card_released = false;
+		if (sd_root[0] && is_mounted(sd_root) && mount_is_alive(sd_root)) {
+			mount_settled(sd_root);
+			card_databases_attach(sd_root);
+		}
+	}
+	pthread_mutex_unlock(&card_lock);
+	if (ours)
+		storage_recheck_card();
+}
+
+bool storage_prepare_for_update(void) {
+	pthread_mutex_lock(&card_lock);
+	if (!g_storage_cfg || !g_storage_cfg->manage_mount || card_released || card_usb_claimed || usb_storage_active() || !sd_root[0] || !is_mounted(sd_root) || !mount_is_alive(sd_root)) {
+		pthread_mutex_unlock(&card_lock);
+		errno = EBUSY;
+		return false;
+	}
+	card_released = true;
+	card_update_claimed = true;
+	card_databases_detach();
+
+	// sync() has no error result. Check this filesystem before relinquishing
+	// it, then close our own directory reference before ordinary unmount.
+	int error = 0;
+	int fd = open(sd_root, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+	if (fd < 0)
+		error = errno;
+	else {
+		int rc;
+		do {
+			rc = syncfs(fd);
+		} while (rc < 0 && errno == EINTR);
+		if (rc < 0)
+			error = errno;
+		if (close(fd) != 0 && !error)
+			error = errno;
+	}
+	if (!error && umount(sd_root) != 0)
+		error = errno;
+	pthread_mutex_unlock(&card_lock);
+	if (error) {
+		storage_cancel_update();
+		fprintf(stderr, "storage: update refused: card release failed: %s\n", strerror(error));
+		errno = error;
+		return false;
+	}
+	printf("storage: card synced and unmounted for the update\n");
+	return true;
 }
 
 void storage_release_for_shutdown(void) {

@@ -1,5 +1,13 @@
 # Release quality review
 
+## 16 October: alpha13 safe-update candidate
+
+Read-only extraction of the inactive R1 recovery confirmed a separate defect: `recoveryd` mounts SD read/write and calls the reboot syscall after `sync()` without unmounting the card. The normal `.upt` does not replace this recovery. `RECOVERY_R1.md` documents both boundaries, the reviewed one-byte read-only mount candidate, the separately authorized repair utility, backups and remaining acceptance.
+
+The application now refuses to arm recovery unless card sync/ordinary-unmount succeeds, restores services after a pre-arm failure, verifies the boot selector, and stops automatic restart/idle auto-off when Normal restoration cannot be confirmed. An R1-specific full raw recovery hash guard prevents use of an old or unknown update module. Failure messages are present in all 22 language files. This guard intentionally requires the one-time reviewed recovery repair before subsequent R1 updates.
+
+Host/MIPS builds and the glibc 2.22 ABI check pass without compiler warnings. Native core UI checks pass at both panel sizes (58 captures each). Storage handoff/preparation and 18 firmware-flow fixtures pass ASan/UBSan. The separately built repair helper passes 24 offline scenarios using actual old/new image/block hashes. Independent review identified and resolved a concurrent-helper race with a retained device lock. Both the real-device isolated RO-loop test and actual read-only repair preflight passed; no recovery partition has been written and no patched recovery boot is claimed. An actual repair/update cycle and a clean offline FAT baseline remain required before calling the warning resolved.
+
 ## 16 October: alpha12 storage, search and standby corrections
 
 USB storage no longer exports a card after a failed unmount, nor uses forced/lazy unmount as an export prerequisite. It requires a known unmounted state, including whole-device/partition overlap checks. USB, hotplug and the storage supervisor share the existing card lock; the host's backing file must be confirmed released before local mounting resumes. Failed remounts leave card services offline rather than opening databases or logs on the internal mount directory. A separate configured mount-point accessor preserves raw USB access for repairing a card that cannot mount. ADB keeps the card local.

@@ -177,6 +177,7 @@ certificate checking, and HLS.
   the card.
 - **System** - device, DAC, serial number, card space, OS version, firmware
   update from a `.upt` on the card, and factory reset.
+- **Safe update handoff** - checked card sync and ordinary unmount before recovery; errors cancel the restart and restore local services. R1 additionally requires the reviewed read-only recovery repair described in `RECOVERY_R1.md`.
 - **Developer options** - unlocked by tapping the build number: ADB, log to the
   card, database log, disabling the software volume attenuation, and a page of
   running processes and memory.

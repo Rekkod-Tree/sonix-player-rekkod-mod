@@ -123,6 +123,12 @@ int storage_pin_card(char *out, size_t size);
 // Call it last, after anything that still writes to the card.
 void storage_release_for_shutdown(void);
 
+// Firmware updates require a checked sync and ordinary unmount. On failure,
+// local services are restored and recovery must not be armed. Cancel releases
+// only this update's claim and restores the card after a later pre-reboot error.
+bool storage_prepare_for_update(void);
+void storage_cancel_update(void);
+
 // "Lock keys while the screen is off": with it on, volume down + power pressed
 // with the screen off locks the buttons on the case, and pressed again unlocks
 // them. Locked, they are ignored while the screen is off; the power key and the

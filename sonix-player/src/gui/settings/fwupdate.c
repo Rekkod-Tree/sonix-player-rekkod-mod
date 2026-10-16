@@ -542,11 +542,21 @@ static void show_release(void) {
 	hide_buttons(2);
 }
 
+static const char *update_failure_key(firmware_update_result_t result) {
+	if (result == FIRMWARE_UPDATE_RECOVERY_REQUIRED)
+		return "system_update_recovery_required";
+	if (result == FIRMWARE_UPDATE_BOOTMODE_UNCERTAIN)
+		return "system_update_bootmode_failed";
+	return "system_update_prepare_failed";
+}
+
 static void install_cb(lv_timer_t *timer) {
 	(void)timer;
-	firmware_update_start();
-	// Returns only on the host build.
-	close_card();
+	firmware_update_result_t result = firmware_update_start();
+	if (result == FIRMWARE_UPDATE_SIMULATED)
+		close_card();
+	else
+		show_notice(tr(update_failure_key(result)));
 }
 
 static void show_installing(void) {
@@ -646,7 +656,9 @@ static void sd_run(void *unused) {
 		return;
 	}
 	printf("firmware: update file %s\n", path);
-	firmware_update_start();
+	firmware_update_result_t result = firmware_update_start();
+	if (result != FIRMWARE_UPDATE_SIMULATED)
+		gui_notify_popup(update_failure_key(result));
 }
 
 static void sd_clicked(void) {
