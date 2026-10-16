@@ -178,6 +178,27 @@ Everything the device does not already carry is linked statically, so the
 result is one file to copy across with nothing to install beside it. The same
 file goes into both images.
 
+### Experimental target LTO
+
+`make target TARGET_LTO=1 -j4` enables link-time optimization for the player
+and LVGL with an explicit `-O2` final link. Although compilation uses `-flto=4`,
+final code generation uses one LTO partition: the assembler-local math symbol
+bindings must stay with all generated calls to support the device's glibc 2.22.
+This limits link parallelism and can increase link time. Ordinary object
+compilation retains the existing O2/O3 split. Host builds, the launcher
+and dependency archives keep their usual flags; no fast-math options are added.
+The default is `TARGET_LTO=0`. Switching either way rebuilds target objects
+automatically. This is an opt-in experiment: compare binary/RAM size, playback
+and UI performance on the device, and pass the ABI and audio checks before
+using the result as a release. A faster build or smaller file alone is not
+evidence of better battery life or unchanged playback.
+
+See [the R1 experiment](LTO_EXPERIMENT_2026-10-17.md) for measured results and
+limits. From `sonix-player/`, run `python3 tests/dependency_cache_test.py` to
+check rebuild/rollback policy. Run
+`ROCKBOX_TOOLCHAIN_DIR=/path/to/toolchain python3 tests/lto_abi_test.py`
+to cross-link the math-symbol regression.
+
 ### The ABI check
 
 The link is followed by a `readelf` pass that fails the build if the binary
