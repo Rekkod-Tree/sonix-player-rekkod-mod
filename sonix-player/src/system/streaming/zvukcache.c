@@ -20,6 +20,8 @@
 #include "src/system/net/http.h"
 #include "src/system/streaming/provider.h"
 #include "src/system/streaming/streamturn.h"
+#include "src/system/streaming/streamcover.h"
+#include "src/system/device/system.h"
 
 // See zvukcache.h.
 
@@ -33,6 +35,7 @@ static __thread char last_error[256];
 
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t changed = PTHREAD_COND_INITIALIZER;
+static unsigned sidecar_generation; // card changes and cancellation invalidate HTTP results
 
 typedef struct {
 	char track_id[ZVUK_ID_MAX];
@@ -70,6 +73,9 @@ static void set_error(const char *fmt, ...) {
 const char *zvukcache_last_error(void) { return last_error; }
 
 void zvukcache_set_root(const char *sd_root) {
+	pthread_mutex_lock(&lock);
+	sidecar_generation++;
+	pthread_mutex_unlock(&lock);
 	cache_dir[0] = '\0';
 	if (!sd_root || !sd_root[0]) {
 		return;
@@ -178,6 +184,7 @@ bool zvukcache_network_wanted(void) { return network_wanted; }
 
 void zvukcache_abandon_all(void) {
 	pthread_mutex_lock(&lock);
+	sidecar_generation++;
 	if (current) {
 		current->abandon = true;
 		if (current->st_open) {
@@ -928,42 +935,68 @@ void zvukcache_clear_on_exit(void) {
 // sidecars
 // ---------------------------------------------------------------------------
 
+// No card descriptor is held during HTTP. Re-admission also rejects a
+// result from before a USB handoff, a card change or playback cancellation.
+static int sidecar_pin(const char *path, unsigned generation) {
+	char root[400], prefix[460];
+	int pin = storage_pin_card(root, sizeof(root));
+	if (pin < 0) {
+		return -1;
+	}
+	snprintf(prefix, sizeof(prefix), "%s/" ZVUKCACHE_DIR "/", root);
+	pthread_mutex_lock(&lock);
+	bool current_generation = generation == sidecar_generation;
+	pthread_mutex_unlock(&lock);
+	if (!current_generation || strncmp(path, prefix, strlen(prefix)) != 0) {
+		close(pin);
+		return -1;
+	}
+	return pin;
+}
+
 void zvukcache_write_sidecars(const zvuk_track_t *track, const char *path) {
-	if (!path || !path[0]) {
+	if (!track || !path || !path[0]) {
+		return;
+	}
+	pthread_mutex_lock(&lock);
+	unsigned generation = sidecar_generation;
+	pthread_mutex_unlock(&lock);
+	int pin = sidecar_pin(path, generation);
+	if (pin < 0) {
 		return;
 	}
 	char tags[600], tmp[620];
 	snprintf(tags, sizeof(tags), "%.560s.tags", path);
 	snprintf(tmp, sizeof(tmp), "%s.tmp", tags);
-	FILE *f = fopen(tmp, "w");
+	FILE *f = track->title[0] ? fopen(tmp, "w") : NULL;
 	if (f) {
-		fprintf(f, "title=%s\nartist=%s\nalbum=%s\nalbum_id=%s\ntrack=%d\n", track->title, track->artist, track->album,
-				track->album_id, track->track_number);
+		bool ok = fprintf(f, "title=%s\nartist=%s\nalbum=%s\nalbum_id=%s\ntrack=%d\n", track->title, track->artist, track->album,
+				track->album_id, track->track_number) > 0;
 		if (track->year > 0) {
-			fprintf(f, "year=%d\n", track->year);
+			ok = ok && fprintf(f, "year=%d\n", track->year) > 0;
 		}
-		fclose(f);
-		if (rename(tmp, tags) != 0) {
+		if (fclose(f) != 0) {
+			ok = false;
+		}
+		if (!ok || rename(tmp, tags) != 0) {
 			remove(tmp);
 		}
-	}
-	if (!track->cover[0]) {
-		return;
 	}
 	char jpg[600];
 	const char *dot = strrchr(path, '.');
 	snprintf(jpg, sizeof(jpg), "%.*s.jpg", (int)(dot ? dot - path : (long)strlen(path)), path);
-	struct stat st;
-	if (stat(jpg, &st) == 0 && st.st_size > 0) {
+	bool have_cover = streamcover_file_valid(jpg);
+	close(pin);
+	if (!track->cover[0] || have_cover) {
 		return;
 	}
 	char *body = NULL;
 	size_t len = 0;
-	if (http_get_ex(track->cover, zvuk_stream_headers(), false, &body, &len, 2 * 1024 * 1024, 15, NULL) && len > 0) {
-		FILE *c = fopen(jpg, "wb");
-		if (c) {
-			fwrite(body, 1, len, c);
-			fclose(c);
+	if (http_get_ex(track->cover, zvuk_stream_headers(), false, &body, &len, STREAMCOVER_MAX_BYTES, 15, NULL) && streamcover_valid(body, len)) {
+		pin = sidecar_pin(path, generation);
+		if (pin >= 0) {
+			streamcover_store(jpg, body, len);
+			close(pin);
 		}
 	}
 	free(body);

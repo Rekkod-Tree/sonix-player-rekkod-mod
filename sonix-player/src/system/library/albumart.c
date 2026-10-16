@@ -977,6 +977,14 @@ static bool image_named_after(const char *name, const char *stem) {
 #define COVER_RANK_NONE 1000
 
 static bool find_cover_file(const char *dirpath, const char *audio_stem, char *out_path, size_t out_size) {
+	// Service caches mix unrelated albums: only the track's own image fits.
+	const char *caches[] = {"/.local/yandex-cache", "/.local/zvuk-cache"};
+	bool track_only = false;
+	size_t dir_len = strlen(dirpath);
+	for (size_t i = 0; i < sizeof(caches) / sizeof(caches[0]); i++) {
+		size_t n = strlen(caches[i]);
+		track_only |= dir_len >= n && strcmp(dirpath + dir_len - n, caches[i]) == 0;
+	}
 	DIR *dir = opendir(dirpath);
 	if (!dir)
 		return false;
@@ -1006,10 +1014,10 @@ static bool find_cover_file(const char *dirpath, const char *audio_stem, char *o
 		int rank = COVER_RANK_NONE;
 		if (image_named_after(de->d_name, audio_stem)) {
 			rank = COVER_RANK_TRACK_NAME;
-		} else if (image_named_after(de->d_name, dir_stem)) {
+		} else if (!track_only && image_named_after(de->d_name, dir_stem)) {
 			rank = COVER_RANK_DIR_NAME;
 		} else {
-			int generic = cover_name_rank(de->d_name);
+			int generic = track_only ? -1 : cover_name_rank(de->d_name);
 			if (generic >= 0) {
 				rank = COVER_RANK_GENERIC + generic;
 			}
@@ -1027,7 +1035,7 @@ static bool find_cover_file(const char *dirpath, const char *audio_stem, char *o
 
 	// Nothing matched by name, but if the folder holds exactly one image it's
 	// almost certainly the cover.
-	if (best[0] == '\0' && image_count == 1) {
+	if (!track_only && best[0] == '\0' && image_count == 1) {
 		snprintf(best, sizeof(best), "%s", only_image);
 	}
 

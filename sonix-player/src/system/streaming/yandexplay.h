@@ -2,6 +2,7 @@
 #define YANDEXPLAY_H
 
 #include <stdbool.h>
+#include "src/system/library/metadata.h"
 
 #include "src/system/playback/playlist.h"
 #include "src/system/streaming/yandex.h"
@@ -69,5 +70,8 @@ void yandexplay_watch(void);
 // device_state's prepare callback: false (and the track fetched, playback
 // started when it is here) when the file is not on the card yet.
 bool yandexplay_prepare_track(const char *path);
+
+// Memory-only display metadata from the loaded queue page.
+bool yandexplay_peek_metadata(const char *path, song_metadata_t *out);
 
 #endif /* YANDEXPLAY_H */

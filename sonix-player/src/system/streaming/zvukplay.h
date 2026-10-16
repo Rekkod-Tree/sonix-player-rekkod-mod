@@ -2,6 +2,7 @@
 #define ZVUKPLAY_H
 
 #include <stdbool.h>
+#include "src/system/library/metadata.h"
 
 #include "src/system/playback/playlist.h"
 #include "src/system/streaming/zvuk.h"
@@ -46,5 +47,8 @@ void zvukplay_playing_id(char *out, size_t size);
 void zvukplay_signed_out(void);
 
 bool zvukplay_prepare_track(const char *path);
+
+// Memory-only display metadata from the loaded queue page.
+bool zvukplay_peek_metadata(const char *path, song_metadata_t *out);
 
 #endif /* ZVUKPLAY_H */

@@ -76,6 +76,25 @@ void zvukplay_playing_id(char *out, size_t size) {
 	}
 }
 
+bool zvukplay_peek_metadata(const char *path, song_metadata_t *out) {
+	char id[ZVUK_ID_MAX];
+	zvukcache_track_id(path, id, sizeof(id));
+	zvuklist_t *q = queue_get();
+	int index = id[0] ? zvuklist_find(q, id) : -1;
+	zvuk_track_t track;
+	bool found = index >= 0 && zvuklist_track(q, index, &track) && track.title[0];
+	zvuklist_free(q);
+	if (!found) {
+		return false;
+	}
+	memset(out, 0, sizeof(*out));
+	snprintf(out->title, sizeof(out->title), "%s", track.title);
+	snprintf(out->artist, sizeof(out->artist), "%s", track.artist);
+	snprintf(out->album, sizeof(out->album), "%s", track.album);
+	out->has_tags = true;
+	return true;
+}
+
 // The file a track plays from: saved, or the cache's (its real name when
 // complete and `look`, the ".flac" guess otherwise). True for a saved file.
 static bool track_path_known(const char *id, bool look, bool any_saved, char *out, size_t size) {
@@ -180,18 +199,21 @@ static void claim_saved(void) {
 // the worker: the tapped track, and the track playback needs
 // ---------------------------------------------------------------------------
 
-typedef enum { JOB_NONE = 0, JOB_PLAY, JOB_FETCH } job_kind_t;
+typedef enum { JOB_NONE = 0, JOB_PLAY, JOB_FETCH, JOB_METADATA } job_kind_t;
 
 typedef struct {
 	job_kind_t kind;
 	char id[ZVUK_ID_MAX];
 	unsigned generation;
+	char path[512];
 	bool waiting;
 } job_t;
 
 static pthread_mutex_t job_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t job_cond = PTHREAD_COND_INITIALIZER;
-static job_t play_pending, fetch_pending;
+static job_t play_pending, fetch_pending, metadata_pending;
+static char metadata_requested[512];
+static unsigned metadata_requested_generation;
 static job_kind_t running_kind;
 static bool worker_started;
 
@@ -251,16 +273,19 @@ static void *worker_main(void *arg) {
 	for (;;) {
 		pthread_mutex_lock(&job_lock);
 		running_kind = JOB_NONE;
-		while (play_pending.kind == JOB_NONE && fetch_pending.kind == JOB_NONE) {
+		while (play_pending.kind == JOB_NONE && fetch_pending.kind == JOB_NONE && metadata_pending.kind == JOB_NONE) {
 			pthread_cond_wait(&job_cond, &job_lock);
 		}
 		job_t job;
 		if (play_pending.kind != JOB_NONE) {
 			job = play_pending;
 			play_pending.kind = JOB_NONE;
-		} else {
+		} else if (fetch_pending.kind != JOB_NONE) {
 			job = fetch_pending;
 			fetch_pending.kind = JOB_NONE;
+		} else {
+			job = metadata_pending;
+			metadata_pending.kind = JOB_NONE;
 		}
 		running_kind = job.kind;
 		pthread_mutex_unlock(&job_lock);
@@ -274,15 +299,27 @@ static void *worker_main(void *arg) {
 		r->generation = job.generation;
 		r->waiting = job.waiting;
 		snprintf(r->id, sizeof(r->id), "%s", job.id);
-		zvuklist_t *q = queue_get();
+		pthread_mutex_lock(&queue_lock);
+		bool current = job.generation == queue_generation;
+		zvuklist_t *q = current ? zvuklist_ref(queue) : NULL;
+		pthread_mutex_unlock(&queue_lock);
+		if (!current) {
+			free(r);
+			continue;
+		}
 		zvuk_track_t t;
 		track_details(q, job.id, &t);
 		zvuklist_free(q);
-		if (job.kind == JOB_PLAY || job.waiting) {
+		if (job.kind == JOB_PLAY || (job.kind == JOB_FETCH && job.waiting)) {
 			abandon_unless(job.id);
 		}
-		r->ok = fetch_track(&t, r->path, sizeof(r->path), r->error, sizeof(r->error));
-		if (!r->ok) {
+		if (job.kind == JOB_METADATA) {
+			snprintf(r->path, sizeof(r->path), "%s", job.path);
+			r->ok = t.title[0] != '\0';
+		} else {
+			r->ok = fetch_track(&t, r->path, sizeof(r->path), r->error, sizeof(r->error));
+		}
+		if (!r->ok && job.kind != JOB_METADATA) {
 			fprintf(stderr, "zvuk: fetching %s failed: %s\n", job.id, r->error);
 		}
 		if (!gui_post(job.kind == JOB_PLAY ? play_done_async : fetch_done_async, r)) {
@@ -292,7 +329,7 @@ static void *worker_main(void *arg) {
 	return NULL;
 }
 
-static void submit(job_kind_t kind, const char *id, bool waiting) {
+static void submit(job_kind_t kind, const char *id, bool waiting, const char *path) {
 	pthread_mutex_lock(&job_lock);
 	if (!worker_started) {
 		pthread_t th;
@@ -304,17 +341,50 @@ static void submit(job_kind_t kind, const char *id, bool waiting) {
 		pthread_attr_destroy(&attr);
 	}
 	job_t job = {.kind = kind, .waiting = waiting};
+	if (path) {
+		snprintf(job.path, sizeof(job.path), "%s", path);
+	}
 	snprintf(job.id, sizeof(job.id), "%s", id);
 	pthread_mutex_lock(&queue_lock);
 	job.generation = queue_generation;
 	pthread_mutex_unlock(&queue_lock);
+	if (kind == JOB_METADATA) {
+		if ((metadata_requested_generation == job.generation && strcmp(metadata_requested, path) == 0) ||
+			(!waiting && metadata_pending.kind != JOB_NONE)) {
+			pthread_mutex_unlock(&job_lock);
+			return;
+		}
+		snprintf(metadata_requested, sizeof(metadata_requested), "%s", path);
+		metadata_requested_generation = job.generation;
+	}
 	if (kind == JOB_PLAY) {
 		play_pending = job;
-	} else {
+	} else if (kind == JOB_FETCH) {
 		fetch_pending = job;
+	} else {
+		metadata_pending = job;
 	}
 	pthread_cond_signal(&job_cond);
 	pthread_mutex_unlock(&job_lock);
+}
+
+// Only the current/next cached track needs a missing page. One low-priority
+// slot, no audio fetch, sidecar write or cover request. A failed lookup is not
+// retried by the watch every second for the same queue/path.
+static void adopt_id(const char *id);
+static void request_metadata(const char *path, bool current) {
+	song_metadata_t known;
+	if (zvukplay_peek_metadata(path, &known) || !zvuk_logged_in()) {
+		return;
+	}
+	char id[ZVUK_ID_MAX];
+	path_track_id(path, id, sizeof(id));
+	if (!id[0]) {
+		return;
+	}
+	adopt_id(id);
+	// Current wins over a pending next lookup; next never displaces current.
+	submit(JOB_METADATA, id, current, path);
 }
 
 static bool worker_fetching(void) {
@@ -440,7 +510,7 @@ bool zvukplay_list(zvuklist_t *list, int start) {
 		return false;
 	}
 	zvukcache_set_network_wanted(true);
-	submit(JOB_PLAY, id, false);
+	submit(JOB_PLAY, id, false, NULL);
 	watch_start();
 	return true;
 }
@@ -462,6 +532,20 @@ static void current_id(char *id, size_t size) {
 
 static void fetch_done_async(void *user) {
 	job_result_t *r = user;
+	pthread_mutex_lock(&queue_lock);
+	bool current = r->generation == queue_generation;
+	pthread_mutex_unlock(&queue_lock);
+	if (!current) {
+		free(r);
+		return;
+	}
+	if (r->kind == JOB_METADATA) {
+		if (r->ok) {
+			device_state_note_metadata_available(r->path);
+		}
+		free(r);
+		return;
+	}
 	char guess[512], now[ZVUK_ID_MAX];
 	current_id(now, sizeof(now));
 	bool waited_for = strcmp(now, r->id) == 0;
@@ -473,7 +557,8 @@ static void fetch_done_async(void *user) {
 		if (playlist_replace_path(guess, r->path) > 0) {
 			note_own_change(was_ours);
 		}
-		if (waited_for && state.status != AUDIO_STATUS_PLAYING) {
+		device_state_note_metadata_available(r->path);
+		if (r->waiting && waited_for && state.status != AUDIO_STATUS_PLAYING) {
 			skips_in_a_row = 0;
 			device_state_play_queue_index(playlist_current_index());
 		}
@@ -497,6 +582,7 @@ static void fetch_ahead(void) {
 		return;
 	}
 	if (access(path, F_OK) == 0 || growfile_is_growing(path)) {
+		request_metadata(path, false);
 		return;
 	}
 	path_track_id(path, id, sizeof(id));
@@ -507,7 +593,9 @@ static void fetch_ahead(void) {
 		bool was_ours = queue_is_ours();
 		if (playlist_replace_path(path, real) > 0) {
 			note_own_change(was_ours);
+			device_state_note_metadata_available(real);
 		}
+		request_metadata(real, false);
 		return;
 	}
 	if (zvukcache_busy() || worker_fetching() || !zvuk_logged_in()) {
@@ -518,7 +606,7 @@ static void fetch_ahead(void) {
 	zvuklist_free(q);
 	if (known) {
 		zvukcache_set_network_wanted(true);
-		submit(JOB_FETCH, id, false);
+		submit(JOB_FETCH, id, false, NULL);
 	}
 }
 
@@ -583,6 +671,7 @@ bool zvukplay_prepare_track(const char *path) {
 		return true;
 	}
 	if (growfile_is_growing(path) || access(path, F_OK) == 0) {
+		request_metadata(path, true);
 		return true;
 	}
 	char id[ZVUK_ID_MAX];
@@ -608,7 +697,7 @@ bool zvukplay_prepare_track(const char *path) {
 	adopt_id(id);
 	zvukcache_set_network_wanted(true);
 	device_state_stop();
-	submit(JOB_FETCH, id, true);
+	submit(JOB_FETCH, id, true, NULL);
 	gui_post(downloading_note_async, NULL);
 	gui_post(watch_start_async, NULL);
 	return false;

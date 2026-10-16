@@ -61,6 +61,28 @@ const stream_provider_t *stream_provider_for_track(const char *path) {
 
 bool stream_provider_owns(const char *path) { return stream_provider_for_path(path) != NULL; }
 
+bool stream_provider_fill_metadata(const char *path, song_metadata_t *out) {
+	const stream_provider_t *p = stream_provider_for_track(path);
+	song_metadata_t extra = {0};
+	if (!out || !p || !p->peek_metadata || !p->peek_metadata(path, &extra)) {
+		return false;
+	}
+	bool changed = false;
+#define FILL_DISPLAY(field) \
+	if (!out->field[0] && extra.field[0]) { \
+		snprintf(out->field, sizeof(out->field), "%s", extra.field); \
+		changed = true; \
+	}
+	FILL_DISPLAY(title)
+	FILL_DISPLAY(artist)
+	FILL_DISPLAY(album)
+#undef FILL_DISPLAY
+	if (changed) {
+		out->has_tags = true;
+	}
+	return changed;
+}
+
 bool stream_provider_any_downloading(void) {
 	for (int i = 0; i < provider_count; i++) {
 		if (providers[i]->downloading && providers[i]->downloading()) {

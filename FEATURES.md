@@ -77,6 +77,16 @@ A CUE referencing a converted WAV can find a neighboring FLAC, WavPack or APE.
 
 ## Streaming
 
+- **Lazy queue metadata** - Yandex Music and Zvuk resolve the playing track,
+  Up next and queue labels from loaded service details before the audio file
+  exists. Missing current/next details are fetched in the background; late
+  titles update without restarting playback or resetting mini-player progress.
+- **List artwork** - Yandex Music and Zvuk load small covers for visible track
+  and album rows in the background. Colour placeholders remain during loading
+  and on errors; numbered tracks on an album page keep their numbers.
+- **Cache artwork isolation** - shared Yandex/Zvuk caches use each track's own
+  cover, rather than another track's picture. Image writes publish atomically
+  after bounded validation and rechecking card ownership.
 - **Tidal** - sign in with the code on screen or with the QR-Code; Low, High, CD and Hi-res quality. Search, albums, artists, playlists, favourites and the featured lists. Favourites and playlists can be managed from the player.
 - **Qobuz** - sign in with the account; MP3 320, FLAC 16/44.1, 24/96 and 24/192. Search, albums, artists, playlists, favourites and the featured lists. Favourites and playlists can be managed from the player.
 - **Podcasts** - the Podcast Index catalogue: search, trending, follow up to 100

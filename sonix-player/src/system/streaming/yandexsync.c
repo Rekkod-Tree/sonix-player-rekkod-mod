@@ -1,4 +1,5 @@
 #include "yandexsync.h"
+#include "yandexplay.h"
 
 #include <pthread.h>
 #include <stdio.h>
@@ -294,6 +295,7 @@ static bool provider_save_track(const char *path, int duration_secs) {
 }
 
 static stream_provider_t provider = {
+	.peek_metadata = yandexplay_peek_metadata,
 	.id = "yandex",
 	.save_track = provider_save_track,
 	.track_saved = provider_track_saved,

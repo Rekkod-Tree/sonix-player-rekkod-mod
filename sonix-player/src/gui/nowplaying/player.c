@@ -5423,6 +5423,7 @@ static lv_obj_t *upnext_words;
 static lv_obj_t *upnext_name; // the track, or "Queue"
 static lv_obj_t *upnext_arrow;
 static unsigned upnext_revision;
+static unsigned upnext_metadata_revision;
 static playback_mode_t upnext_mode;
 static char upnext_text[256];
 
@@ -5490,14 +5491,15 @@ static void np_title_for_path(const char *path, char *out, size_t size) {
 	if (library_track_title(path, out, size) && out[0]) {
 		return;
 	}
-	struct stat st;
-	if (stat(path, &st) == 0) {
-		song_metadata_t meta;
+	song_metadata_t meta = {0};
+	// Lazy entries can already have service details before any audio exists.
+	stream_provider_fill_metadata(path, &meta);
+	if (!meta.title[0]) {
 		metadata_read(path, &meta);
-		if (meta.title[0]) {
-			snprintf(out, size, "%s", meta.title);
-			return;
-		}
+	}
+	if (meta.title[0]) {
+		snprintf(out, size, "%s", meta.title);
+		return;
 	}
 	const char *slash = strrchr(path, '/');
 	snprintf(out, size, "%.255s", slash ? slash + 1 : path);
@@ -5520,6 +5522,7 @@ static bool np_outside(void) {
 
 static void upnext_update(void) {
 	upnext_revision = playlist_revision();
+	upnext_metadata_revision = device_state_metadata_revision();
 	upnext_mode = playlist_get_mode();
 	if (!upnext_chip) {
 		return;
@@ -6006,7 +6009,25 @@ static void np_outside_watch(const device_state_t *state) {
 // seconds paused): each of these compares before it draws, so a poll where
 // nothing moved draws nothing.
 static void np_poll(const device_state_t *state) {
-	if (playlist_revision() != upnext_revision || playlist_get_mode() != upnext_mode) {
+	static unsigned shown_metadata_revision;
+	unsigned metadata_revision = device_state_metadata_revision();
+	if (metadata_revision != shown_metadata_revision) {
+		shown_metadata_revision = metadata_revision;
+		// Details arriving for the same file change text, not transport state.
+		// A full track refresh would reset progress and request the cover again.
+		if (!state->live && !np_outside() && stream_provider_owns(state->current_file)) {
+			const char *base = strrchr(state->current_file, '/');
+			const char *title = state->metadata.title[0] ? state->metadata.title : (base ? base + 1 : state->current_file);
+			if (song_title_label) {
+				scrolltext_set(song_title_label, title);
+				scrolltext_set(song_artist_label, metadata_shown_artist(&state->metadata));
+				lyrics_head_sync();
+				alt_pills_sync();
+			}
+			sx_mini_set_text(title, state->metadata.artist);
+		}
+	}
+	if (playlist_revision() != upnext_revision || playlist_get_mode() != upnext_mode || metadata_revision != upnext_metadata_revision) {
 		upnext_update();
 		update_queue_position();
 	}

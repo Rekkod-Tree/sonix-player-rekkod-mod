@@ -33,6 +33,27 @@
 // LVGL/UI thread (same as the rest of player.c today), so no lock needed.
 static song_metadata_t current_metadata;
 static char current_metadata_file[512] = {0};
+static unsigned metadata_revision;
+
+unsigned device_state_metadata_revision(void) { return metadata_revision; }
+
+bool device_state_refresh_metadata(const char *path) {
+	return path && path[0] && strcmp(path, current_metadata_file) == 0 &&
+		   stream_provider_fill_metadata(path, &current_metadata);
+}
+
+void device_state_note_metadata_available(const char *path) {
+	// A fetched page may also contain the loaded track beside the requested one.
+	// Resolve its own identity from RAM, never copy the result track into it.
+	device_state_refresh_metadata(path);
+	device_state_refresh_metadata(current_metadata_file);
+	metadata_revision++;
+}
+
+static void read_current_metadata(void) {
+	metadata_read(current_metadata_file, &current_metadata);
+	stream_provider_fill_metadata(current_metadata_file, &current_metadata);
+}
 
 // ---------------------------------------------------------------------------
 // "Remember track": where playback was, kept across a power cycle
@@ -559,7 +580,7 @@ static void load_and_play_at(const char *filepath, double position) {
 		current_metadata_file[sizeof(current_metadata_file) - 1] = '\0';
 	}
 
-	metadata_read(current_metadata_file, &current_metadata);
+	read_current_metadata();
 	// Whether the loaded file is an audiobook is decided here, once per track
 	// change, and everything that dresses the player for one reads the answer
 	// from it. Every route by which the track can change passes through one of
@@ -609,7 +630,7 @@ static void load_paused(const char *filepath) {
 	if (filepath != current_metadata_file) {
 		snprintf(current_metadata_file, sizeof(current_metadata_file), "%s", filepath);
 	}
-	metadata_read(current_metadata_file, &current_metadata);
+	read_current_metadata();
 	audiobook_track_changed(current_metadata_file);
 	replaygain_load(&current_metadata);
 	apply_track_speed();
@@ -646,7 +667,7 @@ void device_state_restore_file(const char *filepath, double position) {
 
 	strncpy(current_metadata_file, filepath, sizeof(current_metadata_file) - 1);
 	current_metadata_file[sizeof(current_metadata_file) - 1] = '\0';
-	metadata_read(current_metadata_file, &current_metadata);
+	read_current_metadata();
 	// Whether the loaded file is an audiobook is decided here, once per track
 	// change, and everything that dresses the player for one reads the answer
 	// from it. Every route by which the track can change passes through one of
@@ -729,7 +750,7 @@ void device_state_restore_index(library_index_t *ix, int start_index, const char
 
 	strncpy(current_metadata_file, path, sizeof(current_metadata_file) - 1);
 	current_metadata_file[sizeof(current_metadata_file) - 1] = '\0';
-	metadata_read(current_metadata_file, &current_metadata);
+	read_current_metadata();
 	audiobook_track_changed(current_metadata_file);
 	replaygain_load(&current_metadata);
 	apply_track_speed();
@@ -775,7 +796,7 @@ void device_state_restore_list(const char *const *list, int count, int start_ind
 
 	strncpy(current_metadata_file, path, sizeof(current_metadata_file) - 1);
 	current_metadata_file[sizeof(current_metadata_file) - 1] = '\0';
-	metadata_read(current_metadata_file, &current_metadata);
+	read_current_metadata();
 	// Whether the loaded file is an audiobook is decided here, once per track
 	// change, and everything that dresses the player for one reads the answer
 	// from it. Every route by which the track can change passes through one of
@@ -917,7 +938,7 @@ void device_state_play_file_at(const char *filepath, double position) {
 		strncpy(current_metadata_file, filepath, sizeof(current_metadata_file) - 1);
 		current_metadata_file[sizeof(current_metadata_file) - 1] = '\0';
 	}
-	metadata_read(current_metadata_file, &current_metadata);
+	read_current_metadata();
 	audiobook_track_changed(current_metadata_file);
 	// The ReplayGain the tags asked for, worked out once per track.
 	replaygain_load(&current_metadata);
@@ -1408,6 +1429,7 @@ static void album_key(const char *path, const song_metadata_t *known, char *out,
 	song_metadata_t meta;
 	if (!known) {
 		metadata_read(path, &meta);
+		stream_provider_fill_metadata(path, &meta);
 		known = &meta;
 	}
 	if (known->album[0]) {

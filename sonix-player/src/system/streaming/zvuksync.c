@@ -1,6 +1,7 @@
 #ifdef SONIX_ZVUK
 
 #include "zvuksync.h"
+#include "zvukplay.h"
 
 #include <pthread.h>
 #include <stdio.h>
@@ -237,6 +238,7 @@ static bool provider_save_track(const char *path, int duration_secs) {
 }
 
 static stream_provider_t provider = {
+	.peek_metadata = zvukplay_peek_metadata,
 	.id = "zvuk",
 	.save_track = provider_save_track,
 	.track_saved = provider_track_saved,

@@ -130,6 +130,7 @@ static int32_t queue_y_cur, queue_y_next, queue_y_played;
 // poll) costs nothing when nothing moved -- a layout binds every row in view
 // again, three lookups each.
 static unsigned queue_seen_revision;
+static unsigned queue_seen_metadata_revision;
 static int queue_seen_current = -2;
 static queue_mode_t queue_seen_mode;
 
@@ -157,17 +158,17 @@ static void queue_names_of(const char *path, char *title, size_t title_size, cha
 	}
 	// Not in the library: a streamed track keeps its tags in the sidecar
 	// beside the cache file, and a file from outside the music its own.
-	struct stat st;
-	if (stat(path, &st) == 0) {
-		song_metadata_t meta;
+	song_metadata_t meta = {0};
+	stream_provider_fill_metadata(path, &meta);
+	if (!meta.title[0]) {
 		metadata_read(path, &meta);
-		if (album && album_size)
-			snprintf(album, album_size, "%s", meta.album);
-		if (meta.title[0]) {
-			snprintf(title, title_size, "%s", meta.title);
-			snprintf(artist, artist_size, "%s", metadata_shown_artist(&meta));
-			return;
-		}
+	}
+	if (album && album_size)
+		snprintf(album, album_size, "%s", meta.album);
+	if (meta.title[0]) {
+		snprintf(title, title_size, "%s", meta.title);
+		snprintf(artist, artist_size, "%s", metadata_shown_artist(&meta));
+		return;
 	}
 	const char *slash = strrchr(path, '/');
 	snprintf(title, title_size, "%s", slash ? slash + 1 : path);
@@ -392,6 +393,7 @@ static void queue_layout(void) {
 		return;
 	}
 	queue_seen_revision = playlist_revision();
+	queue_seen_metadata_revision = device_state_metadata_revision();
 	queue_seen_current = playlist_current_index();
 	queue_pitch = sx_row_height(true) + SX_ROW_GAP;
 
@@ -516,6 +518,19 @@ void trackmenu_queue_poll(void) {
 	if (playlist_revision() != queue_seen_revision || playlist_current_index() != queue_seen_current ||
 		queue_mode_now() != queue_seen_mode) {
 		queue_layout();
+	} else if (device_state_metadata_revision() != queue_seen_metadata_revision) {
+		// Do not rebind the row beneath a finger during a queue gesture.
+		for (lv_indev_t *input = lv_indev_get_next(NULL); input; input = lv_indev_get_next(input)) {
+			if (lv_indev_get_type(input) == LV_INDEV_TYPE_POINTER && lv_indev_get_state(input) == LV_INDEV_STATE_PRESSED) {
+				return;
+			}
+		}
+		queue_seen_metadata_revision = device_state_metadata_revision();
+		for (int i = 0; i < QUEUE_POOL; i++) {
+			if (queue_rows[i].index >= 0) {
+				queue_row_bind(&queue_rows[i], queue_rows[i].index);
+			}
+		}
 	}
 }
 

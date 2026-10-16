@@ -84,17 +84,24 @@ void sx_mini_player_shown(bool open) {
 // What it shows
 // ---------------------------------------------------------------------------
 
+void sx_mini_set_text(const char *track_title, const char *track_artist) {
+	if (!slot) {
+		return;
+	}
+	if (has_track) {
+		lv_label_set_text(title, track_title ? track_title : "");
+	}
+	sx_set_text(artist, track_artist ? track_artist : "");
+	lv_obj_set_hidden(artist, !track_artist || !track_artist[0]);
+}
+
 void sx_mini_set_track(const char *track_title, const char *track_path, const char *track_artist, bool is_live) {
 	if (!slot) {
 		return;
 	}
 	has_track = (track_path && track_path[0]) || is_live || (track_title && track_title[0]);
 	live = is_live;
-	if (has_track) {
-		lv_label_set_text(title, track_title ? track_title : "");
-	}
-	sx_set_text(artist, track_artist ? track_artist : "");
-	lv_obj_set_hidden(artist, !track_artist || !track_artist[0]);
+	sx_mini_set_text(track_title, track_artist);
 	// A stream and a file can have the same playing state but different controls.
 	lv_image_set_src(play_icon, playing ? (live ? &icon_stop : &icon_pause_small) : &icon_play_small);
 	sx_mini_set_progress(0, 0);

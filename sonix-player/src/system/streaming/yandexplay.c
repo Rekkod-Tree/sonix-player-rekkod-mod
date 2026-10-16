@@ -76,6 +76,25 @@ static void path_track_id(const char *path, char *id, size_t size) {
 	}
 }
 
+bool yandexplay_peek_metadata(const char *path, song_metadata_t *out) {
+	char id[YANDEX_ID_MAX];
+	yandexcache_track_id(path, id, sizeof(id));
+	yandexlist_t *q = queue_get();
+	int index = id[0] ? yandexlist_find(q, id) : -1;
+	yandex_track_t track;
+	bool found = index >= 0 && yandexlist_track(q, index, &track) && track.title[0];
+	yandexlist_free(q);
+	if (!found) {
+		return false;
+	}
+	memset(out, 0, sizeof(*out));
+	snprintf(out->title, sizeof(out->title), "%s", track.title);
+	snprintf(out->artist, sizeof(out->artist), "%s", track.artist);
+	snprintf(out->album, sizeof(out->album), "%s", track.album);
+	out->has_tags = true;
+	return true;
+}
+
 // The file a track plays from: the saved one when the index has it and it can
 // be read; else the cache's -- under its real name when it is complete and
 // `look` (a stat per extension, so only for the few that matter now), a
@@ -201,18 +220,21 @@ static void claim_saved(void) {
 // Neither replaces the other.
 // ---------------------------------------------------------------------------
 
-typedef enum { JOB_NONE = 0, JOB_PLAY, JOB_FETCH } job_kind_t;
+typedef enum { JOB_NONE = 0, JOB_PLAY, JOB_FETCH, JOB_METADATA } job_kind_t;
 
 typedef struct {
 	job_kind_t kind;
 	char id[YANDEX_ID_MAX];
 	unsigned generation;
 	bool waiting; // playback stopped for this one (prepare), not ahead of it
+	char path[512];
 } job_t;
 
 static pthread_mutex_t job_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t job_cond = PTHREAD_COND_INITIALIZER;
-static job_t play_pending, fetch_pending;
+static job_t play_pending, fetch_pending, metadata_pending;
+static char metadata_requested[512];
+static unsigned metadata_requested_generation;
 static job_kind_t running_kind;
 static char running_id[YANDEX_ID_MAX];
 static bool worker_started;
@@ -288,16 +310,19 @@ static void *worker_main(void *arg) {
 		pthread_mutex_lock(&job_lock);
 		running_kind = JOB_NONE;
 		running_id[0] = '\0';
-		while (play_pending.kind == JOB_NONE && fetch_pending.kind == JOB_NONE) {
+		while (play_pending.kind == JOB_NONE && fetch_pending.kind == JOB_NONE && metadata_pending.kind == JOB_NONE) {
 			pthread_cond_wait(&job_cond, &job_lock);
 		}
 		job_t job;
 		if (play_pending.kind != JOB_NONE) {
 			job = play_pending;
 			play_pending.kind = JOB_NONE;
-		} else {
+		} else if (fetch_pending.kind != JOB_NONE) {
 			job = fetch_pending;
 			fetch_pending.kind = JOB_NONE;
+		} else {
+			job = metadata_pending;
+			metadata_pending.kind = JOB_NONE;
 		}
 		running_kind = job.kind;
 		snprintf(running_id, sizeof(running_id), "%s", job.id);
@@ -312,15 +337,27 @@ static void *worker_main(void *arg) {
 		r->generation = job.generation;
 		r->waiting = job.waiting;
 		snprintf(r->id, sizeof(r->id), "%s", job.id);
-		yandexlist_t *q = queue_get();
+		pthread_mutex_lock(&queue_lock);
+		bool current = job.generation == queue_generation;
+		yandexlist_t *q = current ? yandexlist_ref(queue) : NULL;
+		pthread_mutex_unlock(&queue_lock);
+		if (!current) {
+			free(r);
+			continue;
+		}
 		yandex_track_t t;
 		track_details(q, job.id, &t);
 		yandexlist_free(q);
-		if (job.kind == JOB_PLAY || job.waiting) {
+		if (job.kind == JOB_PLAY || (job.kind == JOB_FETCH && job.waiting)) {
 			abandon_unless(job.id);
 		}
-		r->ok = fetch_track(&t, r->path, sizeof(r->path), r->error, sizeof(r->error));
-		if (!r->ok) {
+		if (job.kind == JOB_METADATA) {
+			snprintf(r->path, sizeof(r->path), "%s", job.path);
+			r->ok = t.title[0] != '\0';
+		} else {
+			r->ok = fetch_track(&t, r->path, sizeof(r->path), r->error, sizeof(r->error));
+		}
+		if (!r->ok && job.kind != JOB_METADATA) {
 			fprintf(stderr, "yandex: fetching %s failed: %s\n", job.id, r->error);
 		}
 		if (!gui_post(job.kind == JOB_PLAY ? play_done_async : fetch_done_async, r)) {
@@ -330,7 +367,7 @@ static void *worker_main(void *arg) {
 	return NULL;
 }
 
-static void submit(job_kind_t kind, const char *id, bool waiting) {
+static void submit(job_kind_t kind, const char *id, bool waiting, const char *path) {
 	pthread_mutex_lock(&job_lock);
 	if (!worker_started) {
 		pthread_t th;
@@ -342,20 +379,53 @@ static void submit(job_kind_t kind, const char *id, bool waiting) {
 		pthread_attr_destroy(&attr);
 	}
 	job_t job = {.kind = kind, .waiting = waiting};
+	if (path) {
+		snprintf(job.path, sizeof(job.path), "%s", path);
+	}
 	snprintf(job.id, sizeof(job.id), "%s", id);
 	pthread_mutex_lock(&queue_lock);
 	job.generation = queue_generation;
 	pthread_mutex_unlock(&queue_lock);
+	if (kind == JOB_METADATA) {
+		if ((metadata_requested_generation == job.generation && strcmp(metadata_requested, path) == 0) ||
+			(!waiting && metadata_pending.kind != JOB_NONE)) {
+			pthread_mutex_unlock(&job_lock);
+			return;
+		}
+		snprintf(metadata_requested, sizeof(metadata_requested), "%s", path);
+		metadata_requested_generation = job.generation;
+	}
 	if (kind == JOB_PLAY) {
 		play_pending = job;
-	} else {
+	} else if (kind == JOB_FETCH) {
 		fetch_pending = job;
+	} else {
+		metadata_pending = job;
 	}
 	pthread_cond_signal(&job_cond);
 	pthread_mutex_unlock(&job_lock);
 }
 
 // True while the worker has a track to ask for, or is asking.
+// Only the current/next cached track needs a missing page. One low-priority
+// slot, no audio fetch, sidecar write or cover request. A failed lookup is not
+// retried by the watch every second for the same queue/path.
+static void adopt_id(const char *id);
+static void request_metadata(const char *path, bool current) {
+	song_metadata_t known;
+	if (yandexplay_peek_metadata(path, &known) || !yandex_logged_in()) {
+		return;
+	}
+	char id[YANDEX_ID_MAX];
+	path_track_id(path, id, sizeof(id));
+	if (!id[0]) {
+		return;
+	}
+	adopt_id(id);
+	// Current wins over a pending next lookup; next never displaces current.
+	submit(JOB_METADATA, id, current, path);
+}
+
 static bool worker_fetching(void) {
 	pthread_mutex_lock(&job_lock);
 	bool busy = play_pending.kind != JOB_NONE || fetch_pending.kind != JOB_NONE || running_kind != JOB_NONE;
@@ -487,7 +557,7 @@ bool yandexplay_list(yandexlist_t *list, int start, bool wave) {
 		return true;
 	}
 	yandexcache_set_network_wanted(true);
-	submit(JOB_PLAY, id, false);
+	submit(JOB_PLAY, id, false, NULL);
 	return true;
 }
 
@@ -515,6 +585,20 @@ static void current_id(char *id, size_t size) {
 // stopped waiting for it, it starts.
 static void fetch_done_async(void *user) {
 	job_result_t *r = user;
+	pthread_mutex_lock(&queue_lock);
+	bool current = r->generation == queue_generation;
+	pthread_mutex_unlock(&queue_lock);
+	if (!current) {
+		free(r);
+		return;
+	}
+	if (r->kind == JOB_METADATA) {
+		if (r->ok) {
+			device_state_note_metadata_available(r->path);
+		}
+		free(r);
+		return;
+	}
 	char guess[512], now[YANDEX_ID_MAX];
 	current_id(now, sizeof(now));
 	bool waited_for = strcmp(now, r->id) == 0;
@@ -526,7 +610,8 @@ static void fetch_done_async(void *user) {
 		if (playlist_replace_path(guess, r->path) > 0) {
 			note_own_change(was_ours);
 		}
-		if (waited_for && state.status != AUDIO_STATUS_PLAYING) {
+		device_state_note_metadata_available(r->path);
+		if (r->waiting && waited_for && state.status != AUDIO_STATUS_PLAYING) {
 			skips_in_a_row = 0;
 			device_state_play_queue_index(playlist_current_index());
 		}
@@ -560,6 +645,7 @@ static void fetch_ahead(void) {
 		return; // nothing after it, or saved on the card, or not ours
 	}
 	if (access(path, F_OK) == 0 || growfile_is_growing(path)) {
+		request_metadata(path, false);
 		return;
 	}
 	path_track_id(path, id, sizeof(id));
@@ -570,7 +656,9 @@ static void fetch_ahead(void) {
 		bool was_ours = queue_is_ours();
 		if (playlist_replace_path(path, real) > 0) {
 			note_own_change(was_ours);
+			device_state_note_metadata_available(real);
 		}
+		request_metadata(real, false);
 		return;
 	}
 	if (yandexcache_busy() || worker_fetching()) {
@@ -583,7 +671,7 @@ static void fetch_ahead(void) {
 		return; // another queue's entry, or one the player kept over a restart: fetched when reached
 	}
 	yandexcache_set_network_wanted(true);
-	submit(JOB_FETCH, id, false);
+	submit(JOB_FETCH, id, false, NULL);
 }
 
 // ---------------------------------------------------------------------------
@@ -663,6 +751,7 @@ bool yandexplay_prepare_track(const char *path) {
 	// Downloaded (an MP4 only appears under its name once complete), or
 	// arriving right now -- the decoder reads a growing file.
 	if (growfile_is_growing(path) || access(path, F_OK) == 0) {
+		request_metadata(path, true);
 		return true;
 	}
 	char id[YANDEX_ID_MAX];
@@ -687,7 +776,7 @@ bool yandexplay_prepare_track(const char *path) {
 	// yandexcache_network_wanted().
 	yandexcache_set_network_wanted(true);
 	device_state_stop();
-	submit(JOB_FETCH, id, true);
+	submit(JOB_FETCH, id, true, NULL);
 	gui_post(downloading_note_async, NULL);
 	return false;
 }

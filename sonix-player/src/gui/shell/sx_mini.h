@@ -44,6 +44,9 @@ void sx_mini_init(gui_config_t *cfg);
 // player goes (idle).
 void sx_mini_set_track(const char *title, const char *track_path, const char *artist, bool live);
 
+// Late service details for the loaded track; leaves progress and controls alone.
+void sx_mini_set_text(const char *title, const char *artist);
+
 void sx_mini_set_playing(bool playing);
 
 // Seconds in and the length; `total` 0 for a live stream (the line stays

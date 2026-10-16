@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include "src/system/library/metadata.h"
 
 // The streaming services that play by downloading into a cache on the card
 // (Qobuz, Tidal, Subsonic), seen from the rest of the program.
@@ -98,6 +99,9 @@ typedef struct stream_provider {
 	// hooks below can use. Every hook below is only called for such a path.
 	bool (*is_track)(const char *path);
 
+	// Memory only: no I/O or page fetch. Missing details return false.
+	bool (*peek_metadata)(const char *path, song_metadata_t *out);
+
 	// The star: what the account says, from the service's in-memory mirror
 	// (false until it arrives -- fav_refresh fetches it).
 	bool (*fav_get)(const char *path);
@@ -166,6 +170,9 @@ const stream_provider_t *stream_provider_for_track(const char *path);
 
 // True when some service's cache holds `path`.
 bool stream_provider_owns(const char *path);
+
+// Fill missing display fields only; retain file tags, ReplayGain and format.
+bool stream_provider_fill_metadata(const char *path, song_metadata_t *out);
 
 // True when some service is downloading.
 bool stream_provider_any_downloading(void);

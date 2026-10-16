@@ -301,4 +301,9 @@ void device_state_remember_note(void);
 void device_state_remember_flush(void);
 void device_state_remember_restored(const char *path, double position);
 
+// GUI thread: presentation-only metadata, independent of the persisted queue.
+unsigned device_state_metadata_revision(void);
+bool device_state_refresh_metadata(const char *path);
+void device_state_note_metadata_available(const char *path);
+
 #endif // DEVICE_STATE_H

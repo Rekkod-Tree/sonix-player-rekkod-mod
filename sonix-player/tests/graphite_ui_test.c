@@ -705,6 +705,24 @@ static void run(lv_timer_t *timer) {
 		}
 		sx_mini_set_track("Time", "/fixture/Time.wav", "Pink Floyd", false);
 		sx_mini_set_playing(false);
+		{
+			lv_obj_t *title = find_label(lv_layer_top(), "Time");
+			assert(title);
+			lv_obj_t *card = lv_obj_get_parent(lv_obj_get_parent(title));
+			lv_obj_t *line = lv_obj_get_child(card, -1);
+			lv_obj_t *fill = lv_obj_get_child(line, 0);
+			sx_mini_set_progress(30, 120);
+			lv_obj_update_layout(card);
+			int width = lv_obj_get_width(fill);
+			assert(width > 0);
+			sx_mini_set_text("Late service title", "Late service artist");
+			lv_obj_update_layout(card);
+			assert(lv_obj_get_width(fill) == width && !lv_obj_is_hidden(fill));
+			assert(find_label(card, "Late service title") && find_label(card, "Late service artist"));
+			sx_mini_set_text("Time", "Pink Floyd");
+			sx_mini_set_progress(0, 0);
+			printf("UI_LATE_METADATA_PASS mini title update preserves progress\n");
+		}
 		if (getenv("SONIX_UI_TEST_FORMS_ONLY"))
 			phase = 39 + 4 * (int)(sizeof(page_audit) / sizeof(page_audit[0])) + 15;
 		if (getenv("SONIX_UI_TEST_CUSTOM_ONLY"))

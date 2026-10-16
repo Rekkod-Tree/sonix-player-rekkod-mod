@@ -25,6 +25,7 @@
 #include "src/gui/shell/sx_tokens.h"
 #include "src/gui/streaming/streamerror.h"
 #include "src/gui/streaming/svclist.h"
+#include "src/gui/streaming/streamrowart.h"
 #include "src/gui/streaming/svcui.h"
 #include "src/system/core/lang.h"
 #include "src/system/decode/growfile.h"
@@ -44,9 +45,8 @@
 #include "src/system/streaming/yandexsync.h"
 #include "src/system/streaming/yandexwave.h"
 
-// See yandexpage.h. Deliberately smaller than the Tidal page: no artwork in
-// the lists (the cover still arrives with each track, beside the file), one
-// list page for every kind of row.
+// See yandexpage.h. One list page for every kind of row; visible thumbnails
+// use the separate bounded streamrowart worker.
 //
 // What is not the page lives beside it, for any page to reuse: the service
 // (yandex.c), long lists by the page (yandexlist.c), playing them
@@ -803,12 +803,24 @@ static void first_char(const char *text, char *out, size_t size) {
 	}
 }
 
+static void list_art(lv_obj_t *row, int index, const char *cover, lv_color_t tone) {
+	char url[YANDEX_URL_MAX];
+	yandex_cover_url(cover, 100, url, sizeof(url));
+	// API structs already contain a sized URL, normally ending in /600x600.
+	char *tail = strrchr(url, '/');
+	int width, height, used = 0;
+	if (tail && sscanf(tail + 1, "%dx%d%n", &width, &height, &used) == 2 && !tail[1 + used])
+		snprintf(tail + 1, sizeof(url) - (size_t)(tail + 1 - url), "100x100");
+	streamrowart_bind(list_box, row, index, url, tone);
+}
+
 static void list_bind(lv_obj_t *row, int index) {
 	row_t r;
 	bool have = view_row(index, &r);
 	lv_obj_set_style_opa(row, LV_OPA_COVER, 0);
 	sx_row_set_playing(row, false);
 	if (!have) {
+		streamrowart_forget(row);
 		// A track whose details have not come yet: it plays all the same.
 		sx_row_set_title(row, tr("loading"));
 		sx_row_set_subtitle(row, "", NULL, NULL);
@@ -829,9 +841,10 @@ static void list_bind(lv_obj_t *row, int index) {
 		// On an album's page its tracks are numbered, as the Library's album
 		// page; elsewhere the plaque in the album's tone.
 		if ((list_kind == JOB_ALBUM || list_kind == JOB_SAVED_ALBUM) && r.u.track.track_number > 0) {
+			streamrowart_forget(row);
 			sx_row_set_number(row, r.u.track.track_number);
 		} else {
-			sx_row_set_thumb(row, NULL, svcui_tone(r.u.track.album[0] ? r.u.track.album : r.u.track.title));
+			list_art(row, index, r.u.track.cover, svcui_tone(r.u.track.album[0] ? r.u.track.album : r.u.track.title));
 		}
 		sx_row_set_trail(row, SX_ROW_TRAIL_STAR);
 		sx_row_set_starred(row, yandex_is_liked(r.u.track.id));
@@ -845,11 +858,12 @@ static void list_bind(lv_obj_t *row, int index) {
 	}
 	case ROW_ALBUM:
 		sx_row_set_subtitle(row, detail, row_saved(&r) ? tr("svc_badge_saved") : NULL, NULL);
-		sx_row_set_thumb(row, NULL, svcui_tone(r.u.album.title));
+		list_art(row, index, r.u.album.cover, svcui_tone(r.u.album.title));
 		sx_row_set_trail(row, SX_ROW_TRAIL_CHEVRON);
 		sx_row_set_swipes(row, true, true);
 		break;
 	case ROW_ARTIST:
+		streamrowart_forget(row);
 		first_char(r.u.artist.name, letter, sizeof(letter));
 		sx_row_set_subtitle(row, detail, NULL, NULL);
 		sx_row_set_letter(row, letter, svcui_tone(r.u.artist.name), true);
@@ -857,6 +871,7 @@ static void list_bind(lv_obj_t *row, int index) {
 		sx_row_set_swipes(row, false, false);
 		break;
 	case ROW_PLAYLIST:
+		streamrowart_forget(row);
 		first_char(r.u.playlist.title, letter, sizeof(letter));
 		sx_row_set_subtitle(row, detail, NULL, NULL);
 		sx_row_set_letter(row, letter, svcui_tone(r.u.playlist.title), false);
@@ -864,6 +879,7 @@ static void list_bind(lv_obj_t *row, int index) {
 		sx_row_set_swipes(row, false, false);
 		break;
 	case ROW_MORE:
+		streamrowart_forget(row);
 		sx_row_set_subtitle(row, "", NULL, NULL);
 		sx_row_set_no_lead(row);
 		sx_row_set_trail(row, SX_ROW_TRAIL_CHEVRON);
@@ -878,6 +894,7 @@ static void request_page(int page);
 // are asked for -- the next page too once the view nears its end, so
 // scrolling on finds it there.
 static void list_visible(int first, int last) {
+	streamrowart_visible(list_box, first, last);
 	int count = view_count();
 	if (!shown || !shown->list || count <= 0) {
 		return;
@@ -943,6 +960,7 @@ static void ensure_list(void);
 // Yandex list never has them.
 static void clear_list(void) {
 	ensure_list();
+	streamrowart_reset(list_box);
 	svclist_set_count(list, 0, false);
 	lv_obj_set_hidden(list_message, true);
 	streamerror_hide(list_error);
@@ -957,8 +975,14 @@ static void error_sign_in(void) {
 
 static void list_returned_cb(lv_event_t *e) {
 	(void)e;
+	svclist_rebind(list);
 	if (shown && shown->error_class == STREAM_ERR_SIGN_IN && streamerror_visible(list_error) && yandex_logged_in())
 		retry_list();
+}
+
+static void list_art_hidden_cb(lv_event_t *e) {
+	(void)e;
+	streamrowart_reset(list_box);
 }
 
 static void fill_list(void) {
@@ -1715,6 +1739,7 @@ static void build_list_page(gui_config_t *cfg) {
 	streamerror_set_service(list_error, tr("yandex"));
 	streamerror_set_offline(list_error, open_saved);
 	lv_obj_add_event_cb(list_screen, list_returned_cb, LV_EVENT_SCREEN_LOADED, NULL);
+	lv_obj_add_event_cb(list_screen, list_art_hidden_cb, LV_EVENT_SCREEN_UNLOADED, NULL);
 
 	list_spin = svcui_spinner(list_screen);
 	switcher_attach_back_gesture(list_screen);

@@ -26,6 +26,7 @@
 #include "src/gui/shell/toast.h"
 #include "src/gui/streaming/streamerror.h"
 #include "src/gui/streaming/svclist.h"
+#include "src/gui/streaming/streamrowart.h"
 #include "src/gui/streaming/svcui.h"
 #include "src/system/core/lang.h"
 #include "src/system/device/system.h"
@@ -526,12 +527,19 @@ static void first_char(const char *text, char *out, size_t size) {
 	}
 }
 
+static void list_art(lv_obj_t *row, int index, const char *cover, lv_color_t tone) {
+	char url[ZVUK_URL_MAX];
+	zvuk_cover_url(cover, 100, url, sizeof(url));
+	streamrowart_bind(list_box, row, index, url, tone);
+}
+
 static void list_bind(lv_obj_t *row, int index) {
 	row_t r;
 	bool have = view_row(index, &r);
 	lv_obj_set_style_opa(row, LV_OPA_COVER, 0);
 	sx_row_set_playing(row, false);
 	if (!have) {
+		streamrowart_forget(row);
 		sx_row_set_title(row, tr("loading"));
 		sx_row_set_subtitle(row, "", NULL, NULL);
 		sx_row_set_thumb(row, NULL, svcui_tone(r.u.track.id));
@@ -548,9 +556,10 @@ static void list_bind(lv_obj_t *row, int index) {
 		length_text(r.u.track.duration, length, sizeof(length));
 		sx_row_set_subtitle(row, r.u.track.artist, row_saved(&r) ? tr("svc_badge_saved") : NULL, length);
 		if ((list_kind == JOB_ALBUM || list_kind == JOB_SAVED_ALBUM) && r.u.track.track_number > 0) {
+			streamrowart_forget(row);
 			sx_row_set_number(row, r.u.track.track_number);
 		} else {
-			sx_row_set_thumb(row, NULL, svcui_tone(r.u.track.album[0] ? r.u.track.album : r.u.track.title));
+			list_art(row, index, r.u.track.cover, svcui_tone(r.u.track.album[0] ? r.u.track.album : r.u.track.title));
 		}
 		// Signed out (the token expired), the saved tracks still play but a
 		// star could only fail: none is offered.
@@ -565,11 +574,12 @@ static void list_bind(lv_obj_t *row, int index) {
 	}
 	case ROW_ALBUM:
 		sx_row_set_subtitle(row, detail, row_saved(&r) ? tr("svc_badge_saved") : NULL, NULL);
-		sx_row_set_thumb(row, NULL, svcui_tone(r.u.album.title));
+		list_art(row, index, r.u.album.cover, svcui_tone(r.u.album.title));
 		sx_row_set_trail(row, SX_ROW_TRAIL_CHEVRON);
 		sx_row_set_swipes(row, true, true);
 		break;
 	case ROW_ARTIST:
+		streamrowart_forget(row);
 		first_char(r.u.artist.name, letter, sizeof(letter));
 		sx_row_set_subtitle(row, detail, NULL, NULL);
 		sx_row_set_letter(row, letter, svcui_tone(r.u.artist.name), true);
@@ -577,6 +587,7 @@ static void list_bind(lv_obj_t *row, int index) {
 		sx_row_set_swipes(row, false, false);
 		break;
 	case ROW_PLAYLIST:
+		streamrowart_forget(row);
 		first_char(r.u.playlist.title, letter, sizeof(letter));
 		sx_row_set_subtitle(row, detail, NULL, NULL);
 		sx_row_set_letter(row, letter, svcui_tone(r.u.playlist.title), false);
@@ -597,6 +608,7 @@ static void request_page(int page) {
 }
 
 static void list_visible(int first, int last) {
+	streamrowart_visible(list_box, first, last);
 	int count = view_count();
 	if (!shown || !shown->list || count <= 0) {
 		return;
@@ -778,6 +790,7 @@ static void show_list(const list_step_t *step) {
 	lv_obj_set_hidden(artist_bar, !is_artist);
 	lv_obj_set_hidden(search_bar, !is_search);
 	place_list(is_album || is_artist || is_search ? 72 : 0);
+	streamrowart_reset(list_box);
 	svclist_set_count(list, 0, false);
 	lv_obj_set_hidden(list_message, true);
 	streamerror_hide(list_error);
@@ -1282,7 +1295,8 @@ static void list_loaded_cb(lv_event_t *e) {
 		retry_list();
 		return;
 	}
-	if (list && playing_update()) {
+	if (list) {
+		playing_update();
 		svclist_rebind(list);
 	}
 }
@@ -1306,6 +1320,7 @@ static void list_shown_cb(lv_event_t *e) {
 
 static void list_hidden_cb(lv_event_t *e) {
 	(void)e;
+	streamrowart_reset(list_box);
 	if (list_timer) {
 		lv_timer_delete(list_timer);
 		list_timer = NULL;
