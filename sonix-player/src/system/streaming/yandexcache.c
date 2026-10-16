@@ -384,6 +384,19 @@ static void note_written(download_t *d, long written) {
 	growfile_progress(d->part[0] && d->whole ? d->part : d->path, written);
 }
 
+static void write_error(download_t *d) {
+	int saved_errno = errno ? errno : EIO;
+	snprintf(d->error, sizeof(d->error), "%s: %s", tr("download_failed"), strerror(saved_errno));
+}
+
+static bool flush_output(download_t *d) {
+	if (fflush(d->f) != 0) {
+		write_error(d);
+		return false;
+	}
+	return true;
+}
+
 static bool copy_raw(download_t *d) {
 	uint8_t *buf = malloc(64 * 1024);
 	if (!buf) {
@@ -396,7 +409,16 @@ static bool copy_raw(download_t *d) {
 		if (got == 0) {
 			break;
 		}
-		if (got < 0 || fwrite(buf, 1, (size_t)got, d->f) != (size_t)got || fflush(d->f) != 0) {
+		if (got < 0) {
+			ok = false;
+			break;
+		}
+		if (fwrite(buf, 1, (size_t)got, d->f) != (size_t)got) {
+			write_error(d);
+			ok = false;
+			break;
+		}
+		if (!flush_output(d)) {
 			ok = false;
 			break;
 		}
@@ -426,8 +448,14 @@ static bool pass_through(download_t *d, mp4flac_t *u, long n) {
 			break;
 		}
 		if (u) {
-			ok = mp4flac_payload(u, buf, (size_t)got) && fflush(d->f) == 0;
-			note_written(d, u->written);
+			ok = mp4flac_payload(u, buf, (size_t)got);
+			if (!ok && ferror(d->f)) {
+				write_error(d);
+			}
+			ok = ok && flush_output(d);
+			if (ok) {
+				note_written(d, u->written);
+			}
 		}
 		if (n > 0) {
 			n -= got;
@@ -481,7 +509,11 @@ static bool unwrap_mp4(download_t *d) {
 		if (is_mdat && !begun && init_len > 0) {
 			// Not fragmented: the header is all there is before the audio.
 			if (!mp4flac_begin(&u, d->f, "flac", init, (size_t)init_len)) {
-				snprintf(d->error, sizeof(d->error), "%s", tr("yandex_unsupported_file"));
+				if (ferror(d->f)) {
+					write_error(d);
+				} else {
+					snprintf(d->error, sizeof(d->error), "%s", tr("yandex_unsupported_file"));
+				}
 				break;
 			}
 			begun = whole = true;
@@ -522,7 +554,11 @@ static bool unwrap_mp4(download_t *d) {
 		}
 		if (!begun) {
 			if (!mp4flac_begin(&u, d->f, "flac", init, (size_t)init_len)) {
-				snprintf(d->error, sizeof(d->error), "%s", tr("yandex_unsupported_file"));
+				if (ferror(d->f)) {
+					write_error(d);
+				} else {
+					snprintf(d->error, sizeof(d->error), "%s", tr("yandex_unsupported_file"));
+				}
 				break;
 			}
 			begun = true;
@@ -540,9 +576,14 @@ static bool unwrap_mp4(download_t *d) {
 		seg_len += (long)size;
 		if (is_mdat) {
 			if (!mp4flac_segment(&u, seg, (size_t)seg_len)) {
+				if (ferror(d->f)) {
+					write_error(d);
+				}
 				break;
 			}
-			fflush(d->f);
+			if (!flush_output(d)) {
+				break;
+			}
 			note_written(d, u.written);
 			seg_len = 0;
 		}
@@ -566,9 +607,16 @@ static void *download_main(void *arg) {
 	if (d->st_open) {
 		http_stream_close(&d->st);
 	}
-	ok = (fclose(d->f) == 0) && ok && !d->abandon;
+	if (fclose(d->f) != 0) {
+		if (!d->error[0]) {
+			write_error(d);
+		}
+		ok = false;
+	}
+	ok = ok && !d->abandon;
 	const char *growing = d->whole ? d->part : d->path;
 	if (ok && d->whole && rename(d->part, d->path) != 0) {
+		write_error(d);
 		ok = false;
 	}
 	if (!ok) {
@@ -629,7 +677,7 @@ bool yandexcache_fetch(const char *track_id, const yandex_file_t *file, FILE *ou
 	pthread_mutex_unlock(&lock);
 
 	bool ok = d->unwrap ? unwrap_mp4(d) : copy_raw(d);
-	ok = ok && !d->abandon && fflush(out) == 0;
+	ok = ok && !d->abandon && flush_output(d);
 
 	pthread_mutex_lock(&lock);
 	detached = NULL;
@@ -665,6 +713,9 @@ static void prune(long room); // below, with the rest of the cache's bounds
 
 bool yandexcache_start(const yandex_track_t *track, const yandex_file_t *file, char *out, size_t size) {
 	last_error[0] = '\0';
+	if (out && size) {
+		out[0] = '\0';
+	}
 	static bool registered;
 	if (!registered) {
 		registered = true;
@@ -688,6 +739,12 @@ bool yandexcache_start(const yandex_track_t *track, const yandex_file_t *file, c
 		}
 		bool ok = current == d || yandexcache_find(track->id, NULL, 0);
 		pthread_mutex_unlock(&lock);
+		if (!ok) {
+			set_error("%s", tr("download_failed"));
+			if (out && size) {
+				out[0] = '\0';
+			}
+		}
 		return ok;
 	}
 	pthread_mutex_unlock(&lock);
@@ -732,7 +789,8 @@ bool yandexcache_start(const yandex_track_t *track, const yandex_file_t *file, c
 	const char *target = d->whole ? d->part : d->path;
 	d->f = fopen(target, "wb");
 	if (!d->f) {
-		set_error("%s", tr("download_failed"));
+		int saved_errno = errno;
+		set_error("%s: %s", tr("download_failed"), strerror(saved_errno));
 		free(d);
 		return false;
 	}
@@ -747,13 +805,20 @@ bool yandexcache_start(const yandex_track_t *track, const yandex_file_t *file, c
 	pthread_attr_init(&attr);
 	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
 	pthread_attr_setstacksize(&attr, 128 * 1024);
-	if (pthread_create(&th, &attr, download_main, d) != 0) {
+	snprintf(out, size, "%s", d->path);
+	int thread_error = pthread_create(&th, &attr, download_main, d);
+	if (thread_error != 0) {
+		set_error("%s: %s", tr("download_failed"), strerror(thread_error));
+		if (out && size) {
+			out[0] = '\0';
+		}
 		pthread_attr_destroy(&attr);
 		growfile_finish(target, false);
 		fclose(d->f);
 		remove(target);
 		pthread_mutex_lock(&lock);
 		current = NULL;
+		pthread_cond_broadcast(&changed);
 		pthread_mutex_unlock(&lock);
 		free(d);
 		return false;
@@ -763,7 +828,6 @@ bool yandexcache_start(const yandex_track_t *track, const yandex_file_t *file, c
 	// The prebuffer: enough to start (a FLAC or MP3 plays while the rest
 	// arrives), or all of it for an MP4 container, whose index may sit at the
 	// end of the file.
-	snprintf(out, size, "%s", d->path);
 	pthread_mutex_lock(&lock);
 	bool ok;
 	for (;;) {
@@ -780,6 +844,9 @@ bool yandexcache_start(const yandex_track_t *track, const yandex_file_t *file, c
 	pthread_mutex_unlock(&lock);
 	if (!ok) {
 		set_error("%s", tr("download_failed"));
+		if (out && size) {
+			out[0] = '\0';
+		}
 	}
 	return ok;
 }

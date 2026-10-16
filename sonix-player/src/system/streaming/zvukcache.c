@@ -3,6 +3,7 @@
 #include "zvukcache.h"
 
 #include <dirent.h>
+#include <errno.h>
 #include <pthread.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -326,11 +327,25 @@ static void note_written(download_t *d, long written) {
 	growfile_progress(d->path, written);
 }
 
+static void write_error(download_t *d) {
+	int saved_errno = errno ? errno : EIO;
+	snprintf(d->error, sizeof(d->error), "%s: %s", tr("download_failed"), strerror(saved_errno));
+}
+
+static bool flush_output(download_t *d) {
+	if (fflush(d->f) != 0) {
+		write_error(d);
+		return false;
+	}
+	return true;
+}
+
 // Everything from the source as it is, after `lead` bytes already read.
 static bool copy_raw(download_t *d, uint8_t *buf, const uint8_t *lead, long lead_len) {
 	long written = 0;
 	if (lead_len > 0) {
 		if (fwrite(lead, 1, (size_t)lead_len, d->f) != (size_t)lead_len) {
+			write_error(d);
 			return false;
 		}
 		written = lead_len;
@@ -340,7 +355,14 @@ static bool copy_raw(download_t *d, uint8_t *buf, const uint8_t *lead, long lead
 		if (got == 0) {
 			return written > 0;
 		}
-		if (got < 0 || fwrite(buf, 1, (size_t)got, d->f) != (size_t)got || fflush(d->f) != 0) {
+		if (got < 0) {
+			return false;
+		}
+		if (fwrite(buf, 1, (size_t)got, d->f) != (size_t)got) {
+			write_error(d);
+			return false;
+		}
+		if (!flush_output(d)) {
 			return false;
 		}
 		written += got;
@@ -356,7 +378,16 @@ static bool frames_through(download_t *d, mp4flac_t *u, uint8_t *buf, long n) {
 		if (got == 0 && n < 0) {
 			return true;
 		}
-		if (got <= 0 || !mp4flac_payload(u, buf, (size_t)got) || fflush(d->f) != 0) {
+		if (got <= 0) {
+			return false;
+		}
+		if (!mp4flac_payload(u, buf, (size_t)got)) {
+			if (ferror(d->f)) {
+				write_error(d);
+			}
+			return false;
+		}
+		if (!flush_output(d)) {
 			return false;
 		}
 		note_written(d, u->written);
@@ -368,6 +399,10 @@ static bool frames_through(download_t *d, mp4flac_t *u, uint8_t *buf, long n) {
 }
 
 static bool unsupported(download_t *d) {
+	if (ferror(d->f)) {
+		write_error(d);
+		return false;
+	}
 	snprintf(d->error, sizeof(d->error), "%s", tr("zvuk_unsupported_file"));
 	return false;
 }
@@ -517,7 +552,13 @@ static void *download_main(void *arg) {
 	bool ok = !d->abandon && transfer(d);
 	streamturn_release();
 	src_close(d);
-	ok = (fclose(d->f) == 0) && ok && !d->abandon;
+	if (fclose(d->f) != 0) {
+		if (!d->error[0]) {
+			write_error(d);
+		}
+		ok = false;
+	}
+	ok = ok && !d->abandon;
 	if (!ok) {
 		remove(d->path);
 		fprintf(stderr, "zvuk: download of %s failed: %s\n", d->track_id, d->abandon ? "abandoned" : d->error);
@@ -564,7 +605,7 @@ bool zvukcache_fetch(const char *track_id, const zvuk_stream_t *stream, FILE *ou
 	pthread_mutex_lock(&lock);
 	detached = d;
 	pthread_mutex_unlock(&lock);
-	bool ok = transfer(d) && !d->abandon && fflush(out) == 0;
+	bool ok = transfer(d) && !d->abandon && flush_output(d);
 	pthread_mutex_lock(&lock);
 	detached = NULL;
 	src_close(d);
@@ -599,6 +640,9 @@ static void prune(long room);
 
 bool zvukcache_start(const zvuk_track_t *track, const zvuk_stream_t *stream, char *out, size_t size) {
 	last_error[0] = '\0';
+	if (out && size) {
+		out[0] = '\0';
+	}
 	static bool registered;
 	if (!registered) {
 		registered = true;
@@ -621,6 +665,12 @@ bool zvukcache_start(const zvuk_track_t *track, const zvuk_stream_t *stream, cha
 		}
 		bool ok = current == d || zvukcache_find(track->id, NULL, 0);
 		pthread_mutex_unlock(&lock);
+		if (!ok) {
+			set_error("%s", tr("download_failed"));
+			if (out && size) {
+				out[0] = '\0';
+			}
+		}
 		return ok;
 	}
 	// Another one: waited for, never abandoned from here (see yandexcache.c).
@@ -644,8 +694,9 @@ bool zvukcache_start(const zvuk_track_t *track, const zvuk_stream_t *stream, cha
 	}
 	d->f = fopen(d->path, "wb");
 	if (!d->f) {
+		int saved_errno = errno;
 		remove(d->marker);
-		set_error("%s", tr("download_failed"));
+		set_error("%s: %s", tr("download_failed"), strerror(saved_errno));
 		free(d);
 		return false;
 	}
@@ -659,7 +710,13 @@ bool zvukcache_start(const zvuk_track_t *track, const zvuk_stream_t *stream, cha
 	pthread_attr_init(&attr);
 	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
 	pthread_attr_setstacksize(&attr, 192 * 1024); // TLS through the reconnects
-	if (pthread_create(&th, &attr, download_main, d) != 0) {
+	snprintf(out, size, "%s", d->path);
+	int thread_error = pthread_create(&th, &attr, download_main, d);
+	if (thread_error != 0) {
+		set_error("%s: %s", tr("download_failed"), strerror(thread_error));
+		if (out && size) {
+			out[0] = '\0';
+		}
 		pthread_attr_destroy(&attr);
 		growfile_finish(d->path, false);
 		fclose(d->f);
@@ -667,13 +724,13 @@ bool zvukcache_start(const zvuk_track_t *track, const zvuk_stream_t *stream, cha
 		remove(d->marker);
 		pthread_mutex_lock(&lock);
 		current = NULL;
+		pthread_cond_broadcast(&changed);
 		pthread_mutex_unlock(&lock);
 		free(d);
 		return false;
 	}
 	pthread_attr_destroy(&attr);
 
-	snprintf(out, size, "%s", d->path);
 	pthread_mutex_lock(&lock);
 	bool ok;
 	for (;;) {
@@ -690,6 +747,9 @@ bool zvukcache_start(const zvuk_track_t *track, const zvuk_stream_t *stream, cha
 	pthread_mutex_unlock(&lock);
 	if (!ok) {
 		set_error("%s", tr("download_failed"));
+		if (out && size) {
+			out[0] = '\0';
+		}
 	}
 	return ok;
 }
