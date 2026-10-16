@@ -40,3 +40,8 @@ Snapshot: upstream `Jepl4r/sonix-player` at `a488e2587aab128d05c5b21dd16dd0604e4
 First: the narrow seek/eventfd corrections and selected metadata compatibility, with focused tests. Next: PEQ entry, persistent queue history and lyrics, each adapted to existing components. Treat drivers, charge-only UI and boot-logo flash writes separately.
 
 LTO was evaluated against unchanged alpha13 functionality in an isolated worktree, with default builds unchanged. See [the measured R1 experiment](LTO_EXPERIMENT_2026-10-17.md): 5.23% less CPU time in a synthetic offscreen renderer, a 1.13% larger player file, passing ABI/numeric/final-frame checks. It remains opt-in; complete-player runtime and battery benefits are not established. No upstream imports were mixed into that A/B test.
+
+Update: the selected seek, interruptible-wait and metadata corrections have
+since been adapted and checked in the [alpha14 test release](ALPHA14_RELEASE.md),
+including a follow-up for WSOLA delivered-output accounting. Other upstream
+features and driver/power changes remain outside that release.
