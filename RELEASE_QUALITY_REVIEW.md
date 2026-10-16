@@ -1,5 +1,19 @@
 # Release quality review
 
+## 16 October: alpha12 storage, search and standby corrections
+
+USB storage no longer exports a card after a failed unmount, nor uses forced/lazy unmount as an export prerequisite. It requires a known unmounted state, including whole-device/partition overlap checks. USB, hotplug and the storage supervisor share the existing card lock; the host's backing file must be confirmed released before local mounting resumes. Failed remounts leave card services offline rather than opening databases or logs on the internal mount directory. A separate configured mount-point accessor preserves raw USB access for repairing a card that cannot mount. ADB keeps the card local.
+
+Yandex and Zvuk permanent-save jobs hold an open card-directory descriptor across HTTP waits and all writes. Ordinary USB unmount therefore refuses while such a job still owns the card. Cancellation is checked after network replies and before output/commit; the copied root cannot change underneath directory creation. Progress callbacks use inexpensive state checks rather than scanning mounts every 64 KiB. This closes the reviewed late-writer scenarios; it is not proof against every physical-removal or power-loss failure.
+
+Held startup/USB log output now stops growing at a 32 KiB threshold. The normal single-writer path enforces this size; concurrent direct fallback writes can briefly overshoot it, so this is not a strict cross-process quota. Existing SD log rotation remains at 8 MiB plus one previous file. Standby now waits for library/audiobook scans, including scans started after card insertion or manual screen-off. No new polling timer was added, and no battery-runtime gain is claimed.
+
+The integrated host/MIPS builds pass without compiler warnings, including the glibc 2.22 ABI check. Core native UI tests pass at 480x800 and 480x720 (58 captures each), as does the separate current-track permanent-save regression using the local mock service. USB/storage and both providers' late-save fixtures pass AddressSanitizer/UndefinedBehaviorSanitizer; both cache variants pass AddressSanitizer, and all 13 logging scenarios pass. Independent review has no blocking findings. Evidence: workspace `output/native-ui-alpha12-{core,save}/`, `output/alpha12-*-test.log` and `output/sonix-graphite-build.log`.
+
+The compact search/history behavior is described in `UI3_VALIDATION.md`. Physical alpha12 USB handoff, standby/resume, sustained playback and battery discharge remain unverified: the user will reconnect the player later. Live-account coverage, R3 Pro II and KA17 acceptance also remain open. Existing short idle-work measurements are not battery-runtime acceptance.
+
+Separately, the user's FAT32 card was fully imaged before an offline Windows repair. The recovered full audio file and rolled-back database were restored with hash checks; the final read-only filesystem check returned no errors and the reader was safely ejected. Recovery files and the original image were retained. This establishes the PC-side repair, not the card's hardware health or a confirmed cause. Private evidence is in workspace `backups/r1-card-20261016/RECOVERY_RESULT.md`.
+
 ## 16 October: alpha11 candidate and card diagnosis
 
 The search layout, Recent heading and T9 field-switch corrections are documented in `UI3_VALIDATION.md`. Independent review also identified two streaming-cache defects: the caller could read a worker-owned path after the worker freed it, and output-write errors lost their cause. Both Yandex and Zvuk now copy the returned path before starting the worker and preserve write/flush/close/rename errors. `tests/stream_cache_io_test.c` includes the production implementations and covers successful output, full storage, fast worker completion and failed thread creation; both service variants pass AddressSanitizer. Async playback still uses its existing generic error message, while the log retains the cause.

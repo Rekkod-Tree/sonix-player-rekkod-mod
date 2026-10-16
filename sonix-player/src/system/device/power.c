@@ -1242,6 +1242,13 @@ static void suspend_if_idle(uint32_t now, bool playing) {
 		mem_skip("music is playing");
 		return;
 	}
+	// Manual screen-off and a scan started after card insertion can bypass
+	// the scan page's screen hold. Let local database work finish before mem
+	// freezes its workers until the next user wake, just as for network work.
+	if (library_scan_running() || audiobookdb_scan_running()) {
+		mem_skip("a library scan is running");
+		return;
+	}
 	// Pause counts as a stopped state: the PCM is already released after five
 	// seconds ("DAC powered down" in the log) and resuming always reopens the
 	// device from scratch, route included, which is the path every unpause

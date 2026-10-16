@@ -168,7 +168,7 @@ static void clean(void) {
 }
 
 static void run_case(int mode) {
-	setup(mode == 8 ? 2 : (mode == 0 || mode == 7 || mode == 9));
+	setup(mode == 8 ? 2 : (mode == 0 || mode == 7 || mode == 9 || mode == 11));
 	if (mode == 0) {
 		fill(current_path, 'A', LOG_FILE_MAX - 128);
 		char text[4097];
@@ -249,14 +249,53 @@ static void run_case(int mode) {
 		fill(current_path, 'A', LOG_FILE_MAX);
 		write_queued(STDOUT_FILENO, "UNMANAGED\n", 10);
 		check(size_of(current_path) == LOG_FILE_MAX + 10 && size_of(previous_path) == -1, "unmanaged output is not rotated or capped");
+	} else if (mode == 11 || mode == 12) {
+		if (mode == 11) {
+			logging_suspend_for_usb();
+		} else {
+			char path[160];
+			snprintf(path, sizeof(path), "%s/held", directory);
+			early_stream = open_held(path);
+			check(early_stream && redirect_to(early_stream), "hold startup output without writer");
+			on_sd = false;
+		}
+		check(holding_output, "held destination marked");
+		char text[4096];
+		memset(text, 'H', sizeof(text));
+		// Two MiB of ordinary diagnostics must not occupy two MiB of tmpfs.
+		for (int i = 0; i < 512; i++) {
+			if (mode == 11) {
+				fwrite(text, 1, sizeof(text), stdout);
+				logging_flush();
+			} else {
+				write_all(STDOUT_FILENO, text, sizeof(text));
+			}
+		}
+		struct stat st;
+		check(fstat(STDOUT_FILENO, &st) == 0 && st.st_size == HELD_MAX, "tmpfs file remains at 32 KiB");
+		write_all(STDERR_FILENO, "extra diagnostics\n", 18);
+		check(fstat(STDERR_FILENO, &st) == 0 && st.st_size == HELD_MAX, "stderr shares held cap");
+		if (mode == 11) {
+			logging_resume_after_usb();
+			logging_flush();
+			check(!holding_output && on_sd, "resume releases held cap");
+			off_t before = size_of(current_path);
+			fprintf(stdout, "after USB resume\n");
+			logging_flush();
+			check(size_of(current_path) > before, "normal logging resumes after a full held file");
+			check(size_of(current_path) < HELD_MAX + 1024, "only bounded held bytes drained");
+		} else {
+			open_null_log();
+			check(!holding_output, "discarded startup resets held state");
+		}
 	}
 	clean();
 }
 
 int main(void) {
 	report_fd = dup(STDOUT_FILENO);
-	const char *names[] = {"worker rotation", "legacy tail", "read-only legacy", "read failure", "rename failure", "truncate failure", "read-only rotation", "USB handoff", "override", "destination lock contention", "unmanaged output"};
-	for (int mode = 0; mode < 11; mode++) {
+	const char *names[] = {"worker rotation", "legacy tail", "read-only legacy", "read failure", "rename failure", "truncate failure", "read-only rotation", "USB handoff", "override", "destination lock contention", "unmanaged output", "USB held tmpfs cap", "startup held tmpfs cap"};
+	for (int mode = 0; mode < 13; mode++) {
 		pid_t child = fork();
 		check(child >= 0, "fork test case");
 		if (!child) {

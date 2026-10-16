@@ -51,7 +51,8 @@ const char *logging_path(void);
 // The USB mass-storage export unmounts the card the log lives on. Suspend
 // releases the file (output is held in memory meanwhile -- an open descriptor
 // on the card would make the unmount fail); resume reopens the file and
-// appends everything said in between. Both are safe to call when the log was
+// appends up to 32 KiB said in between; further output is dropped without
+// growing the tmpfs file. Both are safe to call when the log was
 // never on the card.
 void logging_suspend_for_usb(void);
 void logging_resume_after_usb(void);

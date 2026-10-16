@@ -66,7 +66,7 @@ static void tell(yandexdl_event_t event, int count, const char *text) {
 static bool card_usable(void) { return root[0] && storage_card_attached() && !usb_storage_active() && storage_sd_writable(); }
 
 // <card>/<the first scan folder, else Music>.
-static void music_root(char *out, size_t size) {
+static void music_root(const char *card_root, char *out, size_t size) {
 	int count = 0;
 	char **names = library_scan_folders(&count);
 	const char *folder = "Music";
@@ -76,14 +76,14 @@ static void music_root(char *out, size_t size) {
 			break;
 		}
 	}
-	snprintf(out, size, "%s/%s", root, folder);
+	snprintf(out, size, "%s/%s", card_root, folder);
 	library_scan_folders_free(names, count);
 }
 
-static bool make_dirs(const char *path) {
+static bool make_dirs(const char *card_root, const char *path) {
 	char buf[1024];
 	snprintf(buf, sizeof(buf), "%s", path);
-	for (char *p = buf + strlen(root) + 1; *p; p++) {
+	for (char *p = buf + strlen(card_root) + 1; *p; p++) {
 		if (*p == '/') {
 			*p = '\0';
 			if (mkdir(buf, 0755) != 0 && errno != EEXIST) {
@@ -863,7 +863,7 @@ static void progress_cb(long written, long total, void *user) {
 	}
 	bool stale = asked != generation;
 	pthread_mutex_unlock(&lock);
-	if (stale || !card_usable()) {
+	if (stale || !storage_card_attached() || usb_storage_active()) {
 		yandexcache_fetch_cancel();
 	}
 }
@@ -936,10 +936,20 @@ static void remember(const yandex_track_t *t, const tags_t *tags, int album_trac
 
 // Saves one track. True when the file is in the library afterwards (saved
 // now or already there); false with `why` set otherwise.
-static bool save_track(const yandex_track_t *t, unsigned asked, char *why, size_t why_size) {
+static bool save_allowed(unsigned asked, char *why, size_t why_size) {
+	pthread_mutex_lock(&lock);
+	bool current = asked == generation;
+	pthread_mutex_unlock(&lock);
+	if (!current || !card_usable()) {
+		snprintf(why, why_size, "%s", tr(current ? "download_no_card" : "download_cancelled"));
+		return false;
+	}
+	return true;
+}
+
+static bool save_track_pinned(const yandex_track_t *t, unsigned asked, const char *card_root, char *why, size_t why_size) {
 	why[0] = '\0';
-	if (!card_usable()) {
-		snprintf(why, why_size, "%s", tr("download_no_card"));
+	if (!save_allowed(asked, why, why_size)) {
 		return false;
 	}
 	if (t->album_id[0] && (!meta_ok || strcmp(meta.id, t->album_id) != 0)) {
@@ -947,6 +957,9 @@ static bool save_track(const yandex_track_t *t, unsigned asked, char *why, size_
 		if (!meta_ok) {
 			fprintf(stderr, "yandexdl: no album details for %s (%s), the track's own used\n", t->album_id, yandex_last_error());
 		}
+	}
+	if (!save_allowed(asked, why, why_size)) {
+		return false;
 	}
 	bool have_meta = meta_ok && strcmp(meta.id, t->album_id) == 0;
 
@@ -971,7 +984,7 @@ static bool save_track(const yandex_track_t *t, unsigned asked, char *why, size_
 
 	// <music>/Yandex Music/<album artist>/<album (year)>/<NN - title>
 	char music[600], artist_dir[160], album_dir[200], album_name[220], base[220], title[200];
-	music_root(music, sizeof(music));
+	music_root(card_root, music, sizeof(music));
 	podcastdl_safe_name(tags.album_artist, "Unknown Artist", artist_dir, sizeof(artist_dir));
 	if (tags.year > 0) {
 		snprintf(album_name, sizeof(album_name), "%.180s (%d)", tags.album, tags.year);
@@ -995,6 +1008,9 @@ static bool save_track(const yandex_track_t *t, unsigned asked, char *why, size_
 		char existing[1300];
 		snprintf(existing, sizeof(existing), "%.1024s/%.220s.%s", folder, base, EXTS[i]);
 		if (exists(existing)) {
+			if (!save_allowed(asked, why, why_size)) {
+				return false;
+			}
 			// Into the index all the same: this is how a file saved before
 			// there was one (1.2.4) becomes known to the Yandex pages.
 			printf("yandexdl: %s is already there\n", existing);
@@ -1002,7 +1018,10 @@ static bool save_track(const yandex_track_t *t, unsigned asked, char *why, size_
 			return true;
 		}
 	}
-	if (!make_dirs(folder)) {
+	if (!save_allowed(asked, why, why_size)) {
+		return false;
+	}
+	if (!make_dirs(card_root, folder)) {
 		snprintf(why, why_size, "%s", strerror(errno));
 		return false;
 	}
@@ -1048,6 +1067,9 @@ static bool save_track(const yandex_track_t *t, unsigned asked, char *why, size_
 	pthread_mutex_unlock(&lock);
 	printf("yandexdl: %s -> %s (%s)\n", t->id, path, cached[0] ? "from the cache" : file.codec);
 
+	if (!save_allowed(asked, why, why_size)) {
+		return false;
+	}
 	FILE *out = fopen(part, "wb");
 	if (!out) {
 		snprintf(why, why_size, "%s", strerror(errno));
@@ -1075,6 +1097,7 @@ static bool save_track(const yandex_track_t *t, unsigned asked, char *why, size_
 	if (fclose(out) != 0) {
 		ok = false;
 	}
+	ok = ok && save_allowed(asked, why, why_size);
 	if (ok && samples) {
 		mp4flac_patch_total_samples(part, samples);
 	}
@@ -1108,6 +1131,9 @@ static bool save_track(const yandex_track_t *t, unsigned asked, char *why, size_
 		write_sidecar(path, &tags);
 	}
 	fetch_cover(folder, have_meta && meta.cover[0] ? meta.cover : t->cover);
+	if (!save_allowed(asked, why, why_size)) {
+		return false;
+	}
 	remember(t, &tags, have_meta ? meta.track_count : 0, path);
 	printf("yandexdl: saved %s\n", path);
 	return true;
@@ -1116,6 +1142,18 @@ static bool save_track(const yandex_track_t *t, unsigned asked, char *why, size_
 // ---------------------------------------------------------------------------
 // the worker
 // ---------------------------------------------------------------------------
+
+static bool save_track(const yandex_track_t *t, unsigned asked, char *why, size_t why_size) {
+	char card_root[sizeof(root)];
+	int pin = storage_pin_card(card_root, sizeof(card_root));
+	if (pin < 0) {
+		snprintf(why, why_size, "%s", tr("download_no_card"));
+		return false;
+	}
+	bool ok = save_track_pinned(t, asked, card_root, why, why_size);
+	close(pin);
+	return ok;
+}
 
 static void library_look(void *user) {
 	(void)user;
@@ -1209,7 +1247,7 @@ static void *worker_main(void *arg) {
 		pthread_mutex_unlock(&lock);
 		if (finished) {
 			char music[600];
-			music_root(music, sizeof(music));
+			music_root(root, music, sizeof(music));
 			char where[700];
 			snprintf(where, sizeof(where), "%s/%s", strrchr(music, '/') ? strrchr(music, '/') + 1 : music, LIBRARY_FOLDER);
 			printf("yandexdl: queue done, %d saved\n", saved);

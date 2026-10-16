@@ -835,7 +835,7 @@ static bool card_usable(void) {
 	return root[0] && storage_card_attached() && !usb_storage_active() && storage_sd_writable();
 }
 
-static void music_root(char *out, size_t size) {
+static void music_root(const char *card_root, char *out, size_t size) {
 	int count = 0;
 	char **names = library_scan_folders(&count);
 	const char *folder = "Music";
@@ -845,14 +845,14 @@ static void music_root(char *out, size_t size) {
 			break;
 		}
 	}
-	snprintf(out, size, "%s/%s", root, folder);
+	snprintf(out, size, "%s/%s", card_root, folder);
 	library_scan_folders_free(names, count);
 }
 
-static bool make_dirs(const char *path) {
+static bool make_dirs(const char *card_root, const char *path) {
 	char buf[1024];
 	snprintf(buf, sizeof(buf), "%s", path);
-	for (char *p = buf + strlen(root) + 1; *p; p++) {
+	for (char *p = buf + strlen(card_root) + 1; *p; p++) {
 		if (*p == '/') {
 			*p = '\0';
 			if (mkdir(buf, 0755) != 0 && errno != EEXIST) {
@@ -873,7 +873,7 @@ static void progress_cb(long written, long total, void *user) {
 	}
 	bool stale = asked != generation;
 	pthread_mutex_unlock(&lock);
-	if (stale || !card_usable()) {
+	if (stale || !storage_card_attached() || usb_storage_active()) {
 		zvukcache_fetch_cancel();
 	}
 }
@@ -934,16 +934,29 @@ static void fetch_cover(const char *folder, const char *url) {
 static zvuk_album_t meta;
 static bool meta_ok;
 
-static bool save_track(const zvuk_track_t *t, unsigned asked, char *why, size_t why_size) {
+static bool save_allowed(unsigned asked, char *why, size_t why_size) {
+	pthread_mutex_lock(&lock);
+	bool current = asked == generation;
+	pthread_mutex_unlock(&lock);
+	if (!current || !card_usable()) {
+		snprintf(why, why_size, "%s", tr(current ? "download_no_card" : "download_cancelled"));
+		return false;
+	}
+	return true;
+}
+
+static bool save_track_pinned(const zvuk_track_t *t, unsigned asked, const char *card_root, char *why, size_t why_size) {
 	why[0] = '\0';
-	if (!card_usable()) {
-		snprintf(why, why_size, "%s", tr("download_no_card"));
+	if (!save_allowed(asked, why, why_size)) {
 		return false;
 	}
 	if (t->album_id[0] && (!meta_ok || strcmp(meta.id, t->album_id) != 0)) {
 		zvuk_track_t *tmp = calloc(1, sizeof(*tmp));
 		meta_ok = tmp && zvuk_album_tracks(t->album_id, tmp, 1, &meta) >= 0;
 		free(tmp);
+	}
+	if (!save_allowed(asked, why, why_size)) {
+		return false;
 	}
 	bool have_meta = meta_ok && strcmp(meta.id, t->album_id) == 0;
 	tags_t tags;
@@ -958,7 +971,7 @@ static bool save_track(const zvuk_track_t *t, unsigned asked, char *why, size_t 
 	tags.year = have_meta && meta.year ? meta.year : t->year;
 
 	char music[600], artist_dir[160], album_dir[200], album_name[220], base[220], title[200];
-	music_root(music, sizeof(music));
+	music_root(card_root, music, sizeof(music));
 	podcastdl_safe_name(tags.album_artist, "Unknown Artist", artist_dir, sizeof(artist_dir));
 	if (tags.year > 0) {
 		snprintf(album_name, sizeof(album_name), "%.180s (%d)", tags.album, tags.year);
@@ -979,12 +992,18 @@ static bool save_track(const zvuk_track_t *t, unsigned asked, char *why, size_t 
 		char existing[1300];
 		snprintf(existing, sizeof(existing), "%.1024s/%.220s.%s", folder, base, EXTS[i]);
 		if (exists(existing)) {
+			if (!save_allowed(asked, why, why_size)) {
+				return false;
+			}
 			printf("zvukdl: %s is already there\n", existing);
 			index_add(t, tags.album, tags.album_artist, tags.year, existing);
 			return true;
 		}
 	}
-	if (!make_dirs(folder)) {
+	if (!save_allowed(asked, why, why_size)) {
+		return false;
+	}
+	if (!make_dirs(card_root, folder)) {
 		snprintf(why, why_size, "%s", tr("download_failed"));
 		return false;
 	}
@@ -1004,6 +1023,9 @@ static bool save_track(const zvuk_track_t *t, unsigned asked, char *why, size_t 
 	char path[1300], part[1300];
 	snprintf(path, sizeof(path), "%.1024s/%.220s.%s", folder, base, ext);
 	snprintf(part, sizeof(part), "%.1024s/.%.220s.%s.part", folder, base, ext);
+	if (!save_allowed(asked, why, why_size)) {
+		return false;
+	}
 	FILE *out = fopen(part, "wb");
 	if (!out) {
 		snprintf(why, why_size, "%s", tr("download_failed"));
@@ -1025,9 +1047,7 @@ static bool save_track(const zvuk_track_t *t, unsigned asked, char *why, size_t 
 	if (fclose(out) != 0) {
 		ok = false;
 	}
-	pthread_mutex_lock(&lock);
-	ok = ok && asked == generation;
-	pthread_mutex_unlock(&lock);
+	ok = ok && save_allowed(asked, why, why_size);
 	if (!ok || rename(part, path) != 0) {
 		remove(part);
 		if (!why[0]) {
@@ -1039,9 +1059,24 @@ static bool save_track(const zvuk_track_t *t, unsigned asked, char *why, size_t 
 		mp4flac_patch_total_samples(path, samples);
 	}
 	fetch_cover(folder, have_meta && meta.cover[0] ? meta.cover : t->cover);
+	if (!save_allowed(asked, why, why_size)) {
+		return false;
+	}
 	index_add(t, tags.album, tags.album_artist, tags.year, path);
 	printf("zvukdl: saved %s\n", path);
 	return true;
+}
+
+static bool save_track(const zvuk_track_t *t, unsigned asked, char *why, size_t why_size) {
+	char card_root[sizeof(root)];
+	int pin = storage_pin_card(card_root, sizeof(card_root));
+	if (pin < 0) {
+		snprintf(why, why_size, "%s", tr("download_no_card"));
+		return false;
+	}
+	bool ok = save_track_pinned(t, asked, card_root, why, why_size);
+	close(pin);
+	return ok;
 }
 
 static void library_look(void *user) {

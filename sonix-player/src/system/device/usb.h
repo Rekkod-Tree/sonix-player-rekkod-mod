@@ -3,15 +3,13 @@
 
 #include <stdbool.h>
 
-// USB mass storage, the way the stock firmware does it.
+// USB mass storage with an exclusive filesystem handoff.
 //
-// When a PC is attached, the stock player unmounts the card (through
-// sys_server, "MOUNT:UMOUNT:..."), builds a configfs gadget and hands the raw
-// block device to the host with the firmware's own script,
-// /usr/bin/usb_dev_mass_storage.sh. On unplug it tears the gadget down and
-// remounts. This does exactly that -- the scripts and the daemon are already
-// on the device; the player's job is only to notice the cable and call them
-// in the right order.
+// Local services close first. Only a successful ordinary unmount and a known
+// absence from /proc/mounts allow the raw device to reach the host. A busy or
+// uncertain card stays local; no forced/lazy unmount is used for export.
+// Local services resume only after the gadget releases its backing file and
+// the card has a verified mount. ADB leaves the card local.
 //
 // Detection polls /sys/class/power_supply/usb/online from a small background
 // thread. A wall charger raises the same signal; exporting the gadget then is
@@ -24,7 +22,8 @@
 // (host build).
 void usb_start(const char *sd_device, const char *sd_mount_point);
 
-// True while the gadget is exported to a host (the card is unmounted then).
+// True while USB claims the card, including handoff and an uncertain release.
+// Local writers and mount recovery must stay off the card during this interval.
 bool usb_storage_active(void);
 
 // Hands the USB controller to DAC mode, and takes it back.

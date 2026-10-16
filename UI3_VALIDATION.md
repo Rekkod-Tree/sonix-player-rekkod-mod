@@ -1,5 +1,13 @@
 # Graphite 2 native UI
 
+## Alpha12 compact search and history
+
+Search now uses one 52 px horizontal category row: All, Tracks, Albums and Artists. It stays above the result scroller and hides while typing. Categories with no hits remain selectable. Returning from the keyboard or replaying history reveals the selected tab, without overriding subsequent manual scrolling.
+
+Recent queries are compact rows with independent remove buttons. Repeating a query restores its category; another submission moves it to the front without duplication. Leading/trailing whitespace is trimmed, blank submissions keep the keyboard and history open, and removing an entry does not execute it. The six-entry history retains the existing 127-byte configuration-value limit: longer queries can still search, but are not saved as misleading truncated entries.
+
+Native regression coverage checks category-row geometry, results above the keyboard, restored Albums/Artists selection, empty Albums followed by Tracks, normalization and real-pointer deletion. An initial test expected the full album title despite the shared row's ellipsis; its lookup now uses a stable prefix and its result-container lookup walks to the screen's direct child. Screenshot inspection confirmed the album itself was correctly present. Final integrated evidence and hardware limitations are recorded in `RELEASE_QUALITY_REVIEW.md`.
+
 ## Alpha11 search and keyboard corrections
 
 The search overlap was reproduced in the native simulator with the alpha10 implementation: `search-results.png` in workspace `output/native-ui-search-before/800/` shows track rows over the filter card, and the new geometry assertion failed. Opening/closing the keyboard moved group headings but left already-bound row objects at their old positions. Search now measures the visible filter card before positioning groups and moves retained rows with their group. Format badges also use the shared metadata layout without a leading separator.

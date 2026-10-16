@@ -1,5 +1,6 @@
 #include "search.h"
 
+#include <ctype.h>
 #include <malloc.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -39,16 +40,17 @@ lv_obj_t *search_screen;
 //
 // Under the header: the field (60 px, round, ⌕ at its left and ✕ at its right
 // while it holds something). The query is typed in full and run by the
-// keyboard's search key. Then, in one scrolling list: a card of filter pills
-// -- All, Tracks · N, Albums · N, Artists · N -- and the hits grouped under
+// keyboard's search key. A horizontal category bar stays above the results:
+// All, Tracks, Albums, Artists. Hits are grouped under
 // "TRACKS · N", "ALBUMS · N", "ARTISTS · N" (All), or only the group picked.
-// With no query the recent searches stand there instead, as pills that run
-// again; a query with no hits gets a state saying so, with "Clear".
+// With no query recent searches can be repeated or removed individually.
+// Repeating a recent query restores its category. Empty results keep the
+// category bar available, so another category can be selected.
 //
 // The rows are the library lists' rows and do what they do (the handoff's
 // gesture matrix): a track plays at a tap, with the track hits as the queue,
-// and the page stays; pulled right it plays next, pulled left it goes to the
-// end, its star stars it, held it brings up its sheet. An album opens, takes
+// and the page stays; pulled right it plays next, pulled left it is liked,
+// held it brings up its sheet. An album opens, takes
 // the same swipes and has its sheet; an artist only opens.
 //
 // A group holds row ids, not rows (library_index_t): a query that matches most
@@ -65,6 +67,8 @@ lv_obj_t *search_screen;
 #define GROUP_H 44		 // a group's heading above its rows
 #define RESULTS_BOTTOM 12
 #define RECENT_MAX 6
+#define QUERY_BYTES 256
+#define RECENT_ROW_H 56
 #define STATE_DISC 84
 #define STATE_BUTTON_H 64
 
@@ -102,11 +106,11 @@ static keyboard_t *keyboard;
 static int content_top; // under the field
 static int pitch;		// a row and the gap under it, for the Large rows setting at the last search
 
-// The results: one scroller, a body as tall as every hit shown, the pills
-// card at its top, the headings and the pool on it.
+// Categories stay outside the vertical scroller. Headings and pooled rows
+// share one body, as tall as every hit shown.
 static lv_obj_t *results;
 static lv_obj_t *body;
-static lv_obj_t *pills_card;
+static lv_obj_t *filter_bar;
 static lv_obj_t *pill[CAT_COUNT + 1];
 static lv_obj_t *heading[CAT_COUNT];
 
@@ -116,7 +120,7 @@ static lv_obj_t *recent_pills;
 static lv_obj_t *nothing_box;
 
 // The query the results answer, the hits of each group and which are shown.
-static char searched[256];
+static char searched[QUERY_BYTES];
 static library_index_t *cat_ix[CAT_COUNT];
 static int cat_count[CAT_COUNT];
 static int filter = FILTER_ALL;
@@ -146,13 +150,37 @@ static bool art_dropped; // the pictures went while the page was away
 static void run_search(const char *query, bool keep_place);
 static void window_update(void);
 static void recent_show(void);
+static void layout_results(void);
+static void show_part(lv_obj_t *part);
 
 // ---------------------------------------------------------------------------
 // Recent searches ([library] search_recent_0..5, newest first)
 // ---------------------------------------------------------------------------
 
+// Config values hold 127 bytes. Longer queries still search normally, but
+// must not be remembered as a silently truncated, different query.
 static char recent[RECENT_MAX][128];
+static int recent_filter[RECENT_MAX];
 static int recent_count = -1; // -1 until read
+
+static void query_copy(char *out, size_t size, const char *text) {
+	if (!size)
+		return;
+	if (!text)
+		text = "";
+	while (*text && isspace((unsigned char)*text))
+		text++;
+	size_t length = strlen(text);
+	while (length && isspace((unsigned char)text[length - 1]))
+		length--;
+	if (length >= size) {
+		length = size - 1;
+		while (length && ((unsigned char)text[length] & 0xc0) == 0x80)
+			length--;
+	}
+	memcpy(out, text, length);
+	out[length] = '\0';
+}
 
 static void recent_load(void) {
 	if (recent_count >= 0) {
@@ -160,20 +188,31 @@ static void recent_load(void) {
 	}
 	recent_count = 0;
 	for (int i = 0; i < RECENT_MAX; i++) {
-		char key[24];
+		char key[32], query[sizeof(recent[0])];
 		snprintf(key, sizeof(key), "search_recent_%d", i);
 		const char *q = config_get("library", key, "");
-		if (q && q[0]) {
-			snprintf(recent[recent_count++], sizeof(recent[0]), "%s", q);
-		}
+		query_copy(query, sizeof(query), q);
+		if (!query[0])
+			continue;
+		bool duplicate = false;
+		for (int j = 0; j < recent_count; j++)
+			duplicate |= strcmp(recent[j], query) == 0;
+		if (duplicate)
+			continue;
+		snprintf(recent[recent_count], sizeof(recent[0]), "%s", query);
+		snprintf(key, sizeof(key), "search_recent_filter_%d", i);
+		int category = config_get_int("library", key, FILTER_ALL);
+		recent_filter[recent_count++] = category >= 0 && category <= FILTER_ALL ? category : FILTER_ALL;
 	}
 }
 
 static void recent_save(void) {
 	for (int i = 0; i < RECENT_MAX; i++) {
-		char key[24];
+		char key[32];
 		snprintf(key, sizeof(key), "search_recent_%d", i);
 		config_set("library", key, i < recent_count ? recent[i] : "");
+		snprintf(key, sizeof(key), "search_recent_filter_%d", i);
+		config_set_int("library", key, i < recent_count ? recent_filter[i] : FILTER_ALL);
 	}
 	config_save();
 }
@@ -184,7 +223,7 @@ static void recent_note(const char *query) {
 	if (!query || !query[0] || strlen(query) >= sizeof(recent[0])) {
 		return;
 	}
-	if (recent_count > 0 && strcmp(recent[0], query) == 0) {
+	if (recent_count > 0 && strcmp(recent[0], query) == 0 && recent_filter[0] == filter) {
 		return; // already first: nothing to write
 	}
 	int at = recent_count < RECENT_MAX ? recent_count : RECENT_MAX - 1;
@@ -199,8 +238,10 @@ static void recent_note(const char *query) {
 	}
 	for (int i = at; i > 0; i--) {
 		memcpy(recent[i], recent[i - 1], sizeof(recent[0]));
+		recent_filter[i] = recent_filter[i - 1];
 	}
 	snprintf(recent[0], sizeof(recent[0]), "%.*s", (int)sizeof(recent[0]) - 1, query);
+	recent_filter[0] = filter;
 	recent_save();
 }
 
@@ -209,16 +250,20 @@ static void recent_note(const char *query) {
 // ---------------------------------------------------------------------------
 
 static bool group_shown(int cat) { return cat_count[cat] > 0 && (filter == FILTER_ALL || filter == cat); }
+static bool has_results(void) {
+	for (int c = 0; c < CAT_COUNT; c++)
+		if (group_shown(c))
+			return true;
+	return false;
+}
 
 static int group_height(void) { return keyboard_is_visible(keyboard) ? 24 : GROUP_H; }
 static int rows_top(int cat) { return group_top[cat] + group_height(); }
 
-// Lays the groups out under the pills card and sizes the body to hold them.
+// Sizes the scrolling body and places every visible group inside it.
 static void layout_groups(void) {
 	bool typing = keyboard_is_visible(keyboard);
-	lv_obj_set_hidden(pills_card, typing);
-	lv_obj_update_layout(pills_card);
-	groups_top = typing ? 0 : lv_obj_get_height(pills_card) + SX_CARD_GAP;
+	groups_top = 0;
 	int y = groups_top;
 	for (int c = 0; c < CAT_COUNT; c++) {
 		if (!group_shown(c)) {
@@ -697,8 +742,6 @@ static void pills_paint(void) {
 	}
 }
 
-static void pill_text(int which, const char *text) { lv_label_set_text(lv_obj_get_child(pill[which], 0), text); }
-
 static void pill_clicked_cb(lv_event_t *e) {
 	if (player_sheet_drag_active() || switcher_back_drag_active()) {
 		return;
@@ -709,11 +752,14 @@ static void pill_clicked_cb(lv_event_t *e) {
 	}
 	filter = which;
 	pills_paint();
+	recent_note(searched);
 	for (int i = 0; i < POOL; i++) {
 		row_unbind(&rows[i]);
 	}
-	layout_groups();
+	show_part(has_results() ? results : nothing_box);
+	layout_results();
 	lv_obj_scroll_to_y(results, 0, LV_ANIM_OFF);
+	lv_obj_scroll_to_view(pill[which], LV_ANIM_OFF);
 	window_update();
 }
 
@@ -726,7 +772,13 @@ static void pill_clicked_cb(lv_event_t *e) {
 // scroll its hits under the keys).
 static void layout_results(void) {
 	bool kb = keyboard_is_visible(keyboard);
-	int height = (int)page_cfg->screen_height - content_top - (kb ? SEARCH_KEYBOARD_H : 0);
+	bool categories = searched[0] && !kb;
+	bool reveal_categories = categories && lv_obj_is_hidden(filter_bar);
+	lv_obj_set_hidden(filter_bar, !categories);
+	int top = content_top + (categories ? SX_PILL_H + SX_CARD_GAP : 0);
+	lv_obj_set_y(results, top);
+	lv_obj_set_y(nothing_box, top);
+	int height = (int)page_cfg->screen_height - top - (kb ? SEARCH_KEYBOARD_H : 0);
 	if (height < 60) {
 		height = 60;
 	}
@@ -734,10 +786,12 @@ static void layout_results(void) {
 	// The two that do not scroll stop above the mini player, so the state's
 	// middle is the middle of what can be seen.
 	int still = height - (kb ? 0 : sx_frame_body_bottom());
-	lv_obj_set_height(recent_box, still);
+	lv_obj_set_height(recent_box, (int)page_cfg->screen_height - content_top - (kb ? SEARCH_KEYBOARD_H : sx_frame_body_bottom()));
 	lv_obj_set_height(nothing_box, still);
 	layout_groups();
 	lv_obj_update_layout(results); // the new height, before the window is worked out from it
+	if (reveal_categories)
+		lv_obj_scroll_to_view(pill[filter], LV_ANIM_OFF);
 	window_update();
 }
 
@@ -774,53 +828,35 @@ static void results_clear(void) {
 // stay where they were.
 static void run_search(const char *query, bool keep_place) {
 	char wanted[sizeof(searched)];
-	snprintf(wanted, sizeof(wanted), "%s", query ? query : "");
+	query_copy(wanted, sizeof(wanted), query);
 	int scroll = keep_place ? (int)lv_obj_get_scroll_y(results) : 0;
 
 	results_clear();
+	if (strcmp(lv_textarea_get_text(field), wanted) != 0)
+		lv_textarea_set_text(field, wanted);
 	if (!wanted[0]) {
+		layout_results();
 		return;
 	}
 	if (!library_is_open()) {
 		gui_notify_no_card();
 		return;
 	}
-	if (!keep_place) {
-		filter = FILTER_ALL;
-	}
-
 	snprintf(searched, sizeof(searched), "%s", wanted);
 	pitch = sx_row_height(false) + SX_ROW_GAP;
 	playing_refresh();
-	int total = 0;
 	for (int i = 0; i < CAT_COUNT; i++) {
 		cat_ix[i] = library_index_open(CAT_KIND[i], LIBRARY_FILTER_SEARCH, wanted, LIBRARY_ORDER_DEFAULT, false);
 		cat_count[i] = library_index_count(cat_ix[i]);
-		total += cat_count[i];
-		// A group cut at the cap says so: the count is a floor, not a total.
-		char text[96];
-		snprintf(text, sizeof(text), cat_count[i] >= LIBRARY_SEARCH_MAX ? "%s \xC2\xB7 %d+" : "%s \xC2\xB7 %d",
-				 tr(CAT_PILL[i]), cat_count[i]);
-		pill_text(i, text);
-		// A group with nothing in it has no pill: there is nothing to see.
-		lv_obj_set_hidden(pill[i], cat_count[i] == 0);
 	}
 
-	if (total == 0) {
-		show_part(nothing_box);
-		return;
-	}
-	// Kept among the recent searches: only a query that found something is
-	// worth running again.
+	// Remember submitted queries, including empty result sets, but not refreshes.
 	if (!keep_place) {
 		recent_note(wanted);
 	}
-	if (filter != FILTER_ALL && cat_count[filter] == 0) {
-		filter = FILTER_ALL;
-	}
 	pills_paint();
-	show_part(results);
-	layout_groups();
+	show_part(has_results() ? results : nothing_box);
+	layout_results();
 	lv_obj_update_layout(results);
 	lv_obj_scroll_to_y(results, scroll, LV_ANIM_OFF);
 	window_update();
@@ -858,7 +894,7 @@ static void field_changed_cb(lv_event_t *e) {
 static void kb_search_cb(lv_event_t *e) {
 	(void)e;
 	run_search(lv_textarea_get_text(field), false);
-	keyboard_show(false); // the results get the whole page
+	keyboard_show(!searched[0]);
 }
 
 static void field_clicked_cb(lv_event_t *e) {
@@ -878,24 +914,64 @@ static void recent_clicked_cb(lv_event_t *e) {
 	if (i < 0 || i >= recent_count) {
 		return;
 	}
-	char query[128];
+	char query[QUERY_BYTES];
 	snprintf(query, sizeof(query), "%s", recent[i]);
+	filter = recent_filter[i];
 	lv_textarea_set_text(field, query); // clears nothing: no search stands
 	refresh_clear_button();
 	run_search(query, false);
-	keyboard_show(false);
+	keyboard_show(!searched[0]);
+}
+
+static void recent_remove_cb(lv_event_t *e) {
+	if (player_sheet_drag_active() || switcher_back_drag_active())
+		return;
+	int index = (int)(intptr_t)lv_event_get_user_data(e);
+	if (index < 0 || index >= recent_count)
+		return;
+	for (int i = index; i + 1 < recent_count; i++) {
+		memcpy(recent[i], recent[i + 1], sizeof(recent[0]));
+		recent_filter[i] = recent_filter[i + 1];
+	}
+	recent_count--;
+	recent_save();
+	recent_show();
 }
 
 static void recent_show(void) {
 	recent_load();
 	lv_obj_clean(recent_pills);
 	for (int i = 0; i < recent_count; i++) {
-		lv_obj_t *p = sx_pill(recent_pills, recent[i], i, recent_clicked_cb);
-		lv_obj_set_style_max_width(p, lv_pct(100), 0);
-		lv_label_set_long_mode(lv_obj_get_child(p, 0), LV_LABEL_LONG_DOT);
+		lv_obj_t *row = sx_box(recent_pills);
+		lv_obj_set_size(row, lv_pct(100), RECENT_ROW_H);
+		lv_obj_t *query = lv_button_create(row);
+		lv_obj_remove_style_all(query);
+		lv_obj_set_size(query, lv_pct(100), RECENT_ROW_H);
+		lv_obj_set_style_radius(query, 12, 0);
+		lv_obj_set_style_pad_left(query, 12, 0);
+		lv_obj_set_style_pad_right(query, RECENT_ROW_H + 8, 0);
+		lv_obj_add_style(query, &sx_style_press, LV_STATE_PRESSED);
+		lv_obj_add_event_cb(query, recent_clicked_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+		lv_obj_t *label = sx_label(query, &font_ui_22, &sx_style_text);
+		lv_obj_set_width(label, lv_pct(100));
+		lv_label_set_text(label, recent[i]);
+		lv_obj_align(label, LV_ALIGN_LEFT_MID, 0, 0);
+		lv_obj_t *remove = lv_button_create(row);
+		lv_obj_remove_style_all(remove);
+		lv_obj_set_size(remove, RECENT_ROW_H, RECENT_ROW_H);
+		lv_obj_align(remove, LV_ALIGN_RIGHT_MID, 0, 0);
+		lv_obj_set_style_radius(remove, LV_RADIUS_CIRCLE, 0);
+		lv_obj_add_style(remove, &sx_style_press, LV_STATE_PRESSED);
+		lv_obj_add_event_cb(remove, recent_remove_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+		lv_obj_t *icon = lv_image_create(remove);
+		lv_image_set_src(icon, &icon_clear);
+		lv_obj_add_style(icon, &sx_style_icon2, 0);
+		lv_image_set_scale(icon, LV_SCALE_NONE * 3 / 4);
+		lv_obj_center(icon);
 	}
 	// Nothing searched yet: nothing to show but the field.
 	show_part(recent_count > 0 ? recent_box : NULL);
+	lv_obj_set_hidden(filter_bar, true);
 }
 
 static lv_obj_t *recent_build(lv_obj_t *parent) {
@@ -913,9 +989,10 @@ static lv_obj_t *recent_build(lv_obj_t *parent) {
 	lv_obj_set_style_margin_top(head, 12, 0);
 	lv_label_set_text(head, tr("lists_head_recent"));
 
-	lv_obj_t *card = sx_card_create(box);
-	sx_card_title(card, tr("lists_recent_queries"));
-	recent_pills = sx_card_pills(card);
+	recent_pills = sx_box(box);
+	lv_obj_set_size(recent_pills, lv_pct(100), LV_SIZE_CONTENT);
+	lv_obj_set_flex_flow(recent_pills, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_style_pad_row(recent_pills, 2, 0);
 	return box;
 }
 
@@ -1091,18 +1168,21 @@ void search_init(gui_config_t *cfg) {
 	body = sx_box(results);
 	lv_obj_set_size(body, lv_pct(100), 0);
 
-	pills_card = sx_card_create(body);
-	lv_obj_set_style_pad_ver(pills_card, 14, 0);
-	lv_obj_t *pills = sx_card_pills(pills_card);
-	pill[FILTER_ALL] = sx_pill(pills, tr("lists_filter_all"), FILTER_ALL, pill_clicked_cb);
+	filter_bar = sx_box(search_screen);
+	lv_obj_set_size(filter_bar, cfg->screen_width, SX_PILL_H);
+	lv_obj_set_pos(filter_bar, 0, content_top);
+	lv_obj_set_style_pad_hor(filter_bar, cfg->padding, 0);
+	lv_obj_set_style_pad_column(filter_bar, SX_PILL_GAP, 0);
+	lv_obj_set_flex_flow(filter_bar, LV_FLEX_FLOW_ROW);
+	lv_obj_set_scrollable(filter_bar, true);
+	lv_obj_set_scroll_dir(filter_bar, LV_DIR_HOR);
+	lv_obj_set_scrollbar_mode(filter_bar, LV_SCROLLBAR_MODE_OFF);
+	lv_obj_set_scroll_chain_hor(filter_bar, false);
+	pill[FILTER_ALL] = sx_pill(filter_bar, tr("lists_filter_all"), FILTER_ALL, pill_clicked_cb);
 	for (int i = 0; i < CAT_COUNT; i++) {
-		pill[i] = sx_pill(pills, tr(CAT_PILL[i]), i, pill_clicked_cb);
+		pill[i] = sx_pill(filter_bar, tr(CAT_PILL[i]), i, pill_clicked_cb);
 	}
-	// The pill row comes first in a card with no head of its own.
-	lv_obj_t *head = lv_obj_get_child(pills_card, 0);
-	if (head && head != pills) {
-		lv_obj_set_hidden(head, true);
-	}
+	lv_obj_set_hidden(filter_bar, true);
 	pills_paint();
 
 	for (int c = 0; c < CAT_COUNT; c++) {

@@ -2,57 +2,58 @@
 
 #include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <limits.h>
 #include <linux/input.h>
 #include <linux/netlink.h>
+#include <poll.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <fcntl.h>
-#include <sys/statvfs.h>
-#include <sys/wait.h>
-#include <poll.h>
 #include <sys/inotify.h>
 #include <sys/ioctl.h>
 #include <sys/mount.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include "src/gui/nowplaying/cover.h"
 #include "src/gui/settings/screensaver.h"
 #include "src/gui/shell/gui.h"
-#include "src/system/device/sysinfo.h"
+#include "src/system/audio/alsa-controls.h"
+#include "src/system/audio/audio.h"
+#include "src/system/audio/eq.h"
 #include "src/system/bluetooth/bluetooth.h"
 #include "src/system/bluetooth/btlog.h"
 #include "src/system/bluetooth/btplayer.h"
-#include "src/system/audio/audio.h"
-#include "src/system/audio/alsa-controls.h"
-#include "src/system/playback/device_state.h"
-#include "src/system/library/audiobookdb.h"
-#include "src/system/audio/eq.h"
-#include "src/system/remote/dlna.h"
+#include "src/system/core/config.h"
+#include "src/system/core/logging.h"
+#include "src/system/core/panel.h"
+#include "src/system/core/utils.h"
+#include "src/system/device/power.h"
+#include "src/system/device/screenshot.h"
+#include "src/system/device/sysinfo.h"
+#include "src/system/device/sysserver.h"
+#include "src/system/device/usb.h"
 #include "src/system/gearboy/gbdb.h"
 #include "src/system/input/hookclicks.h"
 #include "src/system/input/keymap.h"
-#include "src/system/core/config.h"
-#include "src/system/core/panel.h"
-#include "src/system/streaming/provider.h"
+#include "src/system/library/audiobookdb.h"
+#include "src/system/library/library.h"
+#include "src/system/library/playlists.h"
+#include "src/system/playback/device_state.h"
+#include "src/system/remote/dlna.h"
 #include "src/system/streaming/cardimport.h"
 #include "src/system/streaming/podcastcache.h"
-#include "src/system/streaming/podcastsubs.h"
 #include "src/system/streaming/podcaststate.h"
+#include "src/system/streaming/podcastsubs.h"
+#include "src/system/streaming/provider.h"
 #include "src/system/streaming/radio.h"
-#include "src/system/library/library.h"
-#include "src/system/core/logging.h"
-#include "src/system/library/playlists.h"
-#include "src/system/device/usb.h"
-#include "src/system/device/power.h"
-#include "src/system/device/screenshot.h"
-#include "src/system/device/sysserver.h"
-#include "src/system/core/utils.h"
-#include "src/system/core/utils.h"
+#include "src/system/streaming/streamturn.h"
 
 #ifndef PATH_MAX
 #define PATH_MAX 4096
@@ -331,12 +332,14 @@ static const char *const SD_DEVICE_CANDIDATES[] = {
 // Resolved once at startup and handed to the file browser, see storage_sd_root().
 static char sd_root[PATH_MAX] = "";
 static char sd_device_used[64] = "";
+static _Atomic bool sd_requires_mount;
+static bool is_mounted(const char *mount_point);
 
 const char *storage_sd_device(void) { return sd_device_used[0] ? sd_device_used : NULL; }
 
-const char *storage_sd_root(void) {
-	return sd_root[0] ? sd_root : NULL;
-}
+const char *storage_sd_mount_point(void) { return sd_root[0] ? sd_root : NULL; }
+
+const char *storage_sd_root(void) { return sd_root[0] && (!sd_requires_mount || (is_mounted(sd_root) && !usb_storage_active())) ? sd_root : NULL; }
 
 // True if something is already mounted on `mount_point`.
 //
@@ -532,7 +535,7 @@ static void list_block_devices(void) {
 // works" is the shape that gets reported.
 static bool mount_is_writable(const char *mount_point) {
 	struct statvfs st;
-	if (statvfs(mount_point, &st) == 0 && (st.f_flag & ST_RDONLY)) {
+	if (statvfs(mount_point, &st) != 0 || (st.f_flag & ST_RDONLY)) {
 		return false;
 	}
 
@@ -636,11 +639,15 @@ static int mount_sd_directly(const char *device, const char *mount_point) {
 // Whether the card can be written to, decided once when it is mounted. Read by
 // storage_sd_writable(); everything that keeps state on the card can ask instead
 // of failing silently.
-static bool sd_writable = true;
+static _Atomic bool sd_writable;
 
 // Records the writability of a mount that has just been established, and says
 // so in the log. Returns 0 so it can stand in for the `return 0` it replaces.
 static int mount_settled(const char *mount_point) {
+	if (sd_requires_mount && !is_mounted(mount_point)) {
+		sd_writable = false;
+		return -1;
+	}
 	sd_writable = mount_is_writable(mount_point);
 	if (!sd_writable) {
 		fprintf(stderr,
@@ -652,10 +659,18 @@ static int mount_settled(const char *mount_point) {
 	return 0;
 }
 
-bool storage_sd_writable(void) { return sd_writable; }
+bool storage_sd_writable(void) {
+	if (!sd_writable || !sd_root[0] || usb_storage_active()) {
+		return false;
+	}
+	struct statvfs st;
+	return (!sd_requires_mount || is_mounted(sd_root)) && statvfs(sd_root, &st) == 0 && !(st.f_flag & ST_RDONLY);
+}
 
 static int mount_sd(storage_config_t *storage_cfg, const system_runtime_t *runtime) {
 	(void)runtime;
+	sd_requires_mount = storage_cfg->manage_mount;
+	sd_writable = false;
 
 	const char *mount_point = pick_sd_root(storage_cfg);
 	snprintf(sd_root, sizeof(sd_root), "%s", mount_point);
@@ -777,7 +792,7 @@ static void check_and_mount_existing_sd(storage_config_t *storage_cfg, const sys
 // bare "mmcblk" prefix, so one card produces TWO events (the disk and its
 // partition) and each half would otherwise run twice, the second call recording
 // the state the first had already cleared.
-static bool card_attached = true; // the card is mounted before this thread starts
+static _Atomic bool card_attached = true; // the card is mounted before this thread starts
 
 bool storage_card_attached(void) { return card_attached; }
 
@@ -786,6 +801,7 @@ static void card_databases_detach(void) {
 		return;
 	}
 	card_attached = false;
+	sd_writable = false;
 
 	// Playback first. The playback thread keeps the track's descriptor open for
 	// the whole track -- and with "remember track" a track is loaded and paused
@@ -803,11 +819,23 @@ static void card_databases_detach(void) {
 	btlog_card_release();
 	library_close();
 	audiobookdb_close();
+	radio_store_close();
+	cover_set_cache_dir(NULL);
+	playlists_init(NULL);
+	streamturn_abandon_all();
+	stream_provider_set_root_all(NULL);
+	cardimport_set_root(NULL);
+	podcastcache_set_root(NULL);
+	podcastsubs_set_root(NULL);
+	dlna_set_root(NULL);
+	eq_presets_set_dir(NULL);
+	peq_presets_set_dir(NULL);
+	mseb_presets_set_dir(NULL);
 	printf("storage: card databases closed for removal\n");
 }
 
 static void card_databases_attach(const char *root) {
-	if (card_attached) {
+	if (card_attached || !root || !root[0] || (sd_requires_mount && (!is_mounted(root) || !mount_is_alive(root)))) {
 		return;
 	}
 	card_attached = true;
@@ -819,10 +847,15 @@ static void card_databases_attach(const char *root) {
 	// long to hold both is rejected rather than silently cut in half and opened
 	// somewhere else.
 	const int room = (int)sizeof(path) - 32;
-	snprintf(path, sizeof(path), "%.*s/.local/library.db", room, root);
+	const char *db_root = sd_writable ? root : "/tmp";
+	if (!sd_writable) {
+		mkdir("/tmp/.local", 0755);
+	}
+	snprintf(path, sizeof(path), "%.*s/.local/library.db", room, db_root);
 	library_open(path);
-	snprintf(path, sizeof(path), "%.*s/.local/audiobooks.db", room, root);
+	snprintf(path, sizeof(path), "%.*s/.local/audiobooks.db", room, db_root);
 	audiobookdb_open(path);
+	radio_store_open(db_root);
 
 	// The card may have been written somewhere else while it was out: looked
 	// over in the background, as soon as the index is open.
@@ -882,6 +915,46 @@ static pthread_mutex_t card_lock = PTHREAD_MUTEX_INITIALIZER;
 static storage_config_t *g_storage_cfg;
 static system_runtime_t *g_runtime;
 static bool card_released; // under card_lock: set for the power-off, never cleared
+static bool card_usb_claimed; // under card_lock: supervisor/hotplug must not mount
+
+bool storage_release_for_usb(void) {
+	pthread_mutex_lock(&card_lock);
+	if (card_released) {
+		pthread_mutex_unlock(&card_lock);
+		return false;
+	}
+	card_usb_claimed = true;
+	card_databases_detach();
+	pthread_mutex_unlock(&card_lock);
+	return true;
+}
+
+void storage_resume_after_usb(void) {
+	pthread_mutex_lock(&card_lock);
+	card_usb_claimed = false;
+	if (!card_released && sd_root[0] && is_mounted(sd_root) && mount_is_alive(sd_root)) {
+		mount_settled(sd_root);
+		card_databases_attach(sd_root);
+	}
+	pthread_mutex_unlock(&card_lock);
+}
+
+int storage_pin_card(char *out, size_t size) {
+	int fd = -1;
+	if (!out || !size) {
+		return -1;
+	}
+	out[0] = '\0';
+	pthread_mutex_lock(&card_lock);
+	if (!card_released && !card_usb_claimed && card_attached && storage_sd_writable() && strlen(sd_root) < size) {
+		fd = open(sd_root, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+		if (fd >= 0) {
+			snprintf(out, size, "%s", sd_root);
+		}
+	}
+	pthread_mutex_unlock(&card_lock);
+	return fd;
+}
 
 void storage_recheck_card(void) {
 	if (!g_storage_cfg || !g_storage_cfg->manage_mount || getenv("SONIX_NO_MOUNT")) {
@@ -895,8 +968,17 @@ void storage_recheck_card(void) {
 
 	pthread_mutex_lock(&card_lock);
 
-	if (card_released || (sd_root[0] && is_mounted(sd_root) && mount_is_alive(sd_root))) {
-		pthread_mutex_unlock(&card_lock); // nothing to do, the common case
+	if (card_released || card_usb_claimed || usb_storage_active()) {
+		pthread_mutex_unlock(&card_lock);
+		return;
+	}
+	if (sd_root[0] && is_mounted(sd_root) && mount_is_alive(sd_root)) {
+		struct statvfs st;
+		if (statvfs(sd_root, &st) != 0 || (st.f_flag & ST_RDONLY)) {
+			sd_writable = false;
+		}
+		card_databases_attach(sd_root);
+		pthread_mutex_unlock(&card_lock);
 		return;
 	}
 
@@ -1104,7 +1186,7 @@ void *sd_hotplug_thread(void *arg) {
 			if (strstr(buf, "add@")) {
 				printf("SD Card Inserted\n");
 				pthread_mutex_lock(&card_lock);
-				if (card_released) {
+				if (card_released || card_usb_claimed || usb_storage_active()) {
 					pthread_mutex_unlock(&card_lock);
 					continue;
 				}
@@ -1137,7 +1219,9 @@ void *sd_hotplug_thread(void *arg) {
 				pthread_mutex_lock(&card_lock);
 				bool was_attached = card_attached;
 				card_databases_detach();
-				unmount_sd(storage_cfg);
+				if (!card_usb_claimed && !usb_storage_active()) {
+					unmount_sd(storage_cfg);
+				}
 				pthread_mutex_unlock(&card_lock);
 				if (was_attached) {
 					send_notification(runtime, "sd_card_removed");

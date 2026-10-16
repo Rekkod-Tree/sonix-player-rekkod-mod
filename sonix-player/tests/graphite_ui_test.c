@@ -819,16 +819,31 @@ static void run(lv_timer_t *timer) {
 			capture("search-results");
 			lv_obj_t *all = find_label(search_screen, tr("lists_filter_all"));
 			assert(visible(all));
-			lv_obj_t *filters = lv_obj_get_parent(lv_obj_get_parent(lv_obj_get_parent(all)));
+			lv_obj_t *filters = lv_obj_get_parent(lv_obj_get_parent(all));
 			lv_area_t filters_box;
 			lv_obj_get_coords(filters, &filters_box);
+			assert(lv_obj_get_height(filters) == 52);
+			assert(lv_obj_get_child_count(filters) == 4);
+			for (uint32_t i = 0; i < 4; i++) {
+				lv_obj_t *category = lv_obj_get_child(filters, (int)i);
+				lv_area_t category_box;
+				lv_obj_get_coords(category, &category_box);
+				assert(category_box.y1 == filters_box.y1 && category_box.y2 <= filters_box.y2);
+			}
 			const char *titles[] = {"Time", "Echoes"};
+			lv_obj_t *results_view = NULL;
 			for (int i = 0; i < 2; i++) {
 				lv_obj_t *label = find_label(search_screen, titles[i]);
 				assert(visible(label));
 				lv_area_t title_box;
 				lv_obj_get_coords(label, &title_box);
 				assert(title_box.y1 > filters_box.y2);
+				if (!results_view) {
+					results_view = label;
+					while (lv_obj_get_parent(results_view) && lv_obj_get_parent(results_view) != search_screen)
+						results_view = lv_obj_get_parent(results_view);
+					assert(lv_obj_get_parent(results_view) == search_screen);
+				}
 			}
 			lv_area_t box;
 			lv_obj_get_coords(field, &box);
@@ -874,8 +889,110 @@ static void run(lv_timer_t *timer) {
 				lv_obj_get_coords(label, &box);
 				assert(box.y1 > filters_box.y2);
 			}
+
+			// A submitted category is part of its recent query, including when
+			// the horizontal bar was scrolled somewhere else while hidden.
+			lv_obj_t *album_label = find_label(filters, tr("albums"));
+			lv_obj_t *track_label = find_label(filters, tr("search_tracks_2"));
+			lv_obj_t *artist_label = find_label(filters, tr("artists"));
+			assert(album_label && track_label && artist_label);
+			lv_obj_t *albums = lv_obj_get_parent(album_label);
+			lv_obj_t *tracks = lv_obj_get_parent(track_label);
+			lv_obj_t *artists = lv_obj_get_parent(artist_label);
+			lv_obj_send_event(albums, LV_EVENT_CLICKED, NULL);
+			capture("search-albums");
+			assert(visible(find_label(results_view, "The Dark Side")));
+			assert(!visible(find_label(results_view, "Time")));
+			assert(lv_color_eq(lv_obj_get_style_bg_color(albums, 0), sx_pal()->accent));
+			lv_obj_send_event(lv_obj_get_parent(clear), LV_EVENT_CLICKED, NULL);
+			lv_obj_update_layout(search_screen);
+			assert(!visible(filters) && !visible(results_view));
+			lv_obj_scroll_to_x(filters, 0, LV_ANIM_OFF);
+			recent = find_label(lv_obj_get_parent(recent_head), "Pink Floyd");
+			assert(visible(recent));
+			lv_obj_send_event(lv_obj_get_parent(recent), LV_EVENT_CLICKED, NULL);
+			capture("search-recent-albums");
+			assert(strcmp(lv_textarea_get_text(field), "Pink Floyd") == 0);
+			assert(visible(find_label(results_view, "The Dark Side")));
+			assert(!visible(find_label(results_view, "Time")));
+			assert(lv_color_eq(lv_obj_get_style_bg_color(albums, 0), sx_pal()->accent));
+			lv_obj_get_coords(filters, &filters_box);
+			lv_obj_get_coords(albums, &box);
+			assert(box.x1 >= filters_box.x1 && box.x2 <= filters_box.x2);
+			// The last category can begin beyond the horizontal viewport. A
+			// replay must reveal it even after another scroll position was left.
+			lv_obj_send_event(artists, LV_EVENT_CLICKED, NULL);
+			lv_obj_send_event(lv_obj_get_parent(clear), LV_EVENT_CLICKED, NULL);
+			lv_obj_scroll_to_x(filters, 0, LV_ANIM_OFF);
+			recent = find_label(lv_obj_get_parent(recent_head), "Pink Floyd");
+			assert(visible(recent));
+			lv_obj_send_event(lv_obj_get_parent(recent), LV_EVENT_CLICKED, NULL);
+			capture("search-recent-artists-revealed");
+			assert(lv_color_eq(lv_obj_get_style_bg_color(artists, 0), sx_pal()->accent));
+			assert(visible(find_label(results_view, "Pink Floyd")));
+			lv_obj_get_coords(filters, &filters_box);
+			lv_obj_get_coords(artists, &box);
+			assert(box.x1 >= filters_box.x1 && box.x2 <= filters_box.x2);
+			lv_obj_send_event(albums, LV_EVENT_CLICKED, NULL);
+
+			// Time has a track hit and no album hit in the local fixture. Empty
+			// Albums must retain the category controls and allow switching out.
+			lv_obj_send_event(field, LV_EVENT_CLICKED, NULL);
+			lv_textarea_set_text(field, "Time");
+			lv_obj_update_layout(search_screen);
+			input(438, height - 40, true);
+			input(438, height - 40, false);
+			capture("search-empty-albums");
+			assert(visible(filters) && !visible(results_view));
+			assert(visible(find_label(search_screen, tr("lists_nothing_found"))));
+			assert(lv_color_eq(lv_obj_get_style_bg_color(albums, 0), sx_pal()->accent));
+			lv_obj_send_event(tracks, LV_EVENT_CLICKED, NULL);
+			capture("search-time-tracks");
+			assert(visible(results_view) && visible(find_label(results_view, "Time")));
+			assert(!visible(find_label(search_screen, tr("lists_nothing_found"))));
+			assert(lv_color_eq(lv_obj_get_style_bg_color(tracks, 0), sx_pal()->accent));
+
+			// Search, field and history use the same normalized query; a blank
+			// submission returns to recents without recording a whitespace query.
+			lv_obj_send_event(field, LV_EVENT_CLICKED, NULL);
+			lv_textarea_set_text(field, "   Pink Floyd   ");
+			lv_obj_update_layout(search_screen);
+			input(438, height - 40, true);
+			input(438, height - 40, false);
+			capture("search-trimmed-query");
+			assert(strcmp(lv_textarea_get_text(field), "Pink Floyd") == 0);
+			assert(strcmp(config_get("library", "search_recent_0", ""), "Pink Floyd") == 0);
+			assert(visible(find_label(results_view, "Time")) && visible(find_label(results_view, "Echoes")));
+			lv_obj_send_event(field, LV_EVENT_CLICKED, NULL);
+			lv_textarea_set_text(field, "   ");
+			lv_obj_update_layout(search_screen);
+			input(438, height - 40, true);
+			input(438, height - 40, false);
+			capture("search-blank-query");
+			assert(strcmp(lv_textarea_get_text(field), "") == 0);
+			assert(!visible(filters) && !visible(results_view) && visible(recent_head));
+			assert(strcmp(config_get("library", "search_recent_0", ""), "Pink Floyd") == 0);
+
+			// The remove control is adjacent to the query button. Exercise real
+			// pointer hit testing: deleting Time must not replay its search.
+			recent = find_label(lv_obj_get_parent(recent_head), "Time");
+			assert(visible(recent));
+			lv_obj_t *recent_row = lv_obj_get_parent(lv_obj_get_parent(recent));
+			lv_obj_t *recent_list = lv_obj_get_parent(recent_row);
+			uint32_t before_remove = lv_obj_get_child_count(recent_list);
+			lv_obj_t *remove_icon = find_image(recent_row, &icon_clear);
+			assert(visible(remove_icon));
+			lv_obj_get_coords(lv_obj_get_parent(remove_icon), &box);
+			assert(box.y2 < height - 316);
+			input((box.x1 + box.x2) / 2, (box.y1 + box.y2) / 2, true);
+			input((box.x1 + box.x2) / 2, (box.y1 + box.y2) / 2, false);
+			capture("search-remove-recent");
+			assert(lv_obj_get_child_count(recent_list) + 1 == before_remove);
+			assert(!find_label(recent_list, "Time") && visible(find_label(recent_list, "Pink Floyd")));
+			assert(strcmp(lv_textarea_get_text(field), "") == 0);
+			assert(!visible(filters) && !visible(results_view) && visible(recent_head));
 			theme_set_dark(false);
-			printf("UI_SEARCH_REFLOW_PASS keyboard, filters and recent query geometry\n");
+			printf("UI_SEARCH_REFLOW_PASS keyboard, horizontal categories, recent category, empty results, normalization and removal\n");
 		}
 		switch_screen(streaming_screen);
 		break;

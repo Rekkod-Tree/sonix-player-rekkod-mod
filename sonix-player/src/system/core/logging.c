@@ -62,6 +62,7 @@ static bool explicit_log;
 // the USB export can never unmount it. Every log file is opened close-on-exec,
 // so no child process inherits that original.
 static FILE *active_stream;
+static atomic_bool holding_output;
 
 // The card can go away under the log: the USB export unmounts it, and so does
 // pulling it out. While it is gone everything printed is held the same way and
@@ -651,6 +652,19 @@ void logging_child_stdio(void) {
 }
 
 static void write_all(int fd, const char *data, size_t size) {
+	if ((fd == STDOUT_FILENO || fd == STDERR_FILENO) && atomic_load(&holding_output)) {
+		// The held file lives on tmpfs: limiting only drain_held() would still
+		// let hours of USB diagnostics consume all available RAM. This common
+		// path also covers startup/fork output without the writer thread.
+		struct stat st;
+		if (fstat(fd, &st) != 0 || st.st_size >= HELD_MAX) {
+			return;
+		}
+		size_t room = (size_t)(HELD_MAX - st.st_size);
+		if (size > room) {
+			size = room;
+		}
+	}
 	while (size > 0) {
 		ssize_t done = write(fd, data, size);
 		if (done <= 0) {
@@ -766,6 +780,7 @@ static bool redirect_to(FILE *stream) {
 	if (fd < 0 || dup2(fd, STDOUT_FILENO) < 0 || dup2(fd, STDERR_FILENO) < 0) {
 		return false;
 	}
+	atomic_store(&holding_output, stream == early_stream || stream == usb_stream);
 
 	if (active_stream && active_stream != stream) {
 		fclose(active_stream);
