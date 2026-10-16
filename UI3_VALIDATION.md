@@ -2,6 +2,8 @@
 
 ## Alpha12 compact search and history
 
+The packaged alpha12 image subsequently booted on the physical R1. Both the installed player and the card's `r1.upt` matched the final build/image SHA-256 values. Repeated identical captures show the existing recent queries, the compact All view, three album matches for `акуст`, and restoration of Albums when that query is replayed. All was restored afterwards. Configuration comparison found only default recent-category keys and the normal clock timestamp added/updated; query order and user preferences were preserved. Evidence: workspace `output/device-audit/alpha12/`. Capture automation now wakes the screen when its backlight reports the off value before injecting a tap, avoiding the stale locked-screen frame seen initially.
+
 Search now uses one 52 px horizontal category row: All, Tracks, Albums and Artists. It stays above the result scroller and hides while typing. Categories with no hits remain selectable. Returning from the keyboard or replaying history reveals the selected tab, without overriding subsequent manual scrolling.
 
 Recent queries are compact rows with independent remove buttons. Repeating a query restores its category; another submission moves it to the front without duplication. Leading/trailing whitespace is trimmed, blank submissions keep the keyboard and history open, and removing an entry does not execute it. The six-entry history retains the existing 127-byte configuration-value limit: longer queries can still search, but are not saved as misleading truncated entries.
