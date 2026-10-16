@@ -43,6 +43,9 @@ screen_off_seconds = 0
 [zvuk]
 base_url = http://127.0.0.1:18766
 EOF
+    if [ "${SONIX_UI_TEST_LIST_ART:-}" = 1 ]; then
+        printf '\n[streaming]\nlist_art = 1\n' >> "$run_root/config.ini"
+    fi
     unset SONIX_UI_TEST_LEGACY
     if [ -n "${SONIX_UI_TEST_GRAY:-}" ]; then
         sed -i '/^language = Russian$/a accent = 6' "$run_root/config.ini"

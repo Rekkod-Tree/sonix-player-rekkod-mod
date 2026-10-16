@@ -11,7 +11,13 @@ static int test_thread_create(pthread_t *, const pthread_attr_t *, void *(*)(voi
 typedef struct { lv_obj_t *image; } fixture_row_t;
 static int requests, decodes;
 static bool network_ok = true;
+static bool artwork_enabled;
 lv_font_t font_ui_14 = {.line_height = 14}; // no text is drawn by this fixture
+
+bool config_get_bool(const char *section, const char *key, bool fallback) {
+	assert(strcmp(section, "streaming") == 0 && strcmp(key, "list_art") == 0 && !fallback);
+	return artwork_enabled;
+}
 
 static int test_thread_create(pthread_t *t, const pthread_attr_t *a, void *(*fn)(void *), void *u) {
 	(void)t; (void)a; (void)fn; (void)u;
@@ -93,6 +99,12 @@ int main(void) {
 	lv_obj_t *a = new_row(owner, 0), *b = new_row(owner, 90);
 	lv_obj_update_layout(owner);
 	lv_color_t tone = lv_color_hex(0x445566);
+	// Default off: retain the usual placeholder without allocating machinery.
+	streamrowart_bind(owner, a, 0, "https://fixture/album", tone);
+	streamrowart_visible(owner, 0, 1);
+	streamrowart_reset(owner);
+	assert(!slots && !timer && !worker_started && requests == 0 && decodes == 0);
+	artwork_enabled = true;
 	streamrowart_bind(owner, a, 0, "https://fixture/album", tone);
 	streamrowart_bind(owner, b, 1, "https://fixture/album", tone);
 	streamrowart_visible(owner, 0, 1);
@@ -131,8 +143,10 @@ int main(void) {
 	lv_obj_delete(owner);
 	lv_timer_handler();
 	lv_timer_delete(timer);
+	free(slots);
+	slots = NULL;
 	lv_display_delete(display);
 	lv_deinit();
-	puts("PASS: visible-only, same-URL fanout, recycled identity, late delete, failure/retry, detach/free, idle timer");
+	puts("PASS: default-off zero allocation/requests, opt-in visible-only, fanout, recycled identity, late delete, failure/retry, detach/free, idle timer");
 	return 0;
 }

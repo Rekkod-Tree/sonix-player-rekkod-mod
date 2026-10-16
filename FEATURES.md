@@ -81,9 +81,11 @@ A CUE referencing a converted WAV can find a neighboring FLAC, WavPack or APE.
   Up next and queue labels from loaded service details before the audio file
   exists. Missing current/next details are fetched in the background; late
   titles update without restarting playback or resetting mini-player progress.
-- **List artwork** - Yandex Music and Zvuk load small covers for visible track
-  and album rows in the background. Colour placeholders remain during loading
-  and on errors; numbered tracks on an album page keep their numbers.
+- **List artwork (opt-in)** - disabled by default: Yandex Music and Zvuk keep
+  colour placeholders without thumbnail requests, worker, timer or row-art pool.
+  Explicit `[streaming] list_art=1` enables small covers for visible track and
+  album rows only, with no disk cache or whole-library preload. Placeholders
+  remain during loading/errors; numbered album tracks keep their numbers.
 - **Cache artwork isolation** - shared Yandex/Zvuk caches use each track's own
   cover, rather than another track's picture. Image writes publish atomically
   after bounded validation and rechecking card ownership.

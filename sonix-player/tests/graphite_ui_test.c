@@ -418,8 +418,12 @@ static void service_states(void) {
 		break;
 	case 30:
 		capture("service-album-thumbnails");
-		assert(has_service_thumbnail(lv_screen_active()));
-		printf("UI_LIST_ART_PASS page binding, real local HTTP, production decoder and LVGL image\n");
+		{
+			const char *setting = getenv("SONIX_UI_TEST_LIST_ART");
+			bool opted_in = setting && strcmp(setting, "1") == 0;
+			assert(has_service_thumbnail(lv_screen_active()) == opted_in);
+			printf("UI_LIST_ART_PASS %s: page binding, local HTTP and rendered image state\n", opted_in ? "opt-in" : "default off");
+		}
 		printf("UI_TEST_PASS service states: expired, subscription, faults and recovery\n");
 		logging_flush();
 		exit(0);
