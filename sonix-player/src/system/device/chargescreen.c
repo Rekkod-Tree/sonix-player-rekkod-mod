@@ -33,6 +33,7 @@ bool chargescreen_mark(int mark) {
 
 #include "src/system/core/config.h"
 #include "src/system/core/respath.h"
+#include "src/gui/shell/sx_tokens.h"
 #include "src/system/device/axpcharge.h"
 #include "src/system/device/power.h"
 
@@ -226,11 +227,9 @@ static long now_ms(void) {
 // ---------------------------------------------------------------------------
 // Drawing
 //
-// assets/icons/battery-device-off.svg standing in the middle of the screen,
-// green from the bottom to the level, the bolt of zap-device-off.svg in yellow
-// over it, and the percentage under it in the interface's bold font. Both
-// icons are drawn here from their geometry, in their own 24-unit boxes, with
-// antialiased edges; every size is scaled from a 480-pixel-wide screen.
+// Graphite 2's neutral dark canvas and typography, without starting LVGL or
+// reading the card. The static icon is drawn only when the level changes or
+// the power key wakes the display. Sizes scale from the 480-pixel-wide R1.
 // ---------------------------------------------------------------------------
 
 typedef struct {
@@ -244,14 +243,19 @@ typedef struct {
 	uint8_t r, g, b;
 } rgb_t;
 
-static const rgb_t OUTLINE = {255, 255, 255};
-static const rgb_t FILL = {1, 219, 17};
-static const rgb_t BOLT = {255, 204, 0};
-static const rgb_t TEXT = {255, 255, 255};
+#define CHARGE_RGB(hex) {(hex >> 16) & 255, (hex >> 8) & 255, hex & 255}
+static const rgb_t BACKGROUND = CHARGE_RGB(SX_D_BG);
+static const rgb_t SURFACE = CHARGE_RGB(SX_D_SURFACE);
+static const rgb_t OUTLINE = CHARGE_RGB(SX_D_TEXT2);
+static const rgb_t FILL = CHARGE_RGB(SX_D_ACCENT);
+static const rgb_t LOW_FILL = CHARGE_RGB(SX_DANGER_BG);
+static const rgb_t BOLT = CHARGE_RGB(SX_D_TEXT);
+static const rgb_t TEXT = CHARGE_RGB(SX_D_TEXT);
+#undef CHARGE_RGB
 
 // Pixels per icon unit for the battery on a 480-pixel-wide screen, and the
 // bolt's height as a share of the body's.
-#define BATTERY_UNIT_PX 14.0f
+#define BATTERY_UNIT_PX 11.0f
 #define BOLT_SCALE 0.42f
 
 // The bolt's outline, from tools/charge_zap.py. The icon strokes it 2 units
@@ -428,28 +432,26 @@ static void draw_text(const canvas_t *cv, const char *text, int px, int cx, int 
 
 static void draw_page(const canvas_t *cv, int percent) {
 	for (int y = 0; y < cv->h; y++) {
-		memset(cv->mem + (size_t)y * cv->stride, 0, (size_t)cv->w * (cv->bpp / 8));
-		if (cv->bpp == 32) {
-			for (int x = 0; x < cv->w; x++) {
-				cv->mem[(size_t)y * cv->stride + (size_t)x * 4 + 3] = 0xFF;
-			}
-		}
+		for (int x = 0; x < cv->w; x++)
+			blend(cv, x, y, BACKGROUND, 255);
 	}
+	if (percent > 100)
+		percent = 100;
 
 	float u = (float)cv->w / 480.0f;
 	float k = BATTERY_UNIT_PX * u;
 	float cx = (float)cv->w / 2.0f;
-	float cy = (float)cv->h * 0.42f; // where the body's centre goes
+	float cy = (float)cv->h * 0.40f;
 
-	// The icon's box is 24 x 24 units with the body's centre at (12, 14): a
-	// 12 x 16 rectangle at (6, 6) with corners of 2, stroked 2 wide, and the
-	// cap, the line from (10, 2) to (14, 2) stroked 2 wide with round ends.
+	// A slim rounded battery, with the same 4px outline and quiet surfaces
+	// used by Graphite controls. The cap retains the original icon geometry.
 	float ox = cx - 12 * k, oy = cy - 14 * k;
 	rrect_t body = {ox + 12 * k, oy + 14 * k, 7 * k, 9 * k, 3 * k};
-	rrect_t hollow = {body.cx, body.cy, 5 * k, 7 * k, 1 * k};
+	rrect_t hollow = {body.cx, body.cy, body.hw - 4 * u, body.hh - 4 * u, body.r - 4 * u};
 	rrect_t cap = {ox + 12 * k, oy + 2 * k, 3 * k, 1 * k, 1 * k};
-	rrect_t inside = {body.cx, body.cy, hollow.hw - 0.9f * k, hollow.hh - 0.9f * k, 0.4f * k};
+	rrect_t inside = {body.cx, body.cy, hollow.hw - 8 * u, hollow.hh - 8 * u, hollow.r - 8 * u};
 
+	fill_rrect(cv, &hollow, SURFACE);
 	fill_rrect(cv, &cap, OUTLINE);
 	stroke_rrect(cv, &body, &hollow, OUTLINE);
 
@@ -458,7 +460,7 @@ static void draw_page(const canvas_t *cv, int percent) {
 		if (level < 3 * u) {
 			level = 3 * u;
 		}
-		fill_rrect_below(cv, &inside, inside.cy + inside.hh - level, FILL);
+		fill_rrect_below(cv, &inside, inside.cy + inside.hh - level, percent <= 5 ? LOW_FILL : FILL);
 	}
 
 	// The bolt's box centred on the body; the bolt is 22 of its 24 units tall.
@@ -470,8 +472,9 @@ static void draw_page(const canvas_t *cv, int percent) {
 		snprintf(text, sizeof(text), "--%%");
 	else
 		snprintf(text, sizeof(text), "%d%%", percent);
-	int px = (int)(56 * u);
-	draw_text(cv, text, px, (int)cx, (int)(body.cy + body.hh + 34 * u + (float)px * 0.75f), TEXT);
+	int px = (int)(72 * u);
+	draw_text(cv, text, px, (int)cx, (int)(body.cy + body.hh + 40 * u + (float)px * 0.75f), TEXT);
+	draw_text(cv, "REKKOD MOD", (int)(20 * u), (int)cx, cv->h - (int)(48 * u), OUTLINE);
 }
 
 // ---------------------------------------------------------------------------

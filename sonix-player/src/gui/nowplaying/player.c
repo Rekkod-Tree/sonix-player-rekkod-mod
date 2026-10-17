@@ -5429,17 +5429,20 @@ static void panel_edge_drag_cb(lv_event_t *e) {
 	}
 }
 
-#define NP_HOME_EDGE_H 24
+#define NP_HOME_EDGE_H 96
+#define NP_HOME_SWIPE_PX 48
 
-// Only the free bottom edge owns Home; artwork and controls keep their gestures.
+// Observe the existing bottom surfaces, including buttons, without covering
+// their tap targets. Judge the final sample too: a quick flick need not produce
+// an intermediate PRESSING event before RELEASED.
 static void home_edge_drag_cb(lv_event_t *e) {
 	static lv_point_t start;
-	static bool tracking, engaged;
+	static bool tracking;
+	if (lv_event_get_target(e) != lv_event_get_current_target(e))
+		return;
 	lv_event_code_t code = lv_event_get_code(e);
 	if (code == LV_EVENT_PRESS_LOST) {
 		tracking = false;
-		if (engaged)
-			lv_async_call(drag_committed_clear_cb, NULL);
 		return;
 	}
 	lv_indev_t *indev = lv_event_get_param(e);
@@ -5449,9 +5452,7 @@ static void home_edge_drag_cb(lv_event_t *e) {
 		return;
 	if (code == LV_EVENT_PRESSED) {
 		lv_indev_get_point(indev, &start);
-		tracking = sheet_open && !chain_is_open() && !quickpanel_is_open() && !sx_sheet_is_open();
-		engaged = false;
-		drag_committed = false;
+		tracking = start.y >= sheet_height - NP_HOME_EDGE_H && lv_obj_get_y(player_screen) == 0 && sheet_open && !chain_is_open() && !quickpanel_is_open() && !sx_sheet_is_open();
 		return;
 	}
 	if (!tracking)
@@ -5459,28 +5460,19 @@ static void home_edge_drag_cb(lv_event_t *e) {
 	lv_point_t point;
 	lv_indev_get_point(indev, &point);
 	int dx = point.x - start.x, up = start.y - point.y;
-	if (code == LV_EVENT_PRESSING) {
-		if (!engaged) {
-			if (LV_ABS(dx) >= SX_DRAG_LOCK_PX && LV_ABS(dx) >= up) {
-				tracking = false;
-				return;
-			}
-			if (up >= SX_DRAG_LOCK_PX && up > LV_ABS(dx)) {
-				engaged = true;
-				drag_committed = true;
-			}
-		}
-		return;
-	}
 	if (code == LV_EVENT_RELEASED) {
 		tracking = false;
-		if (engaged && up >= SX_EDGE_BACK_PX && up > LV_ABS(dx) && sheet_open && !chain_is_open() && !quickpanel_is_open() && !sx_sheet_is_open()) {
+		bool home = up >= NP_HOME_SWIPE_PX && up > LV_ABS(dx) && sheet_open && !chain_is_open() && !quickpanel_is_open() && !sx_sheet_is_open();
+		// A drag on a transport button must not also click it, including a
+		// cancelled/sideways drag that falls short of Home. A tap stays native.
+		if (home || LV_ABS(up) >= SX_DRAG_LOCK_PX || LV_ABS(dx) >= SX_DRAG_LOCK_PX) {
+			lv_indev_reset(indev, NULL);
+		}
+		if (home) {
 			sheet_under = main_menu_screen;
 			switch_screen(main_menu_screen);
 			player_sheet_close(true);
 		}
-		if (engaged)
-			lv_async_call(drag_committed_clear_cb, NULL);
 	}
 }
 
@@ -7418,17 +7410,13 @@ void player_init(gui_config_t *cfg) {
 	lv_obj_add_event_cb(panel_edge, panel_edge_drag_cb, LV_EVENT_PRESS_LOST, NULL);
 	lv_obj_move_foreground(panel_edge);
 
-	lv_obj_t *home_edge = lv_obj_create(player_screen);
-	lv_obj_remove_style_all(home_edge);
-	lv_obj_set_size(home_edge, cfg->screen_width, NP_HOME_EDGE_H);
-	lv_obj_align(home_edge, LV_ALIGN_BOTTOM_MID, 0, 0);
-	lv_obj_set_scrollable(home_edge, false);
-	lv_obj_set_clickable(home_edge, true);
-	lv_obj_set_press_lock(home_edge, true);
-	lv_obj_add_event_cb(home_edge, home_edge_drag_cb, LV_EVENT_PRESSED, NULL);
-	lv_obj_add_event_cb(home_edge, home_edge_drag_cb, LV_EVENT_PRESSING, NULL);
-	lv_obj_add_event_cb(home_edge, home_edge_drag_cb, LV_EVENT_RELEASED, NULL);
-	lv_obj_add_event_cb(home_edge, home_edge_drag_cb, LV_EVENT_PRESS_LOST, NULL);
+	lv_obj_t *home_surfaces[] = {player_screen, player_menu, controls_row, play_btn, prev_btn_obj, next_btn_obj, repeat_btn_obj, speed_btn_obj, more_btn_obj};
+	for (size_t i = 0; i < sizeof(home_surfaces) / sizeof(home_surfaces[0]); i++) {
+		lv_obj_set_press_lock(home_surfaces[i], true);
+		lv_obj_add_event_cb(home_surfaces[i], home_edge_drag_cb, LV_EVENT_PRESSED, NULL);
+		lv_obj_add_event_cb(home_surfaces[i], home_edge_drag_cb, LV_EVENT_RELEASED, NULL);
+		lv_obj_add_event_cb(home_surfaces[i], home_edge_drag_cb, LV_EVENT_PRESS_LOST, NULL);
+	}
 
 	// The backdrop over a loaded cover is always the dark treatment -- same
 	// look in both themes; only the no-cover panel follows the theme.

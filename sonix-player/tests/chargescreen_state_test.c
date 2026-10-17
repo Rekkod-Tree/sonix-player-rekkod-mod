@@ -1,6 +1,10 @@
 // Non-HOST charging-state fixture: device nodes, PMIC, sysfs, framebuffer,
 // input, clock and process operations are replaced below. No devices are used.
-// Compile from sonix-player with -I. and pkg-config --cflags --libs freetype2.
+// From sonix-player: cc -std=gnu11 -I. $(pkg-config --cflags freetype2)
+// tests/chargescreen_state_test.c src/system/image/png_write.c
+// $(pkg-config --libs freetype2) -lm -ldl -pthread -o /tmp/charge_test
+// Run without arguments for state checks; add an output folder and font file
+// to render previews without touching device nodes.
 #define _GNU_SOURCE
 #include <assert.h>
 #include <dirent.h>
@@ -22,6 +26,7 @@
 #include <time.h>
 #include <unistd.h>
 #include FT_FREETYPE_H
+#include "src/system/image/png_write.h"
 #ifdef HOST_BUILD
 #error Exercise the production charging branch with intercepted operations
 #endif
@@ -431,7 +436,42 @@ static void failure_cases(void) {
 	assert(battery_percent(-1) == 64);
 	puts("PASS six framebuffer failure stages and missing input return to normal boot without descriptor/mapping leaks; unknown percent remains unknown");
 }
-int main(void) {
+static void render_cases(const char *out, const char *font) {
+	assert(FT_Init_FreeType(&ft_lib) == 0);
+	assert(FT_New_Face(ft_lib, font, 0, &ft_face) == 0);
+	const int levels[] = {-1, 0, 1, 5, 50, 80, 100, 101};
+	for (int height = 720; height <= 800; height += 80) {
+		for (size_t i = 0; i < sizeof(levels) / sizeof(levels[0]); i++) {
+			size_t size = (size_t)480 * height * 2;
+			uint8_t *allocation = malloc(size + 32);
+			assert(allocation);
+			memset(allocation, 0xA5, size + 32);
+			canvas_t cv = {allocation + 16, 480, height, 960, 16};
+			draw_page(&cv, levels[i]);
+			for (int guard = 0; guard < 16; guard++)
+				assert(allocation[guard] == 0xA5 && allocation[size + 16 + guard] == 0xA5);
+			char path[512];
+			snprintf(path, sizeof(path), "%s/charge-%d-%d.png", out, height, levels[i]);
+			assert(png_write_rgb565(path, (uint16_t *)cv.mem, cv.w, cv.h));
+			// Repainting the same frame must be deterministic, not blend stale pixels.
+			uint8_t *first = malloc(size);
+			assert(first);
+			memcpy(first, cv.mem, size);
+			draw_page(&cv, levels[i]);
+			assert(memcmp(first, cv.mem, size) == 0);
+			free(first);
+			free(allocation);
+		}
+	}
+	font_close();
+	puts("PASS Graphite charging render: both panels, unknown/zero/low/normal/full levels, bounds and repeatability");
+}
+
+int main(int argc, char **argv) {
+	if (argc == 3) {
+		render_cases(argv[1], argv[2]);
+		return 0;
+	}
 	cable_cases();
 	wanted_cases();
 	failure_cases();

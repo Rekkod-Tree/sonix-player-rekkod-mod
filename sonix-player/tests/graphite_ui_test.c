@@ -1066,9 +1066,9 @@ static void player_home_gestures(void) {
 		lv_obj_update_layout(player_screen);
 		capture(layout == PLAYER_LAYOUT_STANDARD ? "home-gesture-player-standard" : layout == PLAYER_LAYOUT_ALTERNATIVE ? "home-gesture-player-waveform" : "home-gesture-player-studio");
 		int bottom = height - 8;
-		input(5, height - 40, true);
-		input(5, height - 140, true);
-		input(5, height - 140, false);
+		input(5, height - 110, true);
+		input(5, height - 210, true);
+		input(5, height - 210, false);
 		assert(player_sheet_is_open()); // An upward drag outside the edge is not Home.
 		assert(!sx_sheet_is_open());
 		input(240, bottom, true);
@@ -1085,14 +1085,7 @@ static void player_home_gestures(void) {
 		input(240, bottom, true);
 		input(240, bottom - 100, true);
 		assert(player_sheet_is_open());
-		lv_obj_t *edge = NULL;
-		for (uint32_t i = 0; i < lv_obj_get_child_count(player_screen); i++) {
-			lv_obj_t *child = lv_obj_get_child(player_screen, i);
-			if (lv_obj_get_height(child) == 24 && lv_obj_get_y(child) == height - 24)
-				edge = child;
-		}
-		assert(edge);
-		lv_obj_send_event(edge, LV_EVENT_PRESS_LOST, pointer);
+		lv_obj_send_event(player_screen, LV_EVENT_PRESS_LOST, pointer);
 		input(240, bottom - 100, false);
 		assert(player_sheet_is_open() && lv_screen_active() == music_screen);
 		input(240, bottom, true);
@@ -1105,12 +1098,55 @@ static void player_home_gestures(void) {
 		// Home resets the stack, including the previous Music page.
 		back_btn_cb(NULL);
 		assert(lv_screen_active() == main_menu_screen);
+		// Natural starts above the edge and quick/diagonal flicks must work,
+		// even when the press begins on a transport button.
+		for (int inset = 12; inset <= 96; inset += 28) {
+			player_sheet_open(false);
+			lv_obj_update_layout(player_screen);
+			input(240, height - inset, true);
+			input(258, height - inset - 3, true);
+			input(268, height - inset - 60, false);
+			assert(!player_sheet_is_open() && lv_screen_active() == main_menu_screen);
+			device_state_get(&after);
+			assert(strcmp(before.current_file, after.current_file) == 0 && before.volume == after.volume && before.status == after.status);
+		}
+		player_sheet_open(false);
+		lv_obj_update_layout(player_screen);
+		lv_obj_t *play = find_image(player_screen, &icon_pause);
+		if (!play)
+			play = find_image(player_screen, &icon_play);
+		assert(play);
+		lv_area_t button;
+		lv_obj_get_coords(lv_obj_get_parent(play), &button);
+		int x = (button.x1 + button.x2) / 2, y = (button.y1 + button.y2) / 2;
+		input(x, y, true);
+		input(x, y, false);
+		device_state_get(&after);
+		assert(after.status != before.status && player_sheet_is_open());
+		input(x, y, true);
+		input(x, y, false);
+		device_state_get(&after);
+		assert(after.status == before.status && player_sheet_is_open());
+		if (y >= height - 96) {
+			input(x, y, true);
+			input(x, y - 30, false);
+			device_state_get(&after);
+			assert(after.status == before.status && player_sheet_is_open());
+			input(x, y, true);
+			input(x + 100, y - 20, false);
+			device_state_get(&after);
+			assert(after.status == before.status && player_sheet_is_open());
+			input(x, y, true);
+			input(x, y + 15, false);
+			device_state_get(&after);
+			assert(after.status == before.status && player_sheet_is_open());
+		}
 	}
 	device_state_get(&after);
 	assert(strcmp(before.current_file, after.current_file) == 0 && before.volume == after.volume && before.status == after.status);
 	player_layout_set(saved);
 	player_sheet_open(false);
-	printf("UI_HOME_GESTURE_PASS %s: tap/short/horizontal/cancel/held/Home, three layouts\n", theme_is_dark() ? "dark" : "light");
+	printf("UI_HOME_GESTURE_PASS %s: taps/short/horizontal/cancel/held/Home/quick/diagonal/wide-start, three layouts\n", theme_is_dark() ? "dark" : "light");
 }
 
 static void run(lv_timer_t *timer) {

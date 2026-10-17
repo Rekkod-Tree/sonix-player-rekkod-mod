@@ -215,10 +215,15 @@ certificate checking, and HLS.
 - **Album context** - after the album header scrolls away, its title and menu remain available in the fixed header. Browsing another album does not change the playing track's mini-player, transport or flat playback colours.
 - **Consistent secondary views** - service line icons, rounded loaded album artwork and a protected scrolling header; coloured file/book/carousel placeholders, 88px carousel/file rows and shared game-setting choices. Fast carousel release uses the latest panel position.
 - **List gestures** - swipe a track left to toggle its favourite state, right to play it next; hold for the menu and append-to-queue action. Album swipes and queue removal/reordering keep their existing meanings.
-- **Player Home gesture** - swipe up at least 70px from the bottom 24px of the
-  full player to return to the main menu without interrupting playback. Short,
-  horizontal and cancelled gestures stay in the player; artwork, lyrics and
-  transport controls retain their own gestures.
+- **Player Home gesture** - swipe up at least 48px from the bottom 96px of the
+  full player to return to the main menu without interrupting playback. Quick
+  flicks and modest diagonal movement work, including starts on transport
+  buttons. Native taps remain available; a drag never also clicks a button.
+  Short, horizontal and cancelled gestures stay in the player.
+- **Charge-only screen** - a static Graphite 2 dark canvas, shared neutral/accent
+  colours, Segoe semibold percentage and Rekkod Mod branding. Low charge uses a
+  muted warning fill; unknown charge stays explicit. Power-key/cable behaviour,
+  charge limits and the redraw-only-on-change policy are unchanged.
 - **Now Playing** - an inset square sleeve, compact right-aligned Up Next, and audio-chain details in the menu. Waveform, Studio, lyrics and existing source controls remain available.
 - **Save the current stream** - Zvuk and Yandex Music offer Save to card directly in the playing track's menu, or a checked Saved state. The action retains the track selected when the menu opened and uses the existing download queue. Services without permanent downloads do not show this action.
 - **Track metadata** - symmetric inner row padding keeps duration away from the edge. Long artist names shorten before the format and duration, including compact queue rows.
