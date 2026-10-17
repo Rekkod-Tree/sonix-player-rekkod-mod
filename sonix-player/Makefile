@@ -170,7 +170,7 @@ HOST_LDFLAGS = $(shell sdl2-config --libs) -lpthread -lm -ldl -lasound $(shell p
 TARGET_LDFLAGS = $(FREETYPE_PREFIX)/lib/libfreetype.a $(AUDIO_LIBS) -lpthread -lm -ldl -lasound \
 				 $(GB_LDFLAGS) -Wl,--gc-sections
 
-# Experimental target-only LTO. Keep the compile-time O2/O3 split above, but
+# Default target-only LTO. Keep the compile-time O2/O3 split above, but
 # choose O2 explicitly for the final link instead of inheriting the hottest
 # input's O3. Repeat the MIPS flags so link-time code generation keeps the same
 # ISA and separate floating-point multiply/add rounding. Host, launcher and
@@ -178,7 +178,7 @@ TARGET_LDFLAGS = $(FREETYPE_PREFIX)/lib/libfreetype.a $(AUDIO_LIBS) -lpthread -l
 # sees this through TARGET_CFLAGS, so both enabling and disabling rebuild objects.
 # A single LTRANS unit keeps glibc_compat.h's assembler-local .symver directives
 # beside every generated math call. Multiple partitions can request GLIBC_2.27.
-TARGET_LTO ?= 0
+TARGET_LTO ?= 1
 ifeq ($(TARGET_LTO),1)
 TARGET_CFLAGS += -flto=4
 TARGET_LDFLAGS += -flto=4 -flto-partition=one -O2 -march=mips32r2 -mno-madd4 -mplt

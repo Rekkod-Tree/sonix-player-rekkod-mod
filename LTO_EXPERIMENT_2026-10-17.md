@@ -1,8 +1,16 @@
 # R1 target LTO experiment
 
-## Decision
+## Current build policy
 
-Keep LTO available as `make target TARGET_LTO=1 -j4`, disabled by default.
+Alpha15 was built with `TARGET_LTO=1`. Target firmware now enables LTO by default,
+and all delivered builds must use it. Explicit non-LTO builds are retained only
+for requested diagnostic comparisons. The measurements below describe the
+original controlled alpha13 experiment.
+
+## Original experiment decision
+
+At the time of the comparison, LTO was available as
+`make target TARGET_LTO=1 -j4` and disabled by default.
 It reduced CPU time in a synthetic offscreen rendering workload by **5.23%**,
 but increased the stripped player file by **1.13%**. This is a modest measured
 gain, not evidence that the complete interface is 5% faster. No LTO firmware

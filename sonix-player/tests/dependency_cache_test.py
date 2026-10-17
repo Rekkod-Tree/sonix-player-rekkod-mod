@@ -27,19 +27,20 @@ def main():
             return stamp.read_text(), stamp.stat().st_mtime_ns
 
         current, first_time = flags()
+        assert "-flto=4" in current, "target firmware must enable LTO by default"
         assert "/freetype-target/2.14.3/" in current
         assert "/audio-target/ogg-1.3.6-opus-1.6.1-opusfile-0.12-wv-5.9.0/" in current
         time.sleep(0.02)
         assert flags() == (current, first_time), "unchanged build must not invalidate objects"
 
-        for override in ("FREETYPE_VER=2.13.3", "OPUS_VER=1.4", "WAVPACK_VER=5.6.0", "TARGET_LTO=1"):
+        for override in ("FREETYPE_VER=2.13.3", "OPUS_VER=1.4", "WAVPACK_VER=5.6.0", "TARGET_LTO=0"):
             time.sleep(0.02)
             changed, changed_time = flags(override)
             assert changed != current and changed_time != first_time
-            if override == "TARGET_LTO=1":
-                assert "-flto=4" in changed and "-flto" not in current
+            if override == "TARGET_LTO=0":
+                assert "-flto" not in changed and "-flto=4" in current
                 time.sleep(0.02)
-                assert flags(override) == (changed, changed_time), "unchanged LTO must not rebuild objects"
+                assert flags(override) == (changed, changed_time), "unchanged diagnostic build must not rebuild objects"
             time.sleep(0.02)
             restored, restored_time = flags()
             assert restored == current and restored_time != changed_time
