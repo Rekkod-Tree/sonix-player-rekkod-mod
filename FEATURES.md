@@ -1,5 +1,17 @@
 ﻿# Features
 
+## R1 USB storage handoff
+
+- Kernel USB events wake the existing watcher so brief enumeration windows are
+  not missed. The current controller, host and card ownership are checked again
+  before export; an event alone never authorizes access to the card.
+- A stalled connection gets one guarded restart of the empty USB reader. Card
+  services and ordinary unmount checks remain mandatory; no forced or lazy
+  unmount is used.
+- Spawned helpers do not inherit open music files or sockets across exec.
+  Bluetooth services can therefore outlive the player without retaining an old
+  track and indefinitely blocking card release.
+
 ## Sonix 1.3 adaptations for Graphite 2
 
 - Persistent listening history in the queue menu, including stored names for

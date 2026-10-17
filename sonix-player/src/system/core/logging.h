@@ -90,6 +90,9 @@ void logging_flush(void);
 // may outlive the next move of the log (a daemon): a descriptor of its own on
 // the card's file keeps the card from being unmounted. Without logging_init()
 // it changes nothing.
+// Also marks other inherited descriptors close-on-exec, preventing a daemon
+// from retaining a decoded track or database. Stdio pipes installed by the
+// caller afterward still work: dup2 clears close-on-exec on the destination.
 void logging_child_stdio(void);
 
 // Copies the kernel's warnings and errors printed since the last call into the

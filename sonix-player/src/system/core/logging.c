@@ -8,6 +8,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <pthread.h>
 #include <semaphore.h>
 #include <stdatomic.h>
@@ -16,13 +17,14 @@
 #include <string.h>
 #include <sys/prctl.h>
 #include <sys/reboot.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
 #include "src/system/core/config.h"
-#include "src/system/core/utils.h"
 #include "src/system/core/lang.h"
+#include "src/system/core/utils.h"
 
 // Where the log goes when it is on: beside everything else the player writes.
 #define LOG_SUBDIR ".local"
@@ -55,6 +57,12 @@ static FILE *early_stream;
 static char sd_log_path[512];
 static atomic_bool on_sd;
 static bool explicit_log;
+static int child_fd_limit;
+
+static void child_fd_limit_init(void) {
+	struct rlimit limit;
+	child_fd_limit = getrlimit(RLIMIT_NOFILE, &limit) == 0 && limit.rlim_cur <= INT_MAX ? (int)limit.rlim_cur : -1;
+}
 
 // The stream stdout/stderr currently feed. Kept so a switch can close the
 // previous one: dup2 copies the descriptor into 1 and 2, but the original stays
@@ -264,8 +272,7 @@ static void emit(int fd, const char *data, size_t size) {
 	pthread_mutex_lock(&queue_lock);
 	if (queue_dropped > 0) {
 		char note[80];
-		int len = snprintf(note, sizeof(note), "---- %lu bytes of log dropped: the card fell behind ----\n",
-						   queue_dropped);
+		int len = snprintf(note, sizeof(note), "---- %lu bytes of log dropped: the card fell behind ----\n", queue_dropped);
 		if (len > 0 && queue_record(fd, note, (size_t)len)) {
 			queue_dropped = 0;
 		}
@@ -641,6 +648,22 @@ static void relay_start(void) {
 }
 
 void logging_child_stdio(void) {
+	// Daemons must not retain a decoder's open track (some third-party
+	// decoders do not use O_CLOEXEC). Set flags in the forked child's own FD
+	// table, before making the deliberate stdout/stderr and relay-reader dup.
+	// Only async-signal-safe operations are used between fork and exec.
+	if (child_fd_limit < 0) {
+		_exit(127);
+	}
+	for (int fd = 3; fd < child_fd_limit; fd++) {
+		int rc;
+		do {
+			rc = fcntl(fd, F_SETFD, FD_CLOEXEC);
+		} while (rc < 0 && errno == EINTR);
+		if (rc < 0 && errno != EBADF) {
+			_exit(127);
+		}
+	}
 	if (relay_write < 0) {
 		return;
 	}
@@ -695,8 +718,7 @@ static void write_stamp(int fd) {
 		emit(fd, text, len);
 	}
 
-	int len = snprintf(text, sizeof(text), "%02d:%02d:%02d.%03ld ", local.tm_hour, local.tm_min, local.tm_sec,
-					   now.tv_nsec / 1000000L);
+	int len = snprintf(text, sizeof(text), "%02d:%02d:%02d.%03ld ", local.tm_hour, local.tm_min, local.tm_sec, now.tv_nsec / 1000000L);
 	if (len > 0) {
 		emit(fd, text, (size_t)len);
 	}
@@ -791,6 +813,8 @@ static bool redirect_to(FILE *stream) {
 }
 
 void logging_init(void) {
+	// Resolve the bound in the parent, not through libc after a threaded fork.
+	child_fd_limit_init();
 	const char *override = getenv("SONIX_LOG");
 	explicit_log = override && override[0];
 	stamp_install();
@@ -881,8 +905,7 @@ static void logging_attach_sd_locked(const char *sd_root) {
 		char folder[512];
 		if (snprintf(folder, sizeof(folder), "%s/%s", sd_root, LOG_SUBDIR) < (int)sizeof(folder)) {
 			mkdir(folder, 0755);
-			if (snprintf(sd_log_path, sizeof(sd_log_path), "%s/%s", folder, LOG_FILE_NAME) >=
-				(int)sizeof(sd_log_path)) {
+			if (snprintf(sd_log_path, sizeof(sd_log_path), "%s/%s", folder, LOG_FILE_NAME) >= (int)sizeof(sd_log_path)) {
 				sd_log_path[0] = '\0';
 			}
 		}
@@ -1271,8 +1294,7 @@ void logging_follow_kernel(void) {
 // first three; the last two are what a card that stops answering looks like,
 // and that ends a scan just as abruptly.
 static const char *const KERNEL_INTERESTING[] = {
-	"Out of memory", "oom-kill", "Killed process", "lowmemorykiller",
-	"mmc0: ",		 "I/O error", "EXT4-fs error",  "FAT-fs error",
+	"Out of memory", "oom-kill", "Killed process", "lowmemorykiller", "mmc0: ", "I/O error", "EXT4-fs error", "FAT-fs error",
 };
 
 static bool kernel_line_interesting(const char *line) {

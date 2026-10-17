@@ -14,8 +14,10 @@
 // Detection polls /sys/class/power_supply/usb/online from a small background
 // thread. A wall charger raises the same signal; exporting the gadget then is
 // harmless (nothing enumerates it) but unmounting the card for a power brick
-// would not be, so the thread waits for a USB *host* -- the UDC state leaves
-// "not attached" only when something on the other end actually talks.
+// would not be, so the thread requires a configured USB host. Kernel
+// enumeration events wake the same watcher without increasing idle polling.
+// Suspend alone is insufficient: the matching bound gadget must still report
+// CONFIGURED. Events never bypass current-state or filesystem ownership checks.
 
 // Starts the watcher thread. Pass the SD block device (e.g. /dev/mmcblk0p1)
 // and the mount point it lives on; either NULL disables the whole feature

@@ -64,6 +64,7 @@ static int fixture_umount2(const char *, int);
 
 static bool mounted, busy, fail_mount, fail_mounts_read, fail_realpath, read_only, fail_stat;
 static bool adb_running, fail_insert, fail_release, fail_medium_read;
+static bool adb_bound;
 static bool medium, elsewhere, partition;
 static bool update_fixture, fail_sync, fail_pin_close, fail_pin_open;
 static int exported_writes, mounted_writes, opens, closes, probes;
@@ -264,7 +265,9 @@ static int fixture_umount2(const char *path, int flags) {
 }
 bool adb_is_running(void) { return adb_running; }
 char *read_file_content(const char *path) {
-	(void)path;
+	if (adb_bound && strcmp(path, ADB_GADGET "/UDC") == 0) {
+		return strdup("13500000.otg_new\n");
+	}
 	return NULL;
 }
 bool sysserver_available(void) { return false; }
@@ -336,6 +339,7 @@ static void reset(void) {
 	mounted = true;
 	busy = fail_mount = fail_mounts_read = fail_realpath = read_only = fail_stat = false;
 	adb_running = fail_insert = fail_release = fail_medium_read = medium = elsewhere = partition = false;
+	adb_bound = false;
 	update_fixture = fail_sync = fail_pin_close = fail_pin_open = false;
 	exported_writes = mounted_writes = opens = closes = probes = 0;
 	sync_calls = pin_closes = unmount_calls = 0;
@@ -519,6 +523,14 @@ int main(void) {
 	assert(!medium && exported_writes == 0 && opens == 0);
 	reset();
 	adb_running = true;
+	storage_export();
+	assert(mounted && !storage_active && closes == 0 && exported_writes == 0);
+	reset();
+	adb_bound = true;
+	storage_export();
+	assert(mounted && !storage_active && closes == 0 && exported_writes == 0);
+	reset();
+	dac_owns_usb = true;
 	storage_export();
 	assert(mounted && !storage_active && closes == 0 && exported_writes == 0);
 	reset();

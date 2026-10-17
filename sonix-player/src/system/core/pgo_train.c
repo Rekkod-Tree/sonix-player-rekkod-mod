@@ -5,6 +5,7 @@
 #include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <unistd.h>
 
 extern void __gcov_dump(void);
 static sigset_t requests;
@@ -19,6 +20,13 @@ static void *capture_profile(void *unused) {
 		if (!captured) {
 			__gcov_dump();
 			captured = true;
+			// USB temporarily holds ordinary log output; completion must remain
+			// observable without enabling writes to the card.
+			FILE *marker = fopen("/tmp/sonix-pgo-complete", "we");
+			if (marker) {
+				fprintf(marker, "%ld\n", (long)getpid());
+				fclose(marker);
+			}
 			fprintf(stderr, "profile: RAM training profile saved\n");
 		}
 	}
