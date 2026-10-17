@@ -1,4 +1,5 @@
 #include "gui.h"
+#include "src/gui/shell/lowbattery.h"
 
 #include <pthread.h>
 #include <stdint.h>
@@ -8,88 +9,94 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "src/gui/library/browser.h"
-#include "src/gui/nowplaying/coverflow.h"
-#include "src/gui/settings/ccsettings.h"
-#include "src/gui/nowplaying/chapters.h"
-#include "src/gui/wireless/airplay.h"
+#include "src/gui/audio/dacpage.h"
+#include "src/gui/audio/eqsettings.h"
+#include "src/gui/audio/metronomepage.h"
+#include "src/gui/audio/msebsettings.h"
+#include "src/gui/audio/peqautoeq.h"
+#include "src/gui/audio/peqsettings.h"
 #include "src/gui/bluetooth/airpodspage.h"
-#include "src/gui/settings/appearance.h"
 #include "src/gui/bluetooth/btaudio.h"
+#include "src/gui/bluetooth/btreceiverpage.h"
 #include "src/gui/bluetooth/btsettings.h"
-#include "src/gui/shell/confirm.h"
-#include "src/gui/shell/corners.h"
-#include "src/gui/shell/touch.h"
-#include "src/gui/settings/kblayoutpage.h"
-#include "src/gui/settings/screensaver.h"
-#include "src/gui/library/audiobookextras.h"
-#include "src/gui/library/audiobooks.h"
-#include "src/gui/settings/devoptions.h"
 #include "src/gui/ebook/ebookmarkspage.h"
 #include "src/gui/ebook/ebookpage.h"
 #include "src/gui/ebook/ebookreader.h"
 #include "src/gui/ebook/ebooksettings.h"
-#include "src/gui/settings/processespage.h"
-#include "src/gui/settings/language.h"
-#include "src/gui/library/libraryscan.h"
-#include "src/gui/wireless/dlna.h"
-#include "src/gui/wireless/sonixlink.h"
-#include "src/gui/gearboy/gearboypage.h"
-#include "src/gui/gearboy/gearboysettings.h"
 #include "src/gui/flappybird/flappybird.h"
+#include "src/gui/fonts/fonts.h"
+#include "src/gui/gearboy/gearboypage.h"
 #include "src/gui/gearboy/gearboyplay.h"
-#include "src/gui/shell/main_menu.h"
-#include "src/gui/library/medialist.h"
+#include "src/gui/gearboy/gearboysettings.h"
+#include "src/gui/library/audiobookextras.h"
+#include "src/gui/library/audiobooks.h"
+#include "src/gui/library/browser.h"
 #include "src/gui/library/filespage.h"
+#include "src/gui/library/imageview.h"
+#include "src/gui/library/libraryscan.h"
+#include "src/gui/library/medialist.h"
+#include "src/gui/library/music.h"
+#include "src/gui/library/playlistpage.h"
+#include "src/gui/library/search.h"
 #include "src/gui/library/textview.h"
+#include "src/gui/nowplaying/chapters.h"
+#include "src/gui/nowplaying/coverflow.h"
+#include "src/gui/nowplaying/historypage.h"
+#include "src/gui/nowplaying/lyricsearch.h"
+#include "src/gui/nowplaying/player.h"
+#include "src/gui/nowplaying/trackmenu.h"
+#include "src/gui/settings/appearance.h"
+#include "src/gui/settings/ccsettings.h"
+#include "src/gui/settings/devoptions.h"
+#include "src/gui/settings/kblayoutpage.h"
+#include "src/gui/settings/language.h"
+#include "src/gui/settings/musicsettings.h"
+#include "src/gui/settings/powersettings.h"
+#include "src/gui/settings/processespage.h"
+#include "src/gui/settings/recoverywizard.h"
+#include "src/gui/settings/remap.h"
+#include "src/gui/settings/screensaver.h"
+#include "src/gui/settings/settings.h"
+#include "src/gui/settings/systempage.h"
+#include "src/gui/settings/timeset.h"
+#include "src/gui/shell/confirm.h"
+#include "src/gui/shell/corners.h"
+#include "src/gui/shell/icons.h"
+#include "src/gui/shell/main_menu.h"
 #include "src/gui/shell/morepage.h"
 #include "src/gui/shell/popover.h"
-#include "src/gui/nowplaying/trackmenu.h"
-#include "src/gui/library/music.h"
-#include "src/gui/audio/eqsettings.h"
-#include "src/gui/audio/peqsettings.h"
-#include "src/gui/audio/peqautoeq.h"
-#include "src/gui/settings/remap.h"
-#include "src/gui/audio/msebsettings.h"
-#include "src/gui/settings/musicsettings.h"
-#include "src/gui/nowplaying/player.h"
-#include "src/gui/library/playlistpage.h"
-#include "src/gui/settings/powersettings.h"
 #include "src/gui/shell/powermenu.h"
 #include "src/gui/shell/quickpanel.h"
+#include "src/gui/shell/switcher.h"
 #include "src/gui/shell/sx_frame.h"
 #include "src/gui/shell/sx_mini.h"
 #include "src/gui/shell/sx_palette.h"
 #include "src/gui/shell/sx_sheet.h"
 #include "src/gui/shell/sx_toast.h"
 #include "src/gui/shell/sx_tokens.h"
-#include "src/gui/bluetooth/btreceiverpage.h"
-#include "src/gui/audio/dacpage.h"
-#include "src/system/bluetooth/btreceiver.h"
-#include "src/system/audio/usbdac.h"
-#include "src/system/net/wifitransfer.h"
-#include "src/system/streaming/radio.h"
-#include "src/gui/streaming/radiopage.h"
-#include "src/gui/library/search.h"
-#include "src/gui/settings/settings.h"
-#include "src/gui/settings/systempage.h"
-#include "src/gui/shell/welcome.h"
-#include "src/gui/streaming/streaming.h"
-#include "src/gui/shell/switcher.h"
-#include "src/gui/settings/timeset.h"
-#include "src/gui/fonts/fonts.h"
-#include "src/gui/shell/icons.h"
 #include "src/gui/shell/theme.h"
 #include "src/gui/shell/toast.h"
 #include "src/gui/shell/topbar.h"
+#include "src/gui/shell/touch.h"
 #include "src/gui/shell/volume_overlay.h"
+#include "src/gui/shell/welcome.h"
+#include "src/gui/streaming/radiopage.h"
+#include "src/gui/streaming/streaming.h"
+#include "src/gui/wireless/airplay.h"
+#include "src/gui/wireless/dlna.h"
+#include "src/gui/wireless/sonixlink.h"
 #include "src/gui/wireless/wifisettings.h"
 #include "src/gui/wireless/wifitransfer.h"
 #include "src/gui/wireless/wireless.h"
+#include "src/system/audio/usbdac.h"
 #include "src/system/bluetooth/bluetooth.h"
+#include "src/system/bluetooth/btreceiver.h"
+#include "src/system/device/clock.h"
+#include "src/system/device/power.h"
 #include "src/system/device/system.h"
 #include "src/system/device/usb.h"
-#include "src/system/device/power.h"
+#include "src/system/net/wifitransfer.h"
+#include "src/system/streaming/radio.h"
 
 #include "lvgl/lvgl.h"
 #include "lvgl/src/display/lv_display_private.h"
@@ -197,8 +204,19 @@ bool gui_post(void (*cb)(void *), void *user) {
 	return queued;
 }
 
+static void clock_changed_async(void *user) {
+	(void)user;
+	clock_poll();
+	topbar_refresh_clock();
+}
+
+static void clock_changed(void) { gui_post(clock_changed_async, NULL); }
+
 static void post_drain_cb(lv_timer_t *timer) {
 	(void)timer;
+	// Also apply a completed zone lookup if the bounded post queue was full.
+	if (clock_poll())
+		topbar_refresh_clock();
 
 	// Reading the eventfd clears its counter. It happens here rather than in the
 	// main loop so it also applies when the safety-net timer did the waking, and
@@ -460,6 +478,9 @@ static void modal_init(gui_config_t *cfg) {
 
 static void key_async_cb(void *user_data) {
 	gui_key_t key = (gui_key_t)(uintptr_t)user_data;
+	if (metronomepage_key(key)) {
+		return;
+	}
 
 	// The side keys act on the local transport, and there are states in which
 	// that transport is not what the device is doing. Pressing them then does
@@ -558,7 +579,7 @@ static gui_config_t *rest_cfg;
 
 // A dozen is room to spare: the list is fixed at build time and only grows
 // when a page is moved here by hand. Full, a page is simply built at once.
-#define DEFERRED_PAGES_MAX 16
+#define DEFERRED_PAGES_MAX 24
 
 typedef struct {
 	lv_obj_t *screen;
@@ -658,12 +679,16 @@ bool gui_init(gui_config_t *cfg, bool split) {
 	morepage_screen = lv_obj_create(NULL);
 	filespage_screen = lv_obj_create(NULL);
 	textview_screen = lv_obj_create(NULL);
+	imageview_screen = lv_obj_create(NULL);
+	lyricsearch_screen = lv_obj_create(NULL);
+	metronomepage_screen = lv_obj_create(NULL);
 	gearboypage_screen = lv_obj_create(NULL);
 	gearboyplay_screen = lv_obj_create(NULL);
 	flappybird_screen = lv_obj_create(NULL);
 
 	// Persistent topbar that stays above every screen.
 	topbar_init(cfg);
+	clock_set_change_hook(clock_changed);
 
 	// Persistent back button that hides when on the main page
 	touch_init(cfg);
@@ -751,7 +776,12 @@ static void build_rest(gui_config_t *cfg, bool final) {
 	ebookmarkspage_init(cfg);
 	ebooksettings_init(cfg); // likewise: the other corner button opens this
 	ebookpage_init(cfg);
+	metronomepage_init(cfg);
+	imageview_init(cfg);
+	lyricsearch_init(cfg);
 	morepage_init(cfg);
+	recoverywizard_init(cfg);
+	lowbattery_init(cfg);
 	textview_init(cfg); // before filespage: a text file tapped there opens here
 	filespage_init(cfg);
 	streaming_init(cfg);
@@ -786,6 +816,7 @@ static void build_rest(gui_config_t *cfg, bool final) {
 	audiobooks_init(cfg);
 	chapters_init(cfg);
 	trackmenu_init(cfg);
+	historypage_init(cfg);
 
 	// The leftward swipe that pulls the player in works on the browsing pages
 	// -- menu, library lists, file browser -- but NOT on the settings pages

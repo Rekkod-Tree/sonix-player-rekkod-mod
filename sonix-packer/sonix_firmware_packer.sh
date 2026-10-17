@@ -450,6 +450,34 @@ build_one() {
 	# same way on macOS and on Linux -- none of which is true of `cp -a` on both.
 	( cd "$ASSETS_DIR/$MODEL_DIR" && tar cf - . ) | ( cd "$SQUASH_DIR" && tar xf - )
 
+	# The R1 wizard never writes recovery during packaging or at boot. It invokes
+	# this separately built helper only after backup and explicit confirmation.
+	# The reviewed proprietary eraseblock is a private build input, never Git.
+	if [ "$MODEL_DIR" = R1 ]; then
+		# This overlay's modules require the reviewed Sonix kernel, not a silent
+		# fallback to the stock image. A new kernel needs a fresh module audit.
+		[ -f "$KERNEL_DIR/xImage-R1" ] || die "R1 overlay requires its matching Sonix kernel."
+		if command -v sha256sum >/dev/null 2>&1; then
+			R1_KERNEL_SHA="$(sha256sum "$KERNEL_DIR/xImage-R1" | cut -d ' ' -f 1)"
+		else
+			R1_KERNEL_SHA="$(shasum -a 256 "$KERNEL_DIR/xImage-R1" | cut -d ' ' -f 1)"
+		fi
+		[ "$R1_KERNEL_SHA" = 9222276c59d7bc9ffb8594106475b986bf66066c4f8f4db99c6fb34cb4fc64f6 ] || die "R1 kernel/module compatibility must be reviewed."
+		RECOVERY_HELPER="${R1_RECOVERY_HELPER:-$SCRIPT_DIR/sonix_recovery_r1}"
+		RECOVERY_BLOCK="${R1_RECOVERY_BLOCK:-$SCRIPT_DIR/r1-recovery-ro.bin}"
+		[ -f "$RECOVERY_HELPER" ] && [ -f "$RECOVERY_BLOCK" ] || die "R1 requires the recovery wizard helper and reviewed private eraseblock."
+		[ "$(wc -c < "$RECOVERY_BLOCK" | tr -d ' ')" = 131072 ] || die "Wrong recovery eraseblock size."
+		if command -v sha256sum >/dev/null 2>&1; then
+			RECOVERY_SHA="$(sha256sum "$RECOVERY_BLOCK" | cut -d ' ' -f 1)"
+		else
+			RECOVERY_SHA="$(shasum -a 256 "$RECOVERY_BLOCK" | cut -d ' ' -f 1)"
+		fi
+		[ "$RECOVERY_SHA" = b347d0c257c74b77081c3e82998651af1426cbdbf5ea91aebc040e2212ffd091 ] || die "Unreviewed recovery eraseblock."
+		cp "$RECOVERY_HELPER" "$SQUASH_DIR/usr/bin/sonix_recovery_r1"
+		chmod 755 "$SQUASH_DIR/usr/bin/sonix_recovery_r1"
+		cp "$RECOVERY_BLOCK" "$SQUASH_DIR/usr/resource/sonix/components/r1-recovery-ro.bin"
+	fi
+
 	MODEL_N="$(cd "$ASSETS_DIR/$MODEL_DIR" && find . -type f | wc -l | tr -d ' ')"
 	say "    $MODEL_DIR/: $MODEL_N files"
 

@@ -1473,7 +1473,8 @@ static void *fetch_main(void *arg) {
 		// on the next episode. One catalogue request by id settles it.
 		if (!known) {
 			fprintf(stderr, "podcast: %lld is not in the list we know, asking the catalogue\n", id);
-			if (!podcast_episode(id, &episode)) {
+			long long feed_id = queued_count > 0 ? queued_episodes[0].feed_id : 0;
+			if (!podcast_episode_in_feed(feed_id, id, &episode)) {
 				fprintf(stderr, "podcast: %lld not found there either: %s\n", id, podcast_last_error());
 				pthread_mutex_lock(&fetch_lock);
 				if (fetch_want_id == id) {
@@ -1923,7 +1924,7 @@ static void *worker_main(void *arg) {
 			}
 			if (index < 0) {
 				podcast_episode_t one;
-				if (!podcast_episode(job.id, &one)) {
+				if (!podcast_episode_in_feed(job.feed, job.id, &one)) {
 					snprintf(result_error, sizeof(result_error), "%s", podcast_last_error());
 					break;
 				}

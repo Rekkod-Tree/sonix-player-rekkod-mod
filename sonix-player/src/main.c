@@ -1,4 +1,5 @@
 #include "lvgl/lvgl.h"
+#include "src/system/device/chargescreen.h"
 
 #include <dirent.h>
 #include <malloc.h>
@@ -2122,6 +2123,12 @@ int main(int argc, char **argv) {
 	bool first_start = stat(config_file, &config_st) != 0;
 #endif
 	config_init(config_file);
+	// Device-dependent power decisions must not cache a guess from early sysfs.
+	sysinfo_load();
+	if (!getenv("SONIX_NO_CHARGE_SCREEN")) {
+		chargescreen_run_if_wanted();
+		chargescreen_mark(CHARGESCREEN_MARK_STARTED);
+	}
 #ifndef HOST_BUILD
 	// Before the card is mounted and before either radio starts.
 	factoryreset_clear_stock_data(first_start);
@@ -2173,7 +2180,6 @@ int main(int argc, char **argv) {
 	// window opens at the panel size of the model named in the file; on the
 	// device the framebuffer answers that question itself and this is read for
 	// the update file's name, the converter's name and the serial number.
-	sysinfo_load();
 
 	// The streaming services' application keys, and Qobuz with them. Before
 	// the GUI builds its pages, because the Qobuz page is drawn one way or

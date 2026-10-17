@@ -2,6 +2,7 @@
 #define _GNU_SOURCE
 
 #include "factoryreset.h"
+#include "src/system/device/recoveryprep.h"
 
 #include "src/system/audio/audio.h"
 #include "src/system/core/config.h"
@@ -149,6 +150,7 @@ bool factoryreset_supported(void) {
 }
 
 void factoryreset_run(void) {
+	if (recovery_prep_active()) return;
 #ifdef HOST_BUILD
 	printf("factoryreset: (build host) would delete %s, %s and %s, write the note and reboot\n", CONFIG_FILE,
 		   EBOOK_CONFIG_FILE, ZVUK_SESSION_FILE);

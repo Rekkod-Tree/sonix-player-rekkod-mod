@@ -401,6 +401,13 @@ the overlay - any other file need to be in the respective folder mirroring the r
 
 ### Flashing
 
+**HiBy R1 rekkod-mod:** read [public update preparation](RECOVERY_R1.md#public-update-preparation)
+before the first transition. Supported recovery can be prepared once through
+Settings > System > Safe R1 updates, with verified backups and a separate
+confirmation. Already prepared devices need no repeat repair. Unknown recovery
+stays blocked; the first update from an older firmware still uses its old
+recovery and cannot be retroactively protected by the new wizard.
+
 1. Copy the image for your player to the **root of the microSD card**:
    `r3proii.upt` for the R3 Pro II, `r1.upt` for the R1. Never the other one.
 2. Insert the SD card into the player.
@@ -413,7 +420,11 @@ the overlay - any other file need to be in the respective folder mirroring the r
 4. Let it flash - it will say "Upgrading..." then "Succeeded" and reboot by itself.
 
 > It is recommended to **charge above 30%** first. 
-**Recovery from a failed flash:** If something goes wrong, you can always restore by flashing the original stock firmware from HiBy's website using the same procedure.
+**Recovery from a failed flash:** Reinstalling the matching stock image through
+recovery may help while recovery itself remains intact. It is not a guaranteed
+repair for a damaged recovery partition. If the R1 preparation wizard reports
+uncertain verification, keep the normal OS running, preserve RecoveryBackup,
+and follow the recovery assistance procedure instead of rebooting or retrying.
 
 
 ## Generated files

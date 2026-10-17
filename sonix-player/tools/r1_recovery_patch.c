@@ -1,5 +1,5 @@
 // One-time, explicitly authorized repair of one known R1 recovery eraseblock.
-// Build separately; this utility is never linked into or invoked by the player:
+// Build separately; the player's explicit recovery wizard invokes this helper:
 // cc -std=gnu11 -O2 -D_FILE_OFFSET_BITS=64 -I. tools/r1_recovery_patch.c src/system/core/sha256.c -o r1_recovery_patch
 // --check opens only read-only descriptors. --apply requires the complete
 // reviewed 128 KiB block, not the smaller compressed SquashFS extent.

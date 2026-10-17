@@ -29,6 +29,8 @@ static int fixture_close(int fd);
 static void fixture_sync(void);
 static unsigned fixture_sleep(unsigned seconds);
 static int fixture_reboot(int command);
+static bool fixture_recovery_busy;
+bool recovery_prep_active(void) { return fixture_recovery_busy; }
 
 #define system fixture_system
 #define open fixture_open
@@ -254,6 +256,14 @@ static void expect_recovery_refusal(void) {
 }
 
 int main(void) {
+	reset();
+	fixture_recovery_busy = true;
+	assert(firmware_update_start() == FIRMWARE_UPDATE_PREPARE_FAILED);
+	assert(!screen_off && !screen_on && !remembered && !audio_stopped);
+	assert(prepared == 0 && commands == 0 && opens == 0 && recovery_opens == 0);
+	assert(shell_reboots == 0 && syscall_reboots == 0);
+	fixture_recovery_busy = false;
+	puts("PASS: active recovery preparation refuses update without side effects");
 	for (int failure = 0; failure < 7; failure++) {
 		reset();
 		model_name = failure == 6 ? "hIbY r1" : "HiBy R1";

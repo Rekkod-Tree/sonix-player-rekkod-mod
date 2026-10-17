@@ -16,7 +16,7 @@ The one-time recovery candidate changes one decompressed byte: `mount -rw` becom
 
 ## Reviewed repair utility
 
-`sonix-player/tools/r1_recovery_patch.c` is built separately and is neither installed nor automatically invoked by the player. It shares the immutable sizes and hashes in `src/system/device/recovery_r1.h`.
+`sonix-player/tools/r1_recovery_patch.c` is built separately as `sonix_recovery_r1` and installed only in the R1 image. The on-device wizard invokes it after a verified backup and a separate repair confirmation; neither boot nor ordinary firmware installation automatically applies it. It shares the immutable sizes and hashes in `src/system/device/recovery_r1.h`.
 
 - `--check`: read-only model, selector, NAND geometry, all 192 bad blocks, whole-partition and target-block hash checks.
 - `--apply reviewed-block.bin`: requires separate human authorization for the inactive recovery repair. It validates the complete 128 KiB replacement, retains an exclusive device lock through readback, rechecks the writable descriptor and normal boot selector, erases exactly block 34 and writes exactly 64 pages. It then closes and reopens the raw character device to verify the complete new image.
@@ -32,6 +32,35 @@ mipsel-rockbox-linux-gnu-gcc -std=gnu11 -O2 -static -D_FILE_OFFSET_BITS=64 -I. \
 Before an authorized apply, retain and rehash the original full rootfs2/kernel2 dumps and old eraseblock, establish normal boot and a single active MTD writer, and keep power stable. No card format or change to the normal OS/kernel is part of this repair. A failure after erase can leave recovery incomplete: keep the normal OS running, preserve diagnostics and review restoration from the verified original backup before entering recovery or retrying. The utility does not provide automatic rollback.
 
 ## Verification and remaining acceptance
+
+### Public update preparation
+
+Open **Settings > System > Safe R1 updates**. Identification is read-only. An
+already prepared image needs no repair. For the single supported original image,
+the wizard saves and reads back both recovery partitions in a new
+`RecoveryBackup/r1-.../` directory on the card (at least 40 MB free), then offers
+the separate repair confirmation. Applying requires external power and at least
+50% battery. Unknown images stay blocked. Do not delete the verified backups.
+
+After an uncertain write/readback, normal shutdown, standby and software reboot
+remain blocked: keep the player powered and seek recovery assistance. There is
+no automatic second erase or rollback. Hardware power loss cannot be prevented
+by the UI. The tested R1 is already repaired; the wizard must not rewrite it.
+
+The first installation from an older, unguarded firmware still uses that old
+firmware's recovery. The new wizard protects subsequent updates and cannot
+retroactively prevent an unclean flag from that first transition. It also does
+not repair pre-existing FAT damage. An alpha15 installation that already blocks
+its stock recovery needs a separate supported transition; renaming the image
+does not bypass that guard.
+
+For reproducible packaging, derive the private 128 KiB input from the exact
+supported original backup using
+`python3 sonix-player/tools/prepare_r1_recovery_block.py rootfs2.bin r1-recovery-ro.bin`.
+The host-only generator checks the complete old image, expected bytes, new
+block and complete candidate hashes, and refuses existing output files. It
+never writes device nodes. Pass the resulting path as `R1_RECOVERY_BLOCK` to
+the packer; raw firmware backups and the generated block remain outside Git.
 
 The user subsequently installed the staged alpha13 image through the repaired recovery. On the next normal boot, installed version/build and executable SHA-256 matched the final alpha13 build; the card image also matched. The fresh kernel log had no unclean-volume warning, invalid cluster, I/O error or read-only remount, and FAT32 remained read/write. The recovery's complete raw hash and target block passed a separate `--check` again; bad-block/ECC counters stayed zero. The recovered full FLAC matched its original verified hash and the library opened with 695 indexed tracks. This accepts the tested SD-update cycle from alpha12 into alpha13. The new alpha13 pre-arm failure paths have native fixture coverage; repeated future cycles and unrelated USB update sources are not claimed here.
 

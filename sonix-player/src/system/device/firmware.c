@@ -1,4 +1,5 @@
 #include "firmware.h"
+#include "src/system/device/recoveryprep.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -164,6 +165,8 @@ static bool set_bootmode(bool recovery) {
 #endif
 
 firmware_update_result_t firmware_update_start(void) {
+	if (recovery_prep_active())
+		return FIRMWARE_UPDATE_PREPARE_FAILED;
 #ifdef HOST_BUILD
 	printf("firmware: (host build) would arm recovery and reboot\n");
 	return FIRMWARE_UPDATE_SIMULATED;

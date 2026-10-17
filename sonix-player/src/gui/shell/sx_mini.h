@@ -69,6 +69,9 @@ void sx_mini_hide_on_screen(lv_obj_t *screen);
 // when a keyboard comes or goes.
 void sx_mini_update_visibility(void);
 
+// A temporary full-panel input on this screen owns the mini-player slot.
+void sx_mini_input_overlay(lv_obj_t *screen, bool active);
+
 bool sx_mini_visible(void);
 
 // Something is loaded (whether or not the mini player is up just now). False

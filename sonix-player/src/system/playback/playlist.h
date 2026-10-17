@@ -154,10 +154,20 @@ bool playlist_snapshot_path_at(const playlist_snapshot_t *snap, int index, char 
 // query on the card, so after a restart such a queue is in its listed order
 // again, as a shuffled one is dealt again.
 bool playlist_move(int index, int delta);
+// Absolute drop position, only within the upcoming part of the queue.
+// Unlike the adjacent-move API, materializes a library-backed order for restart.
+bool playlist_move_to(int from, int to);
 
 // Whether the entry at `index` (playback order) is a "Play next" still waiting
 // to come up.
 bool playlist_is_queued_next(int index);
+
+// The generic menu action follows this preference; explicit swipe-next does not.
+bool playlist_enqueue_at_end(void);
+bool playlist_enqueue_ask(void);
+void playlist_set_enqueue_ask(void);
+void playlist_set_enqueue_at_end(bool at_end);
+bool playlist_enqueue(const char *path);
 
 // The same, but at a slot chosen by the caller rather than after the current
 // track. For putting a saved queue back exactly as it was left.

@@ -1,5 +1,27 @@
 ﻿# Features
 
+## Sonix 1.3 adaptations for Graphite 2
+
+- Persistent listening history in the queue menu, including stored names for
+  lazy streaming entries and a bounded row pool.
+- Queue selection/removal with Undo and grip-based reordering of upcoming
+  tracks. The current track stays fixed. The add policy can ask each time,
+  play next or append; explicit swipe actions retain their meanings.
+- Direct RSS podcast feeds and OPML fallback with listening state retained;
+  native and Ogg FLAC internet radio.
+- LRCLIB lookup and explicit local `.lrc` saving; JPEG/PNG/GIF viewing in Files.
+  Searches and image decoding run outside the GUI thread.
+- Numeric PEQ Gain/Q entry and a metronome under More, using Graphite controls.
+- Automatic network time with optional HTTPS zone discovery (off by default),
+  Czech keyboard/translation, and 1% quick-panel brightness minimum.
+- R1 recovery preparation wizard with verified backups and separate repair
+  confirmation. Startup never automatically patches recovery.
+
+The existing R1 audio-driver pair is retained: upstream's new PCM stop fade
+does not distinguish DoP payload. S24 support is preserved. Charge-only startup,
+RTC wake and gauge changes require model-specific hardware acceptance; host
+fixtures alone do not establish charging or analog-output correctness.
+
 ---
 
 ## Supported audio formats

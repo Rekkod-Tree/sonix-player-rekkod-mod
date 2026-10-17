@@ -74,7 +74,10 @@ static void call_later(void (*fn)(void *), void *user) {
 	}
 	p->fn = fn;
 	p->user = user;
-	lv_async_call(pending_run_cb, p);
+	if (lv_async_call(pending_run_cb, p) != LV_RESULT_OK) {
+		free(p);
+		fn(user);
+	}
 }
 
 // ---------------------------------------------------------------------------

@@ -10,6 +10,10 @@
 
 #include "lvgl/lvgl.h"
 
+extern const lv_image_dsc_t icon_battery_warning;
+extern const lv_image_dsc_t icon_lyrics_search;
+extern const lv_image_dsc_t icon_minus;
+extern const lv_image_dsc_t icon_menu_metronome;
 extern const lv_image_dsc_t icon_chevron_left;
 extern const lv_image_dsc_t icon_chevron_right;
 extern const lv_image_dsc_t icon_check;

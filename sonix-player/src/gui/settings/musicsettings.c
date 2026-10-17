@@ -7,37 +7,37 @@
 
 #include "lvgl/lvgl.h"
 
-#include "src/gui/shell/confirm.h"
-#include "src/gui/shell/icons.h"
-#include "src/gui/fonts/fonts.h"
-#include "src/gui/library/libraryscan.h"
-#include "src/gui/nowplaying/player.h"
-#include "src/gui/shell/confirm.h"
 #include "src/gui/audio/eqsettings.h"
 #include "src/gui/audio/msebsettings.h"
 #include "src/gui/audio/peqpage.h"
+#include "src/gui/fonts/fonts.h"
+#include "src/gui/library/libraryscan.h"
+#include "src/gui/library/medialist.h"
 #include "src/gui/nowplaying/coverflow.h"
+#include "src/gui/nowplaying/player.h"
 #include "src/gui/settings/artistexceptions.h"
 #include "src/gui/settings/lastfmsettings.h"
-#include "src/gui/library/medialist.h"
+#include "src/gui/shell/confirm.h"
+#include "src/gui/shell/icons.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
-#include "src/gui/shell/theme.h"
-#include "src/system/audio/alsa-controls.h"
-#include "src/gui/shell/topbar.h"
 #include "src/gui/shell/sx_tokens.h"
-#include "src/system/device/sysinfo.h"
-#include "src/system/playback/sleeptimer.h"
+#include "src/gui/shell/theme.h"
+#include "src/gui/shell/topbar.h"
+#include "src/system/audio/alsa-controls.h"
 #include "src/system/audio/audio.h"
-#include "src/system/bluetooth/bluetooth.h"
 #include "src/system/audio/eq.h"
-#include "src/system/playback/device_state.h"
-#include "src/system/decode/decode.h"
 #include "src/system/audio/replaygain.h"
+#include "src/system/bluetooth/bluetooth.h"
 #include "src/system/core/config.h"
 #include "src/system/core/lang.h"
+#include "src/system/decode/decode.h"
+#include "src/system/device/sysinfo.h"
 #include "src/system/library/library.h"
 #include "src/system/library/metadata.h"
+#include "src/system/playback/device_state.h"
+#include "src/system/playback/playlist.h"
+#include "src/system/playback/sleeptimer.h"
 
 lv_obj_t *musicsettings_screen;
 
@@ -1932,6 +1932,35 @@ static void playback_loaded_cb(lv_event_t *e) {
 	sleep_refresh();
 }
 
+// Where "add to queue" puts a track: right after the one playing, or at the end
+// of the queue. playlist_enqueue() keeps the setting; this page only shows it.
+static lv_obj_t *queue_next_pill;
+static lv_obj_t *queue_end_pill;
+static lv_obj_t *queue_ask_pill;
+
+static void queue_add_refresh(void) {
+	if (!queue_next_pill) {
+		return;
+	}
+	bool at_end = playlist_enqueue_at_end();
+	bool ask = playlist_enqueue_ask();
+	settingsrow_pill_active(queue_ask_pill, ask);
+	settingsrow_pill_active(queue_next_pill, !ask && !at_end);
+	settingsrow_pill_active(queue_end_pill, !ask && at_end);
+}
+
+static void queue_add_pick_cb(lv_event_t *e) {
+	if (player_sheet_drag_active() || switcher_back_drag_active()) {
+		return;
+	}
+	intptr_t choice = (intptr_t)lv_event_get_user_data(e);
+	if (choice < 0)
+		playlist_set_enqueue_ask();
+	else
+		playlist_set_enqueue_at_end(choice != 0);
+	queue_add_refresh();
+}
+
 static void build_playback_page(gui_config_t *cfg) {
 	playback_screen = lv_obj_create(NULL);
 	lv_obj_t *container = settingsrow_page(playback_screen, cfg, "musicsettings_playback_options");
@@ -1975,6 +2004,16 @@ static void build_playback_page(gui_config_t *cfg) {
 	if (mono_get_enabled()) {
 		lv_obj_add_state(mono_switch, LV_STATE_CHECKED);
 	}
+
+	// "Add to queue" in the library, the search and the browser: next, as it
+	// always was, or at the end.
+	lv_obj_t *queue_pills = NULL;
+	settingsrow_pills(container, "add_to_queue", &queue_pills);
+	queue_ask_pill = settingsrow_pill(queue_pills, "queue_add_ask", -1, queue_add_pick_cb);
+	queue_next_pill = settingsrow_pill(queue_pills, "queue_add_next", 0, queue_add_pick_cb);
+	queue_end_pill = settingsrow_pill(queue_pills, "queue_add_end", 1, queue_add_pick_cb);
+	queue_add_refresh();
+	theme_register_refresh(queue_add_refresh);
 
 	// Which of the two shuffles "Play in random order" starts. The mode button
 	// on the player still reaches both by hand; this only decides what that one

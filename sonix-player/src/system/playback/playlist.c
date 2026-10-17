@@ -1221,6 +1221,38 @@ bool playlist_move(int index, int delta) {
 	return true;
 }
 
+bool playlist_move_to(int from, int to) {
+	if (!order || from < 0 || to < 0 || from == to || (size_t)from <= pos || (size_t)to <= pos || (size_t)from >= entry_count || (size_t)to >= entry_count)
+		return false;
+	unsigned seen = revision;
+	refresh_stale_source();
+	if (seen != revision)
+		return false;
+	if (source_ix) {
+		playlist_snapshot_t *saved = playlist_snapshot_take();
+		if (!saved)
+			return false;
+		size_t before = entry_count;
+		char playing[512];
+		playlist_current_path(playing, sizeof(playing));
+		if (!rebuild_without(NULL) || entry_count != before) {
+			playlist_snapshot_restore(saved, playing);
+			return false;
+		}
+		playlist_snapshot_free(saved);
+	}
+	size_t entry = order[from];
+	if (from < to)
+		memmove(order + from, order + from + 1, (size_t)(to - from) * sizeof(*order));
+	else
+		memmove(order + to + 1, order + to, (size_t)(from - to) * sizeof(*order));
+	order[to] = entry;
+	chain_valid = false;
+	custom_queue = true;
+	revision++;
+	return true;
+}
+
 bool playlist_shuffle_upcoming(void) {
 	if (!order || entry_count < 3 || pos + 2 >= entry_count) {
 		return false;
@@ -2262,4 +2294,20 @@ bool playlist_queue_undo(const playlist_queue_undo_t *undo) {
 	chain_slot = undo->chain_slot;
 	revision++;
 	return true;
+}
+bool playlist_enqueue_at_end(void) { return config_get_int("player", "queue_add_end", -1) == 1; }
+bool playlist_enqueue_ask(void) { return config_get_int("player", "queue_add_end", -1) < 0; }
+void playlist_set_enqueue_ask(void) {
+	config_set_int("player", "queue_add_end", -1);
+	config_save();
+}
+
+void playlist_set_enqueue_at_end(bool at_end) {
+	config_set_int("player", "queue_add_end", at_end ? 1 : 0);
+	config_save();
+}
+
+bool playlist_enqueue(const char *path) {
+	const char *items[] = {path};
+	return path && playlist_queue_paths(items, 1, playlist_enqueue_at_end() ? PLAYLIST_QUEUE_END : PLAYLIST_QUEUE_NEXT) == 1;
 }

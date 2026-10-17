@@ -7,20 +7,21 @@
 
 #include "lvgl/lvgl.h"
 
-#include "src/gui/shell/confirm.h"
-#include "src/gui/shell/sx_sheet.h"
-#include "src/gui/shell/easteregg.h"
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/settings/fwupdate.h"
+#include "src/gui/settings/recoverywizard.h"
 #include "src/gui/settings/settings.h"
+#include "src/gui/shell/confirm.h"
+#include "src/gui/shell/easteregg.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
-#include "src/gui/shell/theme.h"
+#include "src/gui/shell/sx_sheet.h"
 #include "src/gui/shell/sx_tokens.h"
-#include "src/system/core/config.h"
-#include "src/system/device/factoryreset.h"
+#include "src/gui/shell/theme.h"
 #include "src/system/audio/headset.h"
+#include "src/system/core/config.h"
 #include "src/system/core/lang.h"
+#include "src/system/device/factoryreset.h"
 #include "src/system/device/power.h"
 #include "src/system/device/sysinfo.h"
 #include "src/system/device/system.h"
@@ -65,6 +66,11 @@ static void firmware_clicked_cb(lv_event_t *e) {
 	}
 
 	fwupdate_show();
+}
+
+static void recovery_clicked_cb(lv_event_t *e) {
+	(void)e;
+	recoverywizard_open(NULL);
 }
 
 // ---------------------------------------------------------------------------
@@ -313,6 +319,9 @@ void systempage_init(gui_config_t *cfg) {
 	settingsrow_add(container, "system_about", NULL, switch_screen_cb, sysinfo_screen);
 	// Actions, not pages: settingsrow_action leaves off the chevron.
 	settingsrow_action(container, "system_update_firmware", firmware_clicked_cb, NULL);
+	if (strcmp(sysinfo_device_name(), "HiBy R1") == 0) {
+		settingsrow_action(container, "recovery_wizard_title", recovery_clicked_cb, NULL);
+	}
 	settingsrow_action(container, "system_factory_reset", factory_clicked_cb, NULL);
 
 	switcher_attach_back_gesture(systempage_screen);

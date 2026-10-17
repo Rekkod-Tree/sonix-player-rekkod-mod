@@ -6,6 +6,9 @@ sonix-player/sonix_player_debug
 sonix-player/sonix_player_host
 sonix-player/sonix_player_host_ui_test
 sonix-player/sonix_launch
+sonix-player/sonix_recovery_r1
+sonix-packer/sonix_recovery_r1
+sonix-packer/r1-recovery-ro.bin
 
 sonix-player/build_target
 sonix-player/build_host

@@ -13,8 +13,8 @@
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
-#include "src/gui/shell/theme.h"
 #include "src/gui/shell/sx_styles.h"
+#include "src/gui/shell/theme.h"
 #include "src/gui/shell/toast.h"
 #include "src/gui/streaming/podcastpage.h"
 #include "src/system/core/lang.h"
@@ -24,6 +24,7 @@
 #include "src/system/streaming/opml.h"
 #include "src/system/streaming/podcast.h"
 #include "src/system/streaming/podcastdl.h"
+#include "src/system/streaming/podcastrss.h"
 #include "src/system/streaming/podcastsubs.h"
 
 #define FEED_ROW_HEIGHT 80
@@ -58,16 +59,17 @@ static char chosen_file[512];
 
 typedef enum {
 	FEED_LOOKING,
-	FEED_FOUND,	   // in the catalogue, and not followed yet
-	FEED_ALREADY,  // followed already
-	FEED_MISSING,  // the catalogue does not have it
-	FEED_FAILED,   // the catalogue could not be asked
+	FEED_FOUND,	  // in the catalogue or read from the feed, and not followed yet
+	FEED_ALREADY, // followed already
+	FEED_MISSING, // the catalogue does not have it
+	FEED_FAILED,  // the catalogue could not be asked
 } feed_state_t;
 
 typedef struct {
 	opml_feed_t source;
 	podcast_feed_t found;
 	feed_state_t state;
+	bool from_feed; // not in the catalogue: read from the feed itself
 	bool checked;
 	lv_obj_t *row;
 	lv_obj_t *box;
@@ -125,7 +127,8 @@ static int count_checked(void) {
 static void paint_feed(feed_t *f) {
 	static const char *const STATUS[] = {"podcast_opml_looking", "podcast_opml_found", "podcast_opml_already",
 										 "podcast_opml_missing", "podcast_opml_failed"};
-	lv_label_set_text(f->status, tr(STATUS[f->state]));
+	bool from_feed = f->state == FEED_FOUND && f->from_feed;
+	lv_label_set_text(f->status, from_feed ? tr("podcast_opml_from_feed") : tr(STATUS[f->state]));
 	lv_color_t color = theme()->text_secondary;
 	if (f->state == FEED_FOUND) {
 		color = lv_color_hex(0x57c26a);
@@ -173,7 +176,7 @@ static void paint_totals(void) {
 typedef struct {
 	unsigned generation;
 	int index;
-	int result; // podcast_feed_by_url's answer
+	int result; // podcast_feed_by_url's answer, or 2 for a feed read directly
 	podcast_feed_t found;
 } answer_t;
 
@@ -186,6 +189,7 @@ static void answer_cb(void *user) {
 		feed_t *f = &feeds[a->index];
 		if (a->result > 0) {
 			f->found = a->found;
+			f->from_feed = a->result == 2;
 			if (podcastsubs_is_followed(a->found.id)) {
 				f->state = FEED_ALREADY;
 				f->checked = false;
@@ -228,6 +232,10 @@ static void *lookup_main(void *arg) {
 		a->generation = job->generation;
 		a->index = job->indexes[i];
 		a->result = podcast_feed_by_url(job->urls[i], &a->found);
+		// Not in the catalogue, or the catalogue out of reach: the feed itself.
+		if (a->result <= 0 && podcastrss_read_feed(job->urls[i], &a->found)) {
+			a->result = 2;
+		}
 		if (!gui_post(answer_cb, a)) {
 			free(a);
 		}

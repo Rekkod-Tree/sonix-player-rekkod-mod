@@ -810,6 +810,7 @@ void sx_row_set_trail(lv_obj_t *row, sx_row_trail_t trail) {
 	}
 	lv_obj_set_hidden(r->trail, trail == SX_ROW_TRAIL_NONE || trail == SX_ROW_TRAIL_STAR);
 	lv_obj_set_clickable(r->trail, trail == SX_ROW_TRAIL_GRIP);
+	lv_obj_set_press_lock(r->trail, trail == SX_ROW_TRAIL_GRIP);
 	// A grip is held and dragged: a drag on it must not scroll the list.
 	lv_obj_set_scroll_chain_ver(r->trail, trail != SX_ROW_TRAIL_GRIP);
 	lv_obj_remove_style(r->trail_icon, &sx_style_star_on, 0);

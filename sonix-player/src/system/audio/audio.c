@@ -1,19 +1,20 @@
 #include "audio.h"
 #include "src/system/audio/alsa-controls.h"
+#include "src/system/audio/decimate.h"
+#include "src/system/audio/eq.h"
+#include "src/system/audio/replaygain.h"
+#include "src/system/audio/resample.h"
+#include "src/system/audio/speed.h"
+#include "src/system/audio/swvolume.h"
+#include "src/system/audio/usbaudio.h"
 #include "src/system/bluetooth/bluetooth.h"
+#include "src/system/core/config.h"
+#include "src/system/core/utils.h"
 #include "src/system/decode/decode.h"
 #include "src/system/decode/growfile.h"
 #include "src/system/decode/sndfile.h"
-#include "src/system/audio/replaygain.h"
-#include "src/system/audio/speed.h"
-#include "src/system/audio/swvolume.h"
-#include "src/system/audio/eq.h"
-#include "src/system/audio/decimate.h"
-#include "src/system/audio/resample.h"
-#include "src/system/audio/usbaudio.h"
-#include "src/system/core/config.h"
 #include "src/system/device/power.h"
-#include "src/system/core/utils.h"
+#include <stdatomic.h>
 
 #include <pthread.h>
 #include <stdbool.h>
@@ -429,6 +430,11 @@ static bool output_is_bluetooth(void) {
 // opens a fresh stream, which is the same path a track change takes. Nothing is
 // lost by it: there is no DAC to keep warm at that end of the link.
 static long paused_device_close_ms(void) { return output_is_bluetooth() ? 0 : PAUSED_DEVICE_CLOSE_MS; }
+
+// Set while the metronome waits for the output that a paused track still holds
+// (audio_external_begin_yielding): the pause hands it back at its next check
+// rather than when PAUSED_DEVICE_CLOSE_MS is up.
+static atomic_bool paused_release_wanted;
 
 bool audio_output_is_bluetooth(void) { return output_is_bluetooth(); }
 
@@ -1149,6 +1155,11 @@ static snd_pcm_t *gapless_take(int channels, int rate, int bits, snd_pcm_uframes
 // request that was not needed, or one that arrives a moment late.
 static snd_pcm_t *external_pcm;
 static bool (*external_release_cb)(void);
+// Set when anything else asks for the output while an external source holds
+// it, for a source with no callback to be told through (audio_external_wanted).
+static atomic_bool external_wanted;
+// The holder gives way to anyone who asks (audio_external_begin_yielding).
+static bool external_yielding;
 
 void audio_set_external_release_cb(bool (*cb)(void)) { external_release_cb = cb; }
 
@@ -1166,10 +1177,15 @@ void audio_set_external_release_cb(bool (*cb)(void)) { external_release_cb = cb;
 // Never fires on the external path itself: audio_external_begin_latency() only
 // reaches open_pcm_device() with external_pcm still NULL.
 static void release_external_output(void) {
+	if (external_pcm) {
+		external_wanted = true;
+	}
 	if (external_pcm && external_release_cb) {
 		external_release_cb();
 	}
 }
+
+bool audio_external_wanted(void) { return external_wanted; }
 
 static void bt_seek_probe_cancel(void);
 
@@ -3094,7 +3110,7 @@ static void play_wav_file(const char *filepath) {
 			if (entering) {
 				paused_at_ms = log_ms();
 			}
-			if (pcm_handle && (log_ms() - paused_at_ms) >= paused_device_close_ms()) {
+			if (pcm_handle && (paused_release_wanted || (log_ms() - paused_at_ms) >= paused_device_close_ms())) {
 				snd_pcm_close(pcm_handle);
 				pcm_handle = NULL;
 				pcm_device_open = false;
@@ -4476,7 +4492,7 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 			if (entering) {
 				paused_at_ms = log_ms();
 			}
-			if (pcm_handle && (log_ms() - paused_at_ms) >= paused_device_close_ms()) {
+			if (pcm_handle && (paused_release_wanted || (log_ms() - paused_at_ms) >= paused_device_close_ms())) {
 				snd_pcm_close(pcm_handle);
 				pcm_handle = NULL;
 				pcm_device_open = false;
@@ -5761,6 +5777,21 @@ bool audio_external_begin(int sample_rate, int channels, int bits) {
 	return audio_external_begin_latency(sample_rate, channels, bits, 0);
 }
 
+// Under external_lock, which it lets go of while it waits. Gives the holder up
+// to `ms` to close the PCM after being asked, and says whether it did.
+static bool external_wait_closed(int ms) {
+	for (int waited = 0; external_pcm && waited < ms; waited += 10) {
+		pthread_mutex_unlock(&external_lock);
+		usleep(10 * 1000);
+		pthread_mutex_lock(&external_lock);
+	}
+	return !external_pcm;
+}
+
+// How long a holder that gives way is waited for: it notices between two
+// writes, a few tens of milliseconds.
+#define EXTERNAL_YIELD_WAIT_MS 1000
+
 bool audio_external_begin_latency(int sample_rate, int channels, int bits, int buffer_ms) {
 	// A PCM held by gapless occupies the DAC. Callers here want to open one of
 	// their own on the same device, and without this they find it busy right
@@ -5768,6 +5799,13 @@ bool audio_external_begin_latency(int sample_rate, int channels, int bits, int b
 	gapless_release();
 
 	pthread_mutex_lock(&external_lock);
+
+	// The metronome holds the output only until someone else wants it: asked,
+	// it closes, and this opens the PCM afresh on this source's own terms.
+	if (external_pcm && external_yielding) {
+		external_wanted = true;
+		external_wait_closed(EXTERNAL_YIELD_WAIT_MS);
+	}
 
 	if (external_pcm) {
 		pthread_mutex_unlock(&external_lock);
@@ -5783,6 +5821,7 @@ bool audio_external_begin_latency(int sample_rate, int channels, int bits, int b
 	// Remembered rather than merely used: a re-open after the headphones move
 	// has to ask for exactly the same stream. The buffer among them, because
 	// the emulator's short one is the whole of how it keeps time.
+	external_wanted = false;
 	external_rate = sample_rate;
 	external_channels = channels;
 	external_bits = bits;
@@ -5798,6 +5837,49 @@ bool audio_external_begin_latency(int sample_rate, int channels, int bits, int b
 
 	pthread_mutex_unlock(&external_lock);
 	return ok;
+}
+
+bool audio_external_begin_yielding(int sample_rate, int channels, int bits, int buffer_ms) {
+	// Never shares: a PCM some other source holds is asked back first (the
+	// AirPlay receiver keeps one while it is merely switched on), and if it
+	// does not come back the answer is no.
+	//
+	// Asked without external_lock held, as local playback asks: the AirPlay
+	// side takes its own locks to hand the PCM back.
+	pthread_mutex_lock(&external_lock);
+	bool held = external_pcm != NULL;
+	pthread_mutex_unlock(&external_lock);
+	if (held) {
+		release_external_output();
+		pthread_mutex_lock(&external_lock);
+		bool closed = external_wait_closed(EXTERNAL_YIELD_WAIT_MS * 2);
+		pthread_mutex_unlock(&external_lock);
+		if (!closed) {
+			fprintf(stderr, "audio: the output is held by another source; not shared\n");
+			return false;
+		}
+	}
+
+	// A track paused a moment ago keeps the device for a few seconds more;
+	// paused, it is not playing, so it is asked to give it back now.
+	pthread_mutex_lock(&audio_mutex);
+	bool paused_holding = playback_status == AUDIO_STATUS_PAUSED && pcm_device_open;
+	pthread_mutex_unlock(&audio_mutex);
+	if (paused_holding) {
+		paused_release_wanted = true;
+		for (int waited = 0; pcm_device_open && waited < EXTERNAL_YIELD_WAIT_MS; waited += 10) {
+			usleep(10 * 1000);
+		}
+		paused_release_wanted = false;
+	}
+
+	if (!audio_external_begin_latency(sample_rate, channels, bits, buffer_ms)) {
+		return false;
+	}
+	pthread_mutex_lock(&external_lock);
+	external_yielding = external_pcm != NULL;
+	pthread_mutex_unlock(&external_lock);
+	return true;
 }
 
 // Under external_lock. Re-opens when the headphones have moved, and says
@@ -6016,6 +6098,7 @@ void audio_external_end(void) {
 		snd_pcm_close(external_pcm);
 		external_pcm = NULL;
 		pcm_device_open = false;
+		external_yielding = false;
 		external_route = -1;
 		external_device[0] = '\0';
 		printf("audio: external source finished; device handed back (%u underruns)\n", external_underruns);

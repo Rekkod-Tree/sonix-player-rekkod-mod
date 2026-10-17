@@ -44,6 +44,9 @@ OUT_H = os.path.join(REPO_ROOT, "src", "gui", "shell", "icons.h")
 # button, 46 px inside the control centre's 88 px circles, 56 px for a dialog
 # glyph, 96-160 px for a placeholder standing in for missing artwork.
 ICONS = [
+    ("battery-warning.svg", "battery_warning", 48),    ("lyrics-search.svg", "lyrics_search", 36),
+    ("minus.svg", "minus", 36),
+    ("ui3-metronome.svg", "menu_metronome", 34),
     ("chevron-left.svg", "chevron_left", 36),
     ("chevron-right.svg", "chevron_right", 36),
     # Marks the chosen row in a single-choice list, in place of the chevron.

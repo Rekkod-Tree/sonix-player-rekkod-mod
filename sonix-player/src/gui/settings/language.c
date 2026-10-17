@@ -1,16 +1,18 @@
 #include "language.h"
 
 #include "src/gui/fonts/fonts.h"
+#include "src/gui/settings/timeset.h"
 #include "src/gui/shell/icons.h"
+#include "src/gui/shell/keyboard.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/sx_styles.h"
 #include "src/gui/shell/sx_tokens.h"
 #include "src/gui/shell/theme.h"
-#include "src/gui/settings/timeset.h"
 #include "src/system/core/config.h"
 #include "src/system/core/lang.h"
 #include "src/system/device/power.h"
+#include "src/system/input/kblayout.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -122,6 +124,9 @@ static void pick_cb(lv_event_t *e) {
 	fonts_set_language(entries[index].name);
 	if (!lang_set(entries[index].name)) {
 		fonts_set_language(lang_current());
+	} else {
+		kblayout_language_changed();
+		keyboard_refresh_layout();
 	}
 	paint_checks();
 	refresh_titles();

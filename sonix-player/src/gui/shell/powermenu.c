@@ -1,4 +1,5 @@
 #include "powermenu.h"
+#include "src/system/device/recoveryprep.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -72,6 +73,8 @@ bool powermenu_is_open(void) { return panel && !lv_obj_is_hidden(panel); }
 static void slide_reset(slide_t *s);
 
 void powermenu_show(void) {
+	if (recovery_prep_active())
+		return;
 	if (!panel) {
 		return;
 	}
@@ -108,6 +111,8 @@ static void do_power_off(void) {
 }
 
 static void do_reboot(void) {
+	if (recovery_prep_active())
+		return;
 	printf("power: rebooting\n");
 	device_state_remember_flush();
 	clock_shutdown();

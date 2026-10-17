@@ -1,4 +1,5 @@
 #include "trackmenu.h"
+#include "src/gui/nowplaying/historypage.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -134,7 +135,24 @@ static unsigned queue_seen_metadata_revision;
 static int queue_seen_current = -2;
 static queue_mode_t queue_seen_mode;
 
+// Editing never changes playback or the parked queue. Revisions invalidate picks.
+static int queue_edit_mode; // 0 view, 1 select, 2 reorder
+static unsigned queue_edit_revision;
+static int queue_edit_current;
+static int queue_edit_count;
+static unsigned char *queue_selected;
+static int queue_drag_from = -1, queue_drag_to;
+static int queue_drag_y, queue_drag_origin;
+static lv_obj_t *queue_drag_row;
+static void queue_edit_end(void *unused);
+static void queue_edit_paint(void);
+static bool queue_edit_valid(void);
+static void queue_edit_reset(void);
+static void queue_grip_cb(lv_event_t *e);
+static void queue_edit_toggle(int index);
+
 static void queue_layout(void);
+static queue_mode_t queue_mode_now(void);
 static void queue_window_update(void);
 static int32_t queue_row_y(int index);
 
@@ -263,7 +281,8 @@ static void queue_row_bind(queue_row_t *q, int index) {
 	bool queued = queue_mode == QUEUE_MODE_QUEUE && playlist_is_queued_next(index);
 	sx_row_set_subtitle(q->row, artist, queued ? tr("queue_badge_next") : NULL, length[0] ? length : NULL);
 	sx_row_set_playing(q->row, index == queue_cur);
-	sx_row_set_swipes(q->row, false, queue_removable(index));
+	sx_row_set_trail(q->row, queue_edit_mode == 1 && queue_removable(index) ? (queue_selected[index] ? SX_ROW_TRAIL_CHECK : SX_ROW_TRAIL_BLANK) : queue_edit_mode == 2 && index > queue_cur ? SX_ROW_TRAIL_GRIP : SX_ROW_TRAIL_NONE);
+	sx_row_set_swipes(q->row, false, !queue_edit_mode && queue_removable(index));
 	queue_row_cover(q, path, fallback_album);
 
 	lv_obj_set_y(q->row, queue_row_y(index));
@@ -389,6 +408,8 @@ static int32_t queue_note_place(lv_obj_t *note, int32_t y, const char *text) {
 }
 
 static void queue_layout(void) {
+	if (queue_edit_mode && !queue_edit_valid())
+		queue_edit_reset();
 	if (!queue_list) {
 		return;
 	}
@@ -442,7 +463,7 @@ static void queue_layout(void) {
 	lv_obj_set_hidden(queue_note_empty, true);
 	lv_obj_set_hidden(queue_idle, queue_mode != QUEUE_MODE_IDLE);
 	// Nothing to save, shuffle or clear in a queue that is not the queue.
-	bool menu = queue_mode == QUEUE_MODE_QUEUE && queue_total > 0;
+	bool menu = (queue_mode == QUEUE_MODE_QUEUE && queue_total > 0) || library_history_revision() > 0;
 	lv_obj_set_hidden(queue_more_btn, !menu);
 
 	int32_t y = 0;
@@ -576,6 +597,11 @@ static void queue_play(int index) {
 
 static void queue_row_tap(lv_obj_t *row, void *user) {
 	(void)row;
+	if (queue_edit_mode) {
+		if (queue_edit_mode == 1)
+			queue_edit_toggle(queue_user_index(user));
+		return;
+	}
 	queue_play(queue_user_index(user));
 }
 
@@ -660,6 +686,11 @@ static void queue_sheet_album(void *user) {
 
 static void queue_row_hold(lv_obj_t *row, void *user) {
 	(void)row;
+	if (queue_edit_mode) {
+		if (queue_edit_mode == 1)
+			queue_edit_toggle(queue_user_index(user));
+		return;
+	}
 	int index = queue_user_index(user);
 	queue_sheet_index = index;
 	char path[512];
@@ -792,6 +823,152 @@ static void queue_clear_cb(void *user) {
 	queue_layout();
 }
 
+static void queue_edit_paint(void) {
+	for (int i = 0; i < QUEUE_POOL; i++) {
+		if (queue_rows[i].index >= 0)
+			queue_row_bind(&queue_rows[i], queue_rows[i].index);
+	}
+}
+
+static void queue_drag_reset(void) {
+	if (queue_drag_row) {
+		if (queue_drag_from >= 0)
+			lv_obj_set_y(queue_drag_row, queue_row_y(queue_drag_from));
+		lv_obj_remove_local_style_prop(queue_drag_row, LV_STYLE_BG_COLOR, 0);
+		lv_obj_remove_local_style_prop(queue_drag_row, LV_STYLE_BG_OPA, 0);
+	}
+	queue_drag_from = -1;
+	queue_drag_row = NULL;
+	lv_obj_set_scrollable(queue_list, true);
+}
+
+static void queue_edit_reset(void) {
+	queue_drag_reset();
+	free(queue_selected);
+	queue_selected = NULL;
+	queue_edit_mode = 0;
+}
+
+static void queue_edit_end(void *unused) {
+	(void)unused;
+	queue_edit_reset();
+	queue_edit_paint();
+}
+
+static bool queue_edit_valid(void) { return queue_mode_now() == QUEUE_MODE_QUEUE && queue_edit_revision == playlist_revision() && queue_edit_current == playlist_current_index() && queue_edit_count == playlist_count(); }
+
+static void queue_edit_toggle(int index) {
+	if (!queue_edit_valid()) {
+		queue_edit_end(NULL);
+		return;
+	}
+	if (!queue_selected || !queue_removable(index))
+		return;
+	queue_selected[index] = !queue_selected[index];
+	queue_edit_paint();
+}
+
+static void queue_edit_begin(void *user) {
+	queue_edit_reset();
+	queue_layout();
+	if (queue_mode != QUEUE_MODE_QUEUE)
+		return;
+	int mode = (int)(intptr_t)user;
+	if (mode == 1) {
+		queue_selected = calloc((size_t)queue_total, 1);
+		if (!queue_selected)
+			return;
+	}
+	queue_edit_revision = playlist_revision();
+	queue_edit_current = playlist_current_index();
+	queue_edit_count = playlist_count();
+	queue_edit_mode = mode;
+	queue_edit_paint();
+}
+
+static void queue_edit_remove(void *unused) {
+	(void)unused;
+	if (!queue_edit_valid() || !queue_selected) {
+		queue_edit_end(NULL);
+		return;
+	}
+	int *indices = malloc((size_t)queue_total * sizeof(*indices));
+	if (!indices) {
+		queue_edit_end(NULL);
+		return;
+	}
+	int count = 0;
+	for (int i = 0; i < queue_total; i++)
+		if (queue_selected[i])
+			indices[count++] = i;
+	queue_undo_begin();
+	bool changed = count > 0 && playlist_remove(indices, count);
+	free(indices);
+	queue_edit_reset();
+	if (changed) {
+		device_state_queue_changed();
+		player_queue_changed();
+		queue_undo_commit(tr("queue_tracks_removed"));
+	} else
+		queue_undo_cancel();
+	queue_layout();
+}
+
+static void queue_grip_cb(lv_event_t *e) {
+	if (queue_edit_mode != 2)
+		return;
+	lv_event_stop_bubbling(e);
+	if (!queue_edit_valid()) {
+		queue_edit_end(NULL);
+		return;
+	}
+	queue_row_t *q = lv_event_get_user_data(e);
+	lv_point_t point;
+	lv_indev_t *input = lv_indev_active();
+	if (!input)
+		return;
+	lv_indev_get_point(input, &point);
+	lv_event_code_t code = lv_event_get_code(e);
+	if (code == LV_EVENT_PRESSED && q->index > queue_cur) {
+		queue_drag_from = queue_drag_to = q->index;
+		queue_drag_y = point.y;
+		queue_drag_origin = queue_row_y(q->index);
+		queue_drag_row = q->row;
+		lv_obj_set_style_bg_color(queue_drag_row, sx_pal()->surface, 0);
+		lv_obj_set_style_bg_opa(queue_drag_row, LV_OPA_COVER, 0);
+		lv_obj_move_foreground(q->row);
+		lv_obj_set_scrollable(queue_list, false);
+	} else if (code == LV_EVENT_PRESSING && queue_drag_from >= 0) {
+		int dy = point.y - queue_drag_y;
+		queue_drag_to = queue_drag_from + dy / queue_pitch;
+		if (queue_drag_to <= queue_cur)
+			queue_drag_to = queue_cur + 1;
+		if (queue_drag_to >= queue_total)
+			queue_drag_to = queue_total - 1;
+		int32_t y = LV_CLAMP(queue_row_y(queue_cur + 1), queue_drag_origin + dy, queue_row_y(queue_total - 1));
+		lv_obj_set_y(queue_drag_row, y);
+	} else if ((code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) && queue_drag_from >= 0) {
+		int from = queue_drag_from, to = queue_drag_to;
+		queue_drag_reset();
+		if (code == LV_EVENT_RELEASED && from != to) {
+			queue_undo_begin();
+			if (playlist_move_to(from, to)) {
+				queue_edit_revision = playlist_revision();
+				device_state_queue_changed();
+				player_queue_changed();
+				queue_undo_commit(tr("queue_reordered"));
+			} else
+				queue_undo_cancel();
+			queue_layout();
+		}
+	}
+}
+
+static void queue_edit_unloaded(lv_event_t *e) {
+	(void)e;
+	queue_edit_reset();
+}
+
 static void queue_more_cb(lv_event_t *e) {
 	(void)e;
 	if (switcher_back_drag_active()) {
@@ -799,11 +976,24 @@ static void queue_more_cb(lv_event_t *e) {
 	}
 	static char sub[64];
 	snprintf(sub, sizeof(sub), tr("queue_count_fmt"), playlist_count());
-	bool upcoming = playlist_current_index() >= 0 && playlist_current_index() + 1 < playlist_count();
-	bool shufflable = playlist_current_index() >= 0 && playlist_current_index() + 2 < playlist_count();
-	sx_sheet_item_t items[3];
+	bool upcoming = queue_mode == QUEUE_MODE_QUEUE && playlist_current_index() >= 0 && playlist_current_index() + 1 < playlist_count();
+	bool shufflable = queue_mode == QUEUE_MODE_QUEUE && playlist_current_index() >= 0 && playlist_current_index() + 2 < playlist_count();
+	sx_sheet_item_t items[6];
 	int n = 0;
-	items[n++] = (sx_sheet_item_t){tr("queue_save_as_playlist"), &npicon_add_playlist, false, false, queue_save_cb, NULL};
+	if (queue_edit_mode) {
+		if (queue_edit_mode == 1)
+			items[n++] = (sx_sheet_item_t){tr("queue_remove_selected"), &npicon_remove, false, false, queue_edit_remove, NULL};
+		items[n++] = (sx_sheet_item_t){tr("done"), NULL, false, false, queue_edit_end, NULL};
+		sx_sheet_menu(tr("trackmenu_queue"), NULL, items, n);
+		return;
+	}
+	if (upcoming && queue_mode == QUEUE_MODE_QUEUE) {
+		items[n++] = (sx_sheet_item_t){tr("queue_select"), NULL, false, false, queue_edit_begin, (void *)(intptr_t)1};
+		items[n++] = (sx_sheet_item_t){tr("queue_reorder"), NULL, false, false, queue_edit_begin, (void *)(intptr_t)2};
+	}
+	items[n++] = (sx_sheet_item_t){tr("queue_history"), &icon_radio_recent, false, false, historypage_open, NULL};
+	if (queue_mode == QUEUE_MODE_QUEUE && queue_total > 0)
+		items[n++] = (sx_sheet_item_t){tr("queue_save_as_playlist"), &npicon_add_playlist, false, false, queue_save_cb, NULL};
 	if (shufflable) {
 		items[n++] =
 			(sx_sheet_item_t){tr("queue_shuffle_rest"), &npicon_shuffle, false, false, queue_shuffle_rest_cb, NULL};
@@ -862,6 +1052,10 @@ void trackmenu_queue_choose(lv_obj_t *anchor, trackmenu_queue_chosen_cb chosen, 
 	if (!anchor || !chosen) {
 		return;
 	}
+	if (!playlist_enqueue_ask()) {
+		chosen(playlist_enqueue_at_end() ? PLAYLIST_QUEUE_END : PLAYLIST_QUEUE_NEXT, user);
+		return;
+	}
 	static const popover_item_t ITEMS[] = {
 		{"queue_play_next", choose_picked, (void *)(intptr_t)PLAYLIST_QUEUE_NEXT},
 		{"queue_add_to_end", choose_picked, (void *)(intptr_t)PLAYLIST_QUEUE_END},
@@ -908,6 +1102,7 @@ static lv_obj_t *queue_label(lv_obj_t *parent, const lv_font_t *font, bool secon
 static void build_queue_page(gui_config_t *cfg) {
 	lv_obj_add_style(queue_screen, &theme_style_screen, 0);
 	queue_title = settingsrow_title(queue_screen, cfg, "trackmenu_queue");
+	lv_obj_add_event_cb(queue_screen, queue_edit_unloaded, LV_EVENT_SCREEN_UNLOADED, NULL);
 
 	queue_more_btn = lv_btn_create(queue_screen);
 	lv_obj_remove_style_all(queue_more_btn);
@@ -976,6 +1171,11 @@ static void build_queue_page(gui_config_t *cfg) {
 	for (int i = 0; i < QUEUE_POOL; i++) {
 		queue_row_t *q = &queue_rows[i];
 		q->row = sx_row_create(queue_body, &handlers, true);
+		lv_obj_t *grip = sx_row_trail(q->row);
+		lv_obj_add_event_cb(grip, queue_grip_cb, LV_EVENT_PRESSED, q);
+		lv_obj_add_event_cb(grip, queue_grip_cb, LV_EVENT_PRESSING, q);
+		lv_obj_add_event_cb(grip, queue_grip_cb, LV_EVENT_RELEASED, q);
+		lv_obj_add_event_cb(grip, queue_grip_cb, LV_EVENT_PRESS_LOST, q);
 		lv_obj_set_width(q->row, width);
 		lv_obj_set_pos(q->row, 0, 0);
 		lv_obj_set_hidden(q->row, true);

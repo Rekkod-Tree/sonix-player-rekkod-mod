@@ -171,19 +171,39 @@ TARGET_LDFLAGS = $(FREETYPE_PREFIX)/lib/libfreetype.a $(AUDIO_LIBS) -lpthread -l
 				 $(GB_LDFLAGS) -Wl,--gc-sections
 
 # Default target-only LTO. Keep the compile-time O2/O3 split above, but
-# choose O2 explicitly for the final link instead of inheriting the hottest
-# input's O3. Repeat the MIPS flags so link-time code generation keeps the same
+# choose the final link level explicitly (O3; O2 remains a comparison option).
+# Repeat the MIPS flags so link-time code generation keeps the same
 # ISA and separate floating-point multiply/add rounding. Host, launcher and
 # prebuilt dependency archives retain their existing flags. TARGET_FLAGS_STAMP
 # sees this through TARGET_CFLAGS, so both enabling and disabling rebuild objects.
 # A single LTRANS unit keeps glibc_compat.h's assembler-local .symver directives
 # beside every generated math call. Multiple partitions can request GLIBC_2.27.
 TARGET_LTO ?= 1
+TARGET_LTO_OPT ?= 3
+ifneq ($(filter $(TARGET_LTO_OPT),2 3),$(TARGET_LTO_OPT))
+$(error TARGET_LTO_OPT must be 2 or 3)
+endif
 ifeq ($(TARGET_LTO),1)
 TARGET_CFLAGS += -flto=4
-TARGET_LDFLAGS += -flto=4 -flto-partition=one -O2 -march=mips32r2 -mno-madd4 -mplt
+TARGET_LDFLAGS += -flto=4 -flto-partition=one -O$(TARGET_LTO_OPT) -march=mips32r2 -mno-madd4 -mplt
 else ifneq ($(TARGET_LTO),0)
 $(error TARGET_LTO must be 0 or 1)
+endif
+
+# Profiles are collected in RAM on the device, then copied to the build host.
+# Keep identical sources, build paths and per-file optimization levels. A
+# training-only TARGET_LTO=0 build can feed the final LTO build; profile mismatch
+# and missing-profile errors must remain fatal. Never collect profiles on SD.
+TARGET_PGO ?= off
+TARGET_PROFILE_DIR ?= /tmp/sonix-pgo
+ifeq ($(TARGET_PGO),generate)
+TARGET_CFLAGS += -fprofile-generate=$(TARGET_PROFILE_DIR) -fprofile-update=prefer-atomic -DSONIX_PROFILE_GENERATE=1
+TARGET_LDFLAGS += -fprofile-generate=$(TARGET_PROFILE_DIR)
+else ifeq ($(TARGET_PGO),use)
+TARGET_CFLAGS += -fprofile-use=$(TARGET_PROFILE_DIR) -fprofile-correction -Werror=coverage-mismatch -Werror=missing-profile
+TARGET_LDFLAGS += -fprofile-use=$(TARGET_PROFILE_DIR) -fprofile-correction -Werror=coverage-mismatch -Werror=missing-profile
+else ifneq ($(TARGET_PGO),off)
+$(error TARGET_PGO must be off, generate or use)
 endif
 
 # FreeType for the target, built static: the rootfs has no libfreetype.so. The
@@ -322,7 +342,10 @@ build_host/lvgl/%.o: $(LVGL_DIR)/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(HOST_CFLAGS) -c $< -o $@
 
-target: $(TARGET_BIN) $(LAUNCH_BIN) compile_commands.json
+target: $(TARGET_BIN) $(LAUNCH_BIN) sonix_recovery_r1 compile_commands.json
+
+sonix_recovery_r1: tools/r1_recovery_patch.c src/system/core/sha256.c src/system/device/recovery_r1.h $(CROSS_CC)
+	$(CROSS_CC) -std=gnu11 -O2 -static -D_FILE_OFFSET_BITS=64 -I. tools/r1_recovery_patch.c src/system/core/sha256.c -o $@
 
 $(TARGET_BIN): $(TARGET_OBJS) Makefile
 	$(TARGET_LD) -o $@ $(TARGET_OBJS) $(TARGET_LDFLAGS)
@@ -422,12 +445,13 @@ check-abi:
 # included. Rewritten only when they differ, so a change of flags rebuilds
 # everything and nothing else does.
 TARGET_FLAGS_STAMP = build_target/.flags
-TARGET_FLAGS_LINE = $(TARGET_CFLAGS) | $(TARGET_CXXFLAGS) | $(TARGET_DEFAULT_OPT) $(TARGET_HOT_OPT) $(TARGET_HOT_PATTERNS)
+TARGET_FLAGS_LINE = $(TARGET_CFLAGS) | $(TARGET_CXXFLAGS) | $(TARGET_DEFAULT_OPT) $(TARGET_HOT_OPT) $(TARGET_HOT_PATTERNS) | $(TARGET_LDFLAGS)
 $(TARGET_FLAGS_STAMP): FORCE
 	@mkdir -p $(dir $@)
 	@echo '$(TARGET_FLAGS_LINE)' | cmp -s - $@ || \
 		echo '$(TARGET_FLAGS_LINE)' > $@
 FORCE:
+
 
 build_target/%.o: src/%.c $(TARGET_FLAGS_STAMP)
 	@mkdir -p $(dir $@)

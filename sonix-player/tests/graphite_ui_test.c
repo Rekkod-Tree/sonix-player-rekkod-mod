@@ -1051,8 +1051,13 @@ static void surface_states(void) {
 }
 
 #include "graphite_components.inc"
+#include "graphite_upstream.inc"
 
 static void run(lv_timer_t *timer) {
+	if (getenv("SONIX_UI_TEST_UPSTREAM")) {
+		upstream_run();
+		return;
+	}
 	(void)timer;
 	if (getenv("SONIX_UI_TEST_SPOKEN")) {
 		spoken_states();

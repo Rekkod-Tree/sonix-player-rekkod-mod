@@ -1,4 +1,5 @@
 #include "quickpanel.h"
+#include "src/system/device/recoveryprep.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -447,7 +448,7 @@ bool quickpanel_blocked(void) {
 	// thttpd takes a moment and the answer about the process is cached on top of
 	// that, so asking the process left the control centre refusing to open for
 	// seconds after the page said the transfer was off.
-	return usbdac_is_active() || wifitransfer_get_enabled() || btreceiver_is_active();
+	return recovery_prep_active() || usbdac_is_active() || wifitransfer_get_enabled() || btreceiver_is_active();
 }
 
 void quickpanel_open(void) {
@@ -1868,7 +1869,7 @@ void quickpanel_init(gui_config_t *cfg) {
 	brightness_slider = lv_slider_create(bright_row);
 	lv_obj_set_height(brightness_slider, 6);
 	lv_obj_set_flex_grow(brightness_slider, 1);
-	lv_slider_set_range(brightness_slider, 5, 100);
+	lv_slider_set_range(brightness_slider, 1, 100);
 	lv_obj_set_style_radius(brightness_slider, LV_RADIUS_CIRCLE, LV_PART_MAIN);
 	lv_obj_add_style(brightness_slider, &sx_style_press, LV_PART_MAIN);
 	lv_obj_set_style_bg_opa(brightness_slider, LV_OPA_COVER, LV_PART_MAIN);

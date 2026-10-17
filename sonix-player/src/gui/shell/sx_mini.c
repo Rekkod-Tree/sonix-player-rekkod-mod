@@ -61,12 +61,23 @@ void sx_mini_hide_on_screen(lv_obj_t *screen) {
 	sx_mini_update_visibility();
 }
 
+static lv_obj_t *input_overlay_screen;
+
+void sx_mini_input_overlay(lv_obj_t *screen, bool active) {
+	if (active) {
+		input_overlay_screen = screen;
+	} else if (input_overlay_screen == screen) {
+		input_overlay_screen = NULL;
+	}
+	sx_mini_update_visibility();
+}
+
 void sx_mini_update_visibility(void) {
 	if (!slot) {
 		return;
 	}
 	lv_obj_t *screen = lv_screen_active();
-	bool want = has_track && !player_open && !screen_hides_mini(screen) && !keyboard_shown_on(screen);
+	bool want = has_track && !player_open && !screen_hides_mini(screen) && !keyboard_shown_on(screen) && screen != input_overlay_screen;
 	if (want == shown) {
 		return;
 	}
