@@ -63,10 +63,16 @@
 #include "src/gui/wireless/wireless.h"
 #include "src/system/core/config.h"
 #include "src/system/core/lang.h"
+#include "src/system/decode/decode.h"
 #include "src/system/device/power.h"
 #include "src/system/image/png_write.h"
+#include "src/system/library/audiobookdb.h"
+#include "src/system/playback/device_state.h"
 #include "src/system/playback/playlist.h"
+#include "src/system/streaming/yandex.h"
+#include "src/system/streaming/yandexdl.h"
 #include "src/system/streaming/zvuk.h"
+#include "src/system/streaming/zvukdl.h"
 
 static const char *out_dir;
 static int phase;
@@ -263,6 +269,394 @@ static void error_actions(const char *primary) {
 }
 
 static void no_action(void) {}
+
+static bool spoken_wait_label(const char *text) {
+	static int waits;
+	if (visible(find_label(lv_screen_active(), text))) {
+		waits = 0;
+		return true;
+	}
+	if (waits == 28) {
+		printf("UI_SPOKEN_MISSING_LABEL %s\n", text);
+		capture("spoken-unexpected-state");
+	}
+	assert(++waits < 30);
+	return false;
+}
+
+static lv_obj_t *spoken_exact_label(lv_obj_t *root, const char *text) {
+	if (lv_obj_check_type(root, &lv_label_class) && strcmp(lv_label_get_text(root), text) == 0)
+		return root;
+	for (uint32_t i = 0; i < lv_obj_get_child_count(root); i++) {
+		lv_obj_t *found = spoken_exact_label(lv_obj_get_child(root, (int)i), text);
+		if (found)
+			return found;
+	}
+	return NULL;
+}
+
+static int spoken_kind_labels(lv_obj_t *root, const char *text) {
+	int count = lv_obj_check_type(root, &lv_label_class) && strcmp(lv_label_get_text(root), text) == 0 && visible(root);
+	for (uint32_t i = 0; i < lv_obj_get_child_count(root); i++)
+		count += spoken_kind_labels(lv_obj_get_child(root, (int)i), text);
+	return count;
+}
+
+static bool spoken_first_part(const char *path, const char *title, void *user) {
+	(void)title;
+	char *first = user;
+	if (!first[0])
+		snprintf(first, 512, "%s", path);
+	return true;
+}
+
+static bool spoken_check_local_book(const char *book) {
+	if (audiobookdb_scan_running() || !audiobookdb_book_info(book, NULL, 0, NULL, 0, NULL))
+		return false;
+	char first[512] = "", resumed[512];
+	assert(audiobookdb_parts_for_each(book, spoken_first_part, first) == 13);
+	assert(strncmp(first, book, strlen(book)) == 0 && strstr(first, "/0001-"));
+	decoder_t *decoder = decoder_open(first, decode_detect_format(first));
+	assert(decoder && decoder_channels(decoder) > 0 && decoder_channels(decoder) <= 2);
+	int32_t pcm[256 * 2];
+	assert(decoder_read_pcm_frames_s32(decoder, 256, pcm) > 0);
+	decoder_close(decoder);
+	audiobooks_play_at(book, first, 1.25);
+	const char *loaded;
+	const song_metadata_t *metadata = device_state_loaded_metadata(&loaded);
+	assert(loaded && strcmp(loaded, first) == 0 && metadata->title[0]);
+	double position = 0;
+	assert(audiobookdb_get_position(book, resumed, sizeof(resumed), &position));
+	assert(strcmp(resumed, first) == 0 && position == 1.25);
+	device_state_stop();
+	printf("UI_SPOKEN_LOCAL_PLAY_PASS native index, 13 ordered parts, decoded MP3, player path and resume\n");
+	return true;
+}
+
+static void spoken_search(lv_obj_t *home, const char *text, const char *mode_key) {
+	switch_screen(home);
+	lv_obj_t *search = home == yandex_screen ? find_label(home, tr("yandex_search")) : find_image(home, &icon_search);
+	assert(search && visible(search));
+	lv_obj_scroll_to_view(lv_obj_get_parent(search), LV_ANIM_OFF);
+	lv_obj_send_event(lv_obj_get_parent(search), LV_EVENT_CLICKED, NULL);
+	lv_obj_t *field = find_field(lv_screen_active());
+	assert(field);
+	if (mode_key) {
+		lv_obj_t *mode = find_label(lv_screen_active(), tr(mode_key));
+		assert(mode && visible(mode));
+		lv_obj_send_event(lv_obj_get_parent(mode), LV_EVENT_CLICKED, NULL);
+	}
+	lv_textarea_set_text(field, text);
+	lv_obj_t *accept = find_label(lv_screen_active(), tr("ok"));
+	assert(accept && visible(accept));
+	if (mode_key) {
+		// Yandex puts its category pills on the input screen; keep them clear
+		// of the keyboard even with Large text on the shorter panel.
+		assert(fonts_set_large_text(true));
+		lv_obj_update_layout(lv_screen_active());
+		lv_obj_t *tray = accept;
+		while (lv_obj_get_parent(tray) != lv_screen_active())
+			tray = lv_obj_get_parent(tray);
+		lv_obj_t *pill = find_label(lv_screen_active(), tr(mode_key));
+		lv_area_t keyboard, choice;
+		lv_obj_get_coords(tray, &keyboard);
+		lv_obj_get_coords(lv_obj_get_parent(pill), &choice);
+		assert(choice.y2 < keyboard.y1);
+		capture("yandex-spoken-input-large-layout");
+		assert(fonts_set_large_text(false));
+		field = find_field(lv_screen_active());
+		assert(field && strcmp(lv_textarea_get_placeholder_text(field), tr("spoken_book_search_hint")) == 0);
+		accept = find_label(lv_screen_active(), tr("ok"));
+		assert(accept && visible(accept));
+	}
+	lv_obj_send_event(lv_obj_get_parent(accept), LV_EVENT_CLICKED, NULL);
+}
+
+static void spoken_states(void) {
+	static int hold_x, hold_y, download_wait;
+	static lv_obj_t *podcast_list;
+	char count[100];
+	switch (phase) {
+	case 0: {
+		gui_init_rest();
+		pointer = lv_indev_create();
+		lv_indev_set_type(pointer, LV_INDEV_TYPE_POINTER);
+		lv_indev_set_read_cb(pointer, read_pointer);
+		theme_set_accent(THEME_ACCENT_GRAPHITE);
+		theme_set_dynamic_tint(false);
+		theme_set_dark(true);
+		assert(strcmp(config_get("zvuk", "base_url", ""), "http://127.0.0.1:18769") == 0);
+		char message[256];
+		assert(zvuk_sign_in("a1b2c3d4e5f60718293a4b5c6d7e8f90", message, sizeof(message)) == CARDIMPORT_OK);
+		switch_screen(zvuk_screen);
+		phase++;
+		break;
+	}
+	case 1:
+		spoken_search(zvuk_screen, "fixture", NULL);
+		phase = 101;
+		break;
+	case 101: {
+		if (!spoken_wait_label(tr("spoken_audiobook")))
+			return;
+		assert(find_field(lv_screen_active()) == NULL); // Filters and keyboard use separate screens.
+		assert(fonts_set_large_text(true));
+		lv_obj_t *pill = find_label(lv_screen_active(), tr("spoken_audiobook"));
+		lv_obj_scroll_to_view(lv_obj_get_parent(pill), LV_ANIM_OFF);
+		lv_obj_update_layout(lv_screen_active());
+		lv_area_t box;
+		lv_obj_get_coords(lv_obj_get_parent(pill), &box);
+		assert(box.x1 >= 0 && box.x2 < 480 && box.y2 < lv_display_get_vertical_resolution(lv_display_get_default()) / 2);
+		capture("spoken-search-pills-large");
+		assert(fonts_set_large_text(false));
+		lv_obj_send_event(lv_obj_get_parent(pill), LV_EVENT_CLICKED, NULL);
+		phase = 102;
+		break;
+	}
+	case 102: {
+		if (!spoken_wait_label("Fixture Complete"))
+			return;
+		assert(spoken_kind_labels(lv_screen_active(), tr("spoken_audiobook")) >= 2);
+		capture("spoken-book-search-result");
+		lv_obj_t *title = find_label(lv_screen_active(), "Fixture Complete");
+		lv_area_t box;
+		lv_obj_get_coords(title, &box);
+		input(box.x1 + 20, (box.y1 + box.y2) / 2, true);
+		input(box.x1 + 20, (box.y1 + box.y2) / 2, false);
+		phase = 2;
+		break;
+	}
+	case 2: {
+		if (!spoken_wait_label("Chapter 01"))
+			return;
+		capture("spoken-book-loaded");
+		assert(visible(find_label(lv_screen_active(), "Fixture Complete")));
+		lv_obj_t *kind = find_label(lv_screen_active(), tr("spoken_audiobook"));
+		assert(kind && visible(kind));
+		snprintf(count, sizeof(count), tr("spoken_chapter_count"), 13);
+		assert(strstr(lv_label_get_text(kind), count));
+		lv_obj_t *save = find_label(lv_screen_active(), tr("spoken_download_book"));
+		assert(save && visible(save));
+		lv_area_t area;
+		lv_obj_get_coords(lv_obj_get_parent(save), &area);
+		assert(area.y1 >= SX_STATUSBAR_H && area.y2 < lv_display_get_vertical_resolution(lv_display_get_default()) - SX_MINI_SLOT_H);
+		assert(!visible(find_label(lv_screen_active(), tr("zvuk_save_album"))));
+		capture("spoken-book-13-parts");
+		lv_obj_send_event(lv_obj_get_parent(save), LV_EVENT_CLICKED, NULL);
+		phase++;
+		break;
+	}
+	case 3: {
+		char path[512];
+		if (!zvukdl_local_book("8101", path, sizeof(path))) {
+			assert(++download_wait < 60);
+			return;
+		}
+		if (!spoken_check_local_book(path)) {
+			assert(++download_wait < 60);
+			return;
+		}
+		assert(strstr(path, "/zvuk-8101"));
+		printf("UI_SPOKEN_BOOK_SAVED complete 13 parts via real download button\n");
+		capture("spoken-book-saved");
+		theme_set_dark(false);
+		spoken_search(zvuk_screen, "fixture", NULL);
+		phase = 103;
+		break;
+	}
+	case 103: {
+		if (!spoken_wait_label(tr("spoken_podcast")))
+			return;
+		lv_obj_t *pill = find_label(lv_screen_active(), tr("spoken_podcast"));
+		lv_obj_scroll_to_view(lv_obj_get_parent(pill), LV_ANIM_OFF);
+		lv_obj_send_event(lv_obj_get_parent(pill), LV_EVENT_CLICKED, NULL);
+		phase = 104;
+		break;
+	}
+	case 104: {
+		if (!spoken_wait_label("Fixture Road"))
+			return;
+		assert(spoken_kind_labels(lv_screen_active(), tr("spoken_podcast")) >= 2);
+		capture("spoken-podcast-search-result");
+		lv_obj_t *title = find_label(lv_screen_active(), "Fixture Road");
+		lv_area_t box;
+		lv_obj_get_coords(title, &box);
+		input(box.x1 + 20, (box.y1 + box.y2) / 2, true);
+		input(box.x1 + 20, (box.y1 + box.y2) / 2, false);
+		phase = 4;
+		break;
+	}
+	case 4: {
+		if (!spoken_wait_label("Episode 338"))
+			return;
+		podcast_list = lv_screen_active();
+		lv_obj_t *kind = find_label(podcast_list, tr("spoken_podcast"));
+		assert(kind && visible(kind));
+		snprintf(count, sizeof(count), tr("spoken_episode_count"), 338);
+		assert(strstr(lv_label_get_text(kind), count));
+		assert(visible(find_label(podcast_list, "2026-10-17")));
+		assert(!visible(find_label(podcast_list, tr("spoken_download_book"))));
+		assert(!visible(find_label(podcast_list, tr("zvuk_save_album"))));
+		lv_obj_t *newest = find_label(podcast_list, "Episode 338");
+		lv_obj_t *previous = find_label(podcast_list, "Episode 337");
+		assert(newest && previous);
+		lv_area_t a, b;
+		lv_obj_get_coords(newest, &a);
+		lv_obj_get_coords(previous, &b);
+		assert(a.y1 < b.y1);
+		capture("spoken-podcast-338-newest");
+		hold_x = a.x1 + 20;
+		hold_y = (a.y1 + a.y2) / 2;
+		input(hold_x, hold_y, true);
+		phase++;
+		break;
+	}
+	case 5:
+		input(hold_x, hold_y, false);
+		assert(sx_sheet_is_open());
+		assert(visible(find_label(lv_layer_top(), tr("spoken_download_episode"))));
+		assert(!visible(find_label(lv_layer_top(), tr("spoken_download_book"))));
+		assert(!visible(find_label(lv_layer_top(), tr("zvuk_save_album"))));
+		capture("spoken-podcast-episode-menu");
+		sx_sheet_close();
+		phase++;
+		break;
+	case 6: {
+		lv_obj_t *label = find_label(podcast_list, "Episode 338");
+		lv_obj_t *scroll = lv_obj_get_parent(label);
+		while (scroll && lv_obj_get_scroll_bottom(scroll) < 1000)
+			scroll = lv_obj_get_parent(scroll);
+		assert(scroll);
+		lv_obj_scroll_to_y(scroll, lv_obj_get_scroll_y(scroll) + lv_obj_get_scroll_bottom(scroll), LV_ANIM_OFF);
+		phase++;
+		break;
+	}
+	case 7:
+		if (!spoken_wait_label("Episode 001"))
+			return;
+		capture("spoken-podcast-lazy-last-page");
+		assert(strcmp(config_get("yandex", "base_url", ""), "http://127.0.0.1:18770") == 0);
+		assert(yandex_configured() && yandex_logged_in() && yandex_screen);
+		theme_set_dark(true);
+		spoken_search(yandex_screen, "book", "audiobooks");
+		phase++;
+		break;
+	case 8: {
+		if (!spoken_wait_label("Симона де"))
+			return;
+		assert(visible(find_label(lv_screen_active(), tr("spoken_audiobook"))));
+		capture("yandex-spoken-book-search");
+		lv_obj_t *title = find_label(lv_screen_active(), "Симона де");
+		lv_area_t box;
+		lv_obj_get_coords(title, &box);
+		input(box.x1 + 20, (box.y1 + box.y2) / 2, true);
+		input(box.x1 + 20, (box.y1 + box.y2) / 2, false);
+		phase++;
+		break;
+	}
+	case 9: {
+		snprintf(count, sizeof(count), tr("spoken_chapter_count"), 13);
+		if (!spoken_wait_label(count))
+			return;
+		assert(visible(find_label(lv_screen_active(), tr("spoken_download_book"))));
+		assert(!visible(find_label(lv_screen_active(), tr("yandex_save_album"))));
+		capture("yandex-spoken-book-13-parts");
+		// The actual chapter title is long and LVGL truncates its displayed
+		// buffer; the first numbered row remains an unambiguous hold target.
+		lv_obj_t *first = spoken_exact_label(lv_screen_active(), "1");
+		assert(first);
+		lv_area_t box;
+		lv_obj_get_coords(first, &box);
+		hold_x = box.x1 + 20;
+		hold_y = (box.y1 + box.y2) / 2;
+		input(hold_x, hold_y, true);
+		phase++;
+		break;
+	}
+	case 10:
+		input(hold_x, hold_y, false);
+		assert(sx_sheet_is_open());
+		assert(visible(find_label(lv_layer_top(), tr("spoken_download_book"))));
+		assert(!visible(spoken_exact_label(lv_layer_top(), tr("yandex_save"))));
+		capture("yandex-spoken-chapter-menu-whole-book");
+		sx_sheet_close();
+		phase++;
+		break;
+	case 11: {
+		lv_obj_t *save = find_label(lv_screen_active(), tr("spoken_download_book"));
+		assert(save && visible(save));
+		lv_obj_send_event(lv_obj_get_parent(save), LV_EVENT_CLICKED, NULL);
+		download_wait = 0;
+		phase++;
+		break;
+	}
+	case 12: {
+		char path[512];
+		if (!yandexdl_audiobook_path("38681851", path, sizeof(path))) {
+			assert(++download_wait < 60);
+			return;
+		}
+		if (!spoken_check_local_book(path)) {
+			assert(++download_wait < 60);
+			return;
+		}
+		assert(strstr(path, "/yandex-38681851"));
+		printf("UI_SPOKEN_YANDEX_BOOK_SAVED complete 13 parts via real download button\n");
+		capture("yandex-spoken-book-saved");
+		theme_set_dark(false);
+		spoken_search(yandex_screen, "https://music.yandex.ru/album/11002256", NULL);
+		phase++;
+		break;
+	}
+	case 13: {
+		if (!spoken_wait_label("206: Последний кадр"))
+			return;
+		podcast_list = lv_screen_active();
+		snprintf(count, sizeof(count), tr("spoken_episode_count"), 299);
+		assert(visible(find_label(podcast_list, count)));
+		assert(visible(find_label(podcast_list, "2026-10-08")));
+		assert(!visible(find_label(podcast_list, tr("spoken_download_book"))));
+		assert(!visible(find_label(podcast_list, tr("yandex_save_album"))));
+		capture("yandex-spoken-podcast-299-newest");
+		lv_obj_t *first = find_label(podcast_list, "206: Последний кадр");
+		lv_area_t box;
+		lv_obj_get_coords(first, &box);
+		hold_x = box.x1 + 20;
+		hold_y = (box.y1 + box.y2) / 2;
+		input(hold_x, hold_y, true);
+		phase++;
+		break;
+	}
+	case 14:
+		input(hold_x, hold_y, false);
+		assert(sx_sheet_is_open());
+		assert(visible(find_label(lv_layer_top(), tr("spoken_download_episode"))));
+		assert(!visible(find_label(lv_layer_top(), tr("spoken_download_book"))));
+		assert(!visible(spoken_exact_label(lv_layer_top(), tr("yandex_save"))));
+		capture("yandex-spoken-episode-menu");
+		sx_sheet_close();
+		phase++;
+		break;
+	case 15: {
+		lv_obj_t *label = find_label(podcast_list, "206: Последний кадр");
+		lv_obj_t *scroll = lv_obj_get_parent(label);
+		while (scroll && lv_obj_get_scroll_bottom(scroll) < 1000)
+			scroll = lv_obj_get_parent(scroll);
+		assert(scroll);
+		lv_obj_scroll_to_y(scroll, lv_obj_get_scroll_y(scroll) + lv_obj_get_scroll_bottom(scroll), LV_ANIM_OFF);
+		phase++;
+		break;
+	}
+	case 16:
+		if (!spoken_wait_label("01: Миф"))
+			return;
+		capture("yandex-spoken-podcast-last-page");
+		printf("UI_TEST_PASS spoken: both providers, real book downloads, 338/299 episodes, dates and destination menus\n");
+		logging_flush();
+		exit(0);
+	}
+}
+
 static lv_obj_t *long_error;
 static lv_obj_t *expired_list;
 
@@ -660,6 +1054,10 @@ static void surface_states(void) {
 
 static void run(lv_timer_t *timer) {
 	(void)timer;
+	if (getenv("SONIX_UI_TEST_SPOKEN")) {
+		spoken_states();
+		return;
+	}
 	if (getenv("SONIX_UI_TEST_KEYBOARD_FIELDS_ONLY")) {
 		keyboard_field_states();
 		return;

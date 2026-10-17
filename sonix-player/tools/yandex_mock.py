@@ -54,12 +54,21 @@ wave_batch below) make batches smaller or larger, fail chosen requests with
 a 500, or forget the session after N batches (unknownSession), so the
 player's retries and its new session can be watched.
 
+Spoken GUI fixtures: album 38681851 is a complete 13-part audiobook;
+album 11002256 is a 299-episode podcast, newest first. Search "book" or
+"podcast" (or their Russian titles) returns the real typed sections. Every
+spoken item serves the existing t103.mp3 fixture; no service media is used.
+To skip sign-in, put yandex_session.ini beside the simulator config with
+access_token=mock-access-token, refresh_token=mock-refresh-token,
+expires_at=4102444800, uid=12345 and user=Test User on separate lines.
+
 YANDEX_MOCK_KBPS=N in the environment serves the audio at N KB/s, slow
 enough to watch a download in progress (the Wi-Fi keep-alive, the cache's
 "busy" state).
 """
 
 import base64
+from datetime import date, timedelta
 import hashlib
 import hmac
 import json
@@ -116,6 +125,53 @@ ALBUMS = {
 }
 
 
+# Typed spoken fixtures mirror the observed response shape, not real audio.
+# The book's trackCount=0 intentionally disagrees with its complete pager/list.
+BOOK_ID = "38681851"
+SHOW_ID = "11002256"
+BOOK_TITLE = "Симона де Бовуар. «Все люди смертны»"
+SHOW_TITLE = "У Холмов Есть Подкаст"
+SPOKEN_TRACKS = {}
+book_parts = []
+for i in range(13):
+    tid = str(144069784 + i)
+    item = track(tid, f"{BOOK_TITLE}. Часть {i + 1}", "Юлия Тархова", int(BOOK_ID), BOOK_TITLE, 30, i + 1)
+    item.update(type="audiobook", rememberPosition=True)
+    item["albums"][0].update(type="audiobook", metaType="podcast")
+    SPOKEN_TRACKS[tid] = item
+    book_parts.append(tid)
+show_episodes = []
+for i in range(299):
+    tid = "67125847" if i == 298 else str(156882082 - i)
+    title = "206: Последний кадр" if i == 0 else "01: Миф о Чарльзе Мэнсоне" if i == 298 else f"Выпуск {299 - i}"
+    item = track(tid, title, "Mock Podcast", int(SHOW_ID), SHOW_TITLE, 30, 299 - i)
+    item.update(type="podcast-episode", rememberPosition=True, podcastEpisodeType="full",
+                pubDate=(date(2026, 10, 8) - timedelta(days=i)).isoformat())
+    item["albums"][0].update(type="podcast", metaType="podcast")
+    SPOKEN_TRACKS[tid] = item
+    show_episodes.append(tid)
+ALBUMS[BOOK_ID] = {"id": int(BOOK_ID), "title": BOOK_TITLE, "type": "audiobook", "metaType": "podcast",
+                   "trackCount": 0, "artists": [{"id": 17818329, "name": "Юлия Тархова"}],
+                   "sortOrder": "asc", "pager": {"page": 0, "perPage": 13, "total": 13}, "volumes": [book_parts]}
+ALBUMS[SHOW_ID] = {"id": int(SHOW_ID), "title": SHOW_TITLE, "type": "podcast", "metaType": "podcast",
+                   "trackCount": 299, "artists": [], "sortOrder": "desc",
+                   "pager": {"page": 0, "perPage": 299, "total": 299}, "volumes": [show_episodes]}
+MP3_ONLY.update(SPOKEN_TRACKS)
+
+
+def spoken_search(text, host):
+    """Typed /search sections, isolated from the existing music fixtures."""
+    query = text.casefold().strip()
+    books = not query or query in {"book", "audiobook", "книга"} or query in BOOK_TITLE.casefold()
+    shows = not query or query in {"podcast", "подкаст"} or query in SHOW_TITLE.casefold()
+    ids = ([BOOK_ID] if books else []) + ([SHOW_ID] if shows else [])
+    albums = [dict(album_obj(aid), coverUri=f"http://{host}/cover/%%") for aid in ids]
+    episodes = [full_track(tid, host) for tid in show_episodes if shows or query in SPOKEN_TRACKS[tid]["title"].casefold()]
+    # Search itself is a bounded page, unlike a show's full with-tracks answer.
+    return {"podcasts": {"results": albums, "total": len(albums)},
+            "podcast_episodes": {"results": episodes[:20], "total": len(episodes)}}
+
+
 # My Wave hands out generated tracks, 3000 upwards, a batch at a time and
 # without end: each played from t105.m4a (30 s), so a test runs through
 # several batches in a few minutes. Their artists and albums rotate.
@@ -138,10 +194,10 @@ def gen_track(tid):
 
 
 def any_track(tid):
-    return TRACKS.get(str(tid)) or gen_track(tid)
+    return SPOKEN_TRACKS.get(str(tid)) or TRACKS.get(str(tid)) or gen_track(tid)
 
 
-def full_track(tid):
+def full_track(tid, host=None):
     """A track as /tracks really answers: the fields the player reads and the
     many it does not (a real object is one to three kilobytes), so that what
     a list of them costs the player can be measured."""
@@ -149,6 +205,11 @@ def full_track(tid):
     if not t:
         return None
     t = json.loads(json.dumps(t))
+    if str(tid) in SPOKEN_TRACKS:
+        if host:
+            t["coverUri"] = f"http://{host}/cover/%%"
+            t["albums"][0]["coverUri"] = t["coverUri"]
+        return t
     n = int(t["id"])
     album = t["albums"][0]
     album.update({"coverUri": f"avatars.yandex.net/get-music-content/{n % 97}/{n:08x}.a.{album['id']}-1/%%",
@@ -323,7 +384,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"error": {"name": "not-found"}}, 404)
             host = self.headers.get("Host")
             result = dict(album, coverUri=f"http://{host}/cover/%%",
-                          volumes=[[TRACKS[t] for t in v] for v in album["volumes"]])
+                          volumes=[[full_track(t, host) if t in SPOKEN_TRACKS else TRACKS[t] for t in v] for v in album["volumes"]])
             return self.send_json({"result": result})
 
         if p == f"/users/{UID}/likes/artists":
@@ -374,6 +435,7 @@ class Handler(BaseHTTPRequestHandler):
                 "albums": {"results": [{"id": 11, "title": "Mock Album", "year": 2024, "trackCount": 2, "artists": [{"name": "Mock Artist"}]},
                                        {"id": 12, "title": "Second Album", "year": 2025, "trackCount": 3, "artists": [{"name": "Mock Artist"}]}]},
                 "artists": {"results": [{"id": 7, "name": "Mock Artist"}]},
+                **spoken_search(text, self.headers.get("Host")),
             }})
         if p == "/get-file-info":
             return self.file_info(q)
@@ -535,7 +597,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json({"result": "ok"})
         if p == "/tracks":
             ids = body.get("track-ids", "").split(",")
-            found = [full_track(i.split(":")[0]) for i in ids]
+            found = [full_track(i.split(":")[0], self.headers.get("Host")) for i in ids]
             sys.stderr.write(f"mock: TRACKS {len(ids)} asked, from {ids[0] if ids else '-'}\n")
             return self.send_json({"result": [t for t in found if t]})
         if p == "/rotor/session/new":

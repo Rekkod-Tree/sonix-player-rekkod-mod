@@ -77,6 +77,16 @@ A CUE referencing a converted WAV can find a neighboring FLAC, WavPack or APE.
 
 ## Streaming
 
+- **Offline spoken audio** - Yandex Music audiobooks and Zvuk books download
+  into the configured Audiobooks folder as complete, ordered books. A book is
+  published only after every chapter and its required metadata are present;
+  a failed download leaves no partial book in the shelf. The local library
+  keeps chapter position, bookmarks and finished state across rescans.
+- **Service podcasts** - podcast shows use album-style lists with a Podcast
+  badge. Episodes can be saved individually into `Podcast/`, with service IDs
+  separating equal titles. Local listening progress survives repeat downloads
+  and filename changes. An entire podcast archive is never downloaded by a
+  show-level action; streaming progress is not yet shared with local progress.
 - **Lazy queue metadata** - Yandex Music and Zvuk resolve the playing track,
   Up next and queue labels from loaded service details before the audio file
   exists. Missing current/next details are fetched in the background; late

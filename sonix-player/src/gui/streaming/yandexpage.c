@@ -16,24 +16,25 @@
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/spinner.h"
 #include "src/gui/shell/switcher.h"
-#include "src/gui/shell/theme.h"
-#include "src/gui/shell/toast.h"
 #include "src/gui/shell/sx_card.h"
 #include "src/gui/shell/sx_row.h"
 #include "src/gui/shell/sx_sheet.h"
 #include "src/gui/shell/sx_styles.h"
 #include "src/gui/shell/sx_tokens.h"
+#include "src/gui/shell/theme.h"
+#include "src/gui/shell/toast.h"
 #include "src/gui/streaming/streamerror.h"
-#include "src/gui/streaming/svclist.h"
 #include "src/gui/streaming/streamrowart.h"
+#include "src/gui/streaming/svclist.h"
 #include "src/gui/streaming/svcui.h"
 #include "src/system/core/lang.h"
 #include "src/system/decode/growfile.h"
 #include "src/system/device/system.h"
 #include "src/system/library/library.h"
-#include "src/system/playback/device_state.h"
 #include "src/system/net/http.h"
+#include "src/system/playback/device_state.h"
 #include "src/system/playback/playlist.h"
+#include "src/system/streaming/podcaststate.h"
 #include "src/system/streaming/provider.h"
 #include "src/system/streaming/streamturn.h"
 #include "src/system/streaming/yandex.h"
@@ -86,6 +87,8 @@ typedef enum {
 	JOB_ALBUM,
 	JOB_ARTIST,
 	JOB_SEARCH,
+	JOB_SEARCH_BOOKS,
+	JOB_SEARCH_PODCASTS,
 	JOB_WAVE,
 	// The rest of the collection, and what the service puts forward.
 	JOB_LIKED_ARTISTS,
@@ -140,6 +143,8 @@ typedef struct {
 	// details by the page. NULL for the other lists, whose rows follow.
 	yandexlist_t *list;
 	int count;
+	yandex_content_t content_type;
+	char album_title[YANDEX_TITLE_MAX];
 	row_t rows[]; // `count` of them
 } job_result_t;
 
@@ -167,12 +172,15 @@ static job_kind_t list_kind;
 // The album a JOB_ALBUM list shows, for its "Save album" button.
 static char list_album_id[YANDEX_ID_MAX];
 static char list_album_title[YANDEX_TITLE_MAX];
+static yandex_content_t list_content_type;
 // An artist's page: its Like button, and which artist.
 static lv_obj_t *artist_bar, *artist_like_label;
 static char list_artist_id[YANDEX_ID_MAX];
 static gui_config_t *list_cfg;
 // search
 static lv_obj_t *search_field;
+static lv_obj_t *search_pills[3];
+static int search_mode;
 
 // The answer on screen (GUI thread), which owns its rows or its list. NULL
 // before the first list.
@@ -188,6 +196,8 @@ static int result_count;
 static yandexlist_t *result_list;
 static char result_error[256];
 static stream_err_t result_class;
+static yandex_content_t result_content_type;
+static char result_album_title[YANDEX_TITLE_MAX];
 
 // Worker. Three kinds of work, each with its own place, so that none can
 // push another out:
@@ -339,10 +349,16 @@ static void run_list_job(const job_t *job) {
 		result_list = yandexlist_new();
 		got = list_from_refs(result_list ? yandex_playlist_ids(job->a, job->b, add_ref_cb, result_list) : -1, "playlist");
 		break;
-	case JOB_ALBUM:
-		ensure_collection(); // the album's Like in its menu
-		got = list_from_tracks(tmp, yandex_album_tracks(job->a, tmp, MAX_ROWS * 2));
+	case JOB_ALBUM: {
+		yandex_album_meta_t meta = {0};
+		int count = yandex_album_view(job->a, tmp, MAX_ROWS * 2, &meta);
+		if (count >= 0 && meta.content_type != YANDEX_CONTENT_AUDIOBOOK && meta.content_type != YANDEX_CONTENT_PODCAST)
+			ensure_collection(); // The music album's Like in its menu.
+		result_content_type = meta.content_type;
+		snprintf(result_album_title, sizeof(result_album_title), "%s", meta.title);
+		got = list_from_tracks(tmp, count);
 		break;
+	}
 	case JOB_WAVE:
 		got = list_from_tracks(tmp, yandex_wave_start(NULL, 0, tmp, MAX_ROWS));
 		break;
@@ -412,13 +428,23 @@ static void run_list_job(const job_t *job) {
 		got = nt < 0 && na < 0 ? -1 : result_count;
 		break;
 	}
-	case JOB_SEARCH: {
+	case JOB_SEARCH:
+	case JOB_SEARCH_BOOKS:
+	case JOB_SEARCH_PODCASTS: {
 		// Artists first, then albums, then tracks: one list, short of each.
-		ensure_collection();
+		if (job->kind == JOB_SEARCH)
+			ensure_collection();
 		yandex_artist_t ar[5];
 		yandex_album_t al[10];
 		int nr = 5, na = 10, nt = 40;
-		int n = yandex_search(job->a, ar, &nr, al, &na, tmp, &nt) ? 0 : -1;
+		bool ok;
+		if (job->kind == JOB_SEARCH) {
+			ok = yandex_search(job->a, ar, &nr, al, &na, tmp, &nt);
+		} else {
+			nr = 0;
+			ok = yandex_search_spoken(job->a, job->kind == JOB_SEARCH_BOOKS ? YANDEX_CONTENT_AUDIOBOOK : YANDEX_CONTENT_PODCAST, al, &na, tmp, &nt);
+		}
+		int n = ok ? 0 : -1;
 		for (int i = 0; n == 0 && i < nr; i++) {
 			result[result_count].kind = ROW_ARTIST;
 			result[result_count++].u.artist = ar[i];
@@ -474,6 +500,8 @@ static job_result_t *job_result_new(const job_t *job, int count) {
 	r->error_class = result_class;
 	r->count = count;
 	r->list = result_list;
+	r->content_type = result_content_type;
+	snprintf(r->album_title, sizeof(r->album_title), "%s", result_album_title);
 	result_list = NULL;
 	if (count > 0) {
 		memcpy(r->rows, result, (size_t)count * sizeof(row_t));
@@ -519,6 +547,8 @@ static void *worker_main(void *arg) {
 		streamerr_begin();
 		result_count = 0;
 		result_list = NULL;
+		result_content_type = YANDEX_CONTENT_UNKNOWN;
+		result_album_title[0] = '\0';
 		switch (job.kind) {
 		case JOB_LOGIN_BEGIN:
 			login_state = yandex_login_begin(&login) ? YANDEX_LOGIN_PENDING : YANDEX_LOGIN_ERROR;
@@ -721,9 +751,13 @@ static bool view_row(int index, row_t *out) {
 // there -- they are on the card.
 static bool row_saved(const row_t *r) {
 	if (r->kind == ROW_TRACK) {
+		if (r->u.track.content_type == YANDEX_CONTENT_AUDIOBOOK || r->u.track.content_type == YANDEX_CONTENT_EPISODE)
+			return false;
 		return r->u.track.id[0] && yandexsaved_has(r->u.track.id);
 	}
 	if (r->kind == ROW_ALBUM && r->u.album.id[0] && r->u.album.track_count > 0) {
+		if (r->u.album.content_type == YANDEX_CONTENT_AUDIOBOOK || r->u.album.content_type == YANDEX_CONTENT_PODCAST)
+			return false;
 		return yandexsaved_album_count(r->u.album.id) >= r->u.album.track_count;
 	}
 	return false;
@@ -837,10 +871,19 @@ static void list_bind(lv_obj_t *row, int index) {
 	case ROW_TRACK: {
 		char length[16];
 		length_text(r.u.track.duration, length, sizeof(length));
-		sx_row_set_subtitle(row, r.u.track.artist, row_saved(&r) ? tr("svc_badge_saved") : NULL, length);
+		char date[11];
+		snprintf(date, sizeof(date), "%.10s", r.u.track.pub_date);
+		const char *badge = row_saved(&r) ? tr("svc_badge_saved") : NULL;
+		if (list_kind != JOB_ALBUM) {
+			if (r.u.track.content_type == YANDEX_CONTENT_EPISODE)
+				badge = tr("spoken_podcast");
+			else if (r.u.track.content_type == YANDEX_CONTENT_AUDIOBOOK)
+				badge = tr("spoken_audiobook");
+		}
+		sx_row_set_subtitle(row, r.u.track.content_type == YANDEX_CONTENT_EPISODE && date[0] ? date : r.u.track.artist, badge, length);
 		// On an album's page its tracks are numbered, as the Library's album
 		// page; elsewhere the plaque in the album's tone.
-		if ((list_kind == JOB_ALBUM || list_kind == JOB_SAVED_ALBUM) && r.u.track.track_number > 0) {
+		if ((list_kind == JOB_ALBUM || list_kind == JOB_SAVED_ALBUM) && list_content_type != YANDEX_CONTENT_PODCAST && r.u.track.track_number > 0) {
 			streamrowart_forget(row);
 			sx_row_set_number(row, r.u.track.track_number);
 		} else {
@@ -857,10 +900,10 @@ static void list_bind(lv_obj_t *row, int index) {
 		break;
 	}
 	case ROW_ALBUM:
-		sx_row_set_subtitle(row, detail, row_saved(&r) ? tr("svc_badge_saved") : NULL, NULL);
+		sx_row_set_subtitle(row, detail, r.u.album.content_type == YANDEX_CONTENT_AUDIOBOOK ? tr("spoken_audiobook") : r.u.album.content_type == YANDEX_CONTENT_PODCAST ? tr("spoken_podcast") : row_saved(&r) ? tr("svc_badge_saved") : NULL, NULL);
 		list_art(row, index, r.u.album.cover, svcui_tone(r.u.album.title));
 		sx_row_set_trail(row, SX_ROW_TRAIL_CHEVRON);
-		sx_row_set_swipes(row, true, true);
+		sx_row_set_swipes(row, r.u.album.content_type != YANDEX_CONTENT_AUDIOBOOK && r.u.album.content_type != YANDEX_CONTENT_PODCAST, r.u.album.content_type != YANDEX_CONTENT_AUDIOBOOK && r.u.album.content_type != YANDEX_CONTENT_PODCAST);
 		break;
 	case ROW_ARTIST:
 		streamrowart_forget(row);
@@ -939,6 +982,17 @@ static void update_album_bar(void) {
 	if (lv_obj_is_hidden(album_bar)) {
 		return;
 	}
+	if (list_content_type == YANDEX_CONTENT_AUDIOBOOK || list_content_type == YANDEX_CONTENT_PODCAST) {
+		bool book = list_content_type == YANDEX_CONTENT_AUDIOBOOK;
+		lv_obj_set_hidden(album_state, false);
+		lv_obj_set_hidden(album_tick, true);
+		lv_label_set_text_fmt(album_state_label, tr(book ? "spoken_chapter_count" : "spoken_episode_count"), view_count());
+		lv_label_set_text(album_btn_label, tr("spoken_download_book"));
+		lv_obj_set_hidden(lv_obj_get_parent(album_btn_label), !book);
+		return;
+	}
+	lv_obj_set_hidden(album_tick, false);
+	lv_obj_set_hidden(lv_obj_get_parent(album_btn_label), false);
 	int saved, playable;
 	album_saved_counts(&saved, &playable);
 	bool complete = playable > 0 && saved == playable;
@@ -986,6 +1040,13 @@ static void list_art_hidden_cb(lv_event_t *e) {
 }
 
 static void fill_list(void) {
+	if (shown && shown->kind == JOB_ALBUM) {
+		list_content_type = shown->content_type;
+		if (shown->album_title[0]) {
+			snprintf(list_album_title, sizeof(list_album_title), "%s", shown->album_title);
+			lv_label_set_text(list_title, shown->album_title);
+		}
+	}
 	int count = view_count();
 	playing_update();
 	svclist_set_count(list, count, false);
@@ -1123,6 +1184,7 @@ static void show_list(const list_step_t *step) {
 	job_kind_t kind = step->kind;
 	const char *title = step->title, *a = step->a, *b = step->b;
 	list_kind = kind;
+	list_content_type = YANDEX_CONTENT_UNKNOWN;
 	lv_label_set_text(list_title, title);
 	list_is_wave = kind == JOB_WAVE;
 	bool is_album = (kind == JOB_ALBUM || kind == JOB_SAVED_ALBUM) && a[0];
@@ -1173,6 +1235,16 @@ static void retry_list(void) {
 static void play_rows(int tapped) {
 	row_t r;
 	bool have = view_row(tapped, &r);
+	if (have && r.kind == ROW_TRACK && r.u.track.content_type == YANDEX_CONTENT_EPISODE) {
+		char local[512];
+		if (yandexdl_local_episode(&r.u.track, local, sizeof(local))) {
+			const char *paths[] = {local};
+			double resume = podcaststate_resume_point(local);
+			device_state_play_list_ordered_at(paths, 1, 0, resume > 0 ? resume : -1.0);
+			player_sheet_open(false);
+			return;
+		}
+	}
 	if (have && r.kind == ROW_TRACK && !r.u.track.available) {
 		toast_error(tr("yandex_no_file"));
 		return;
@@ -1450,7 +1522,8 @@ static void save_refused(void) { toast_error(tr("yandex_save_refused")); }
 static void do_row_save(void *user) {
 	(void)user;
 	if (menu_row.kind == ROW_ALBUM) {
-		if (!yandexdl_album(menu_row.u.album.id, menu_row.u.album.title)) {
+		bool ok = menu_row.u.album.content_type == YANDEX_CONTENT_AUDIOBOOK ? yandexdl_audiobook(menu_row.u.album.id, menu_row.u.album.title) : yandexdl_album(menu_row.u.album.id, menu_row.u.album.title);
+		if (!ok) {
 			save_refused();
 		}
 	} else if (!yandexdl_track(&menu_row.u.track)) {
@@ -1520,8 +1593,11 @@ static void list_hold(lv_obj_t *row, void *user) {
 	// On the card: the save is done, said with a tick, and the way to undo it
 	// is offered instead. Part of an album on the card: both.
 	bool saved = row_saved(&menu_row);
-	bool some = saved || (menu_row.kind == ROW_ALBUM && yandexsaved_album_count(menu_row.u.album.id) > 0);
+	bool spoken_album = menu_row.kind == ROW_ALBUM && (menu_row.u.album.content_type == YANDEX_CONTENT_AUDIOBOOK || menu_row.u.album.content_type == YANDEX_CONTENT_PODCAST);
+	bool some = saved || (!spoken_album && menu_row.kind == ROW_ALBUM && yandexsaved_album_count(menu_row.u.album.id) > 0);
 	bool queueable = (menu_row.kind == ROW_TRACK && menu_row.u.track.available) || menu_row.kind == ROW_ALBUM;
+	if (spoken_album)
+		queueable = false;
 	if (queueable) {
 		items[n++] = (sx_sheet_item_t){.label = tr("queue_play_next"), .icon = &icon_list_start, .action = do_row_queue, .user = (void *)(intptr_t)PLAYLIST_QUEUE_NEXT};
 		items[n++] = (sx_sheet_item_t){.label = tr("queue_add_to_end"), .icon = &icon_list_plus_small, .action = do_row_queue, .user = (void *)(intptr_t)PLAYLIST_QUEUE_END};
@@ -1535,15 +1611,18 @@ static void list_hold(lv_obj_t *row, void *user) {
 		if (saved) {
 			items[n++] = (sx_sheet_item_t){.label = tr("yandex_saved_on_card"), .checked = true};
 		} else if (menu_row.u.track.available) {
-			items[n++] = (sx_sheet_item_t){.label = tr("yandex_save"), .icon = &icon_download, .action = do_row_save};
+			const char *key = menu_row.u.track.content_type == YANDEX_CONTENT_AUDIOBOOK ? "spoken_download_book" : menu_row.u.track.content_type == YANDEX_CONTENT_EPISODE ? "spoken_download_episode" : "yandex_save";
+			items[n++] = (sx_sheet_item_t){.label = tr(key), .icon = &icon_download, .action = do_row_save};
 		}
 	} else if (menu_row.kind == ROW_ALBUM) {
-		bool liked = yandex_album_liked(menu_row.u.album.id);
-		items[n++] = (sx_sheet_item_t){.label = tr(liked ? "yandex_unlike" : "yandex_like"), .icon = liked ? &icon_star_filled : &icon_star, .action = do_album_like, .user = liked ? NULL : (void *)1};
+		if (!spoken_album) {
+			bool liked = yandex_album_liked(menu_row.u.album.id);
+			items[n++] = (sx_sheet_item_t){.label = tr(liked ? "yandex_unlike" : "yandex_like"), .icon = liked ? &icon_star_filled : &icon_star, .action = do_album_like, .user = liked ? NULL : (void *)1};
+		}
 		if (saved) {
 			items[n++] = (sx_sheet_item_t){.label = tr("yandex_saved_on_card"), .checked = true};
-		} else {
-			items[n++] = (sx_sheet_item_t){.label = tr("yandex_save_album"), .icon = &icon_download, .action = do_row_save};
+		} else if (menu_row.u.album.content_type != YANDEX_CONTENT_PODCAST) {
+			items[n++] = (sx_sheet_item_t){.label = tr(spoken_album ? "spoken_download_book" : "yandex_save_album"), .icon = &icon_download, .action = do_row_save};
 		}
 	} else if (menu_row.kind == ROW_ARTIST) {
 		bool liked = yandex_artist_liked(menu_row.u.artist.id);
@@ -1609,6 +1688,13 @@ static void album_save_cb(lv_event_t *e) {
 	if (switcher_back_drag_active()) {
 		return;
 	}
+	if (list_content_type == YANDEX_CONTENT_AUDIOBOOK) {
+		if (!yandexdl_audiobook(list_album_id, list_album_title))
+			save_refused();
+		return;
+	}
+	if (list_content_type == YANDEX_CONTENT_PODCAST)
+		return;
 	int saved, playable;
 	album_saved_counts(&saved, &playable);
 	if (playable > 0 && saved == playable) {
@@ -1873,11 +1959,25 @@ static void build_login_page(gui_config_t *cfg) {
 // search
 // ---------------------------------------------------------------------------
 
+static void search_mode_cb(lv_event_t *event) {
+	if (switcher_back_drag_active())
+		return;
+	search_mode = (int)(intptr_t)lv_event_get_user_data(event);
+	for (int i = 0; i < 3; i++)
+		sx_pill_set_active(search_pills[i], i == search_mode);
+	lv_textarea_set_placeholder_text(search_field, tr(search_mode == 1 ? "spoken_book_search_hint" : search_mode == 2 ? "spoken_podcast_search_hint" : "artist_album_or_track"));
+}
+
 static void search_accept_cb(lv_event_t *e) {
 	(void)e;
 	const char *text = lv_textarea_get_text(search_field);
 	if (text && text[0]) {
-		open_list(text, JOB_SEARCH, text, NULL);
+		char album_id[YANDEX_ID_MAX];
+		if (yandex_album_link_id(text, album_id, sizeof(album_id))) {
+			open_list(tr("loading"), JOB_ALBUM, album_id, NULL);
+			return;
+		}
+		open_list(text, search_mode == 1 ? JOB_SEARCH_BOOKS : search_mode == 2 ? JOB_SEARCH_PODCASTS : JOB_SEARCH, text, NULL);
 	}
 }
 
@@ -1902,6 +2002,14 @@ static void build_search_page(gui_config_t *cfg) {
 	lv_obj_set_style_pad_hor(search_field, SX_CARD_PAD_H, 0);
 	lv_obj_set_style_text_font(search_field, &font_ui_24, 0);
 	keyboard_style_caret(search_field);
+	lv_obj_t *modes = sx_card_pills(search_screen);
+	lv_obj_set_width(modes, cfg->screen_width - 2 * SX_BODY_PAD_L);
+	lv_obj_set_pos(modes, SX_BODY_PAD_L, top + 72);
+	const char *keys[] = {"music", "audiobooks", "podcasts"};
+	for (int i = 0; i < 3; i++) {
+		search_pills[i] = sx_pill(modes, tr(keys[i]), i, search_mode_cb);
+		sx_pill_set_active(search_pills[i], i == search_mode);
+	}
 	keyboard_create(search_screen, cfg->screen_width, 316, search_field, NULL, "ok", search_accept_cb, NULL);
 	switcher_attach_back_gesture(search_screen);
 }
@@ -2104,6 +2212,7 @@ typedef struct {
 	int count;
 	char text[400];
 } save_note_t;
+static bool batch_spoken_notice;
 
 static void save_note_async(void *user) {
 	save_note_t *note = user;
@@ -2121,16 +2230,26 @@ static void save_note_async(void *user) {
 		refresh_marks();
 		update_album_bar();
 		break;
+	case YANDEXDL_BOOK_SAVED:
+		batch_spoken_notice = true;
+		toast_success(tr("spoken_book_saved"));
+		break;
+	case YANDEXDL_EPISODE_SAVED:
+		batch_spoken_notice = true;
+		toast_success(tr("spoken_episode_saved"));
+		break;
 	case YANDEXDL_FAILED:
 		toast_error(note->text);
 		break;
 	case YANDEXDL_FINISHED:
-		if (note->count > 0) {
+		if (note->count > 0 && !batch_spoken_notice && note->text[0]) {
 			snprintf(line, sizeof(line), tr("yandex_saved_to"), note->text, note->count);
 			toast_success(line);
 		}
+		batch_spoken_notice = false;
 		break;
 	case YANDEXDL_STOPPED:
+		batch_spoken_notice = false;
 		toast_plain(note->text);
 		break;
 	}

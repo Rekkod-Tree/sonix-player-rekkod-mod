@@ -82,6 +82,8 @@ static volatile bool scan_running;
 static volatile bool scan_cancel;
 static volatile int scan_found;
 static char scan_root[512];
+static pthread_mutex_t scan_request_lock = PTHREAD_MUTEX_INITIALIZER;
+static char scan_pending[512];
 
 // For statements that are expected to fail once the schema is already right:
 // the ALTER TABLEs below run on every open and say "duplicate column name" on
@@ -1537,6 +1539,41 @@ static bool named_like(const char *rel, const char *stem, const char *title) {
 // A book in one file, in the folder `rel` under the Audiobooks folder. `alone`
 // says it is the only thing in that folder, which is then its own folder when
 // it is named like it, and the folders above it are its author and series.
+static bool imported_book_folder(const char *dir) {
+	char path[1024], line[32];
+	if (snprintf(path, sizeof(path), "%s/.sonix-book", dir) >= (int)sizeof(path))
+		return false;
+	FILE *f = fopen(path, "r");
+	if (!f)
+		return false;
+	bool imported = fgets(line, sizeof(line), f) && strcmp(line, "SONIX-BOOK-1\n") == 0;
+	fclose(f);
+	return imported;
+}
+
+// Imported parts always have explicit sidecars. Read the author field there
+// even when empty: the general metadata overlay ignores empty values and can
+// otherwise retain an ambiguous service credit from the embedded tags.
+static void imported_author(const char *dir, const char *file, book_t *book) {
+	if (!imported_book_folder(dir))
+		return;
+	book->author[0] = '\0';
+	char path[1024], line[512];
+	if (snprintf(path, sizeof(path), "%s.tags", file) >= (int)sizeof(path))
+		return;
+	FILE *f = fopen(path, "r");
+	if (!f)
+		return;
+	while (fgets(line, sizeof(line), f)) {
+		if (strncmp(line, "album_artist=", 13) == 0) {
+			line[strcspn(line, "\r\n")] = '\0';
+			snprintf(book->author, sizeof(book->author), "%.255s", line + 13);
+			break;
+		}
+	}
+	fclose(f);
+}
+
 static void index_single(const char *path, const char *name, const char *rel, bool alone) {
 	struct stat st;
 	if (stat(path, &st) != 0) {
@@ -1570,6 +1607,12 @@ static void index_single(const char *path, const char *name, const char *rel, bo
 		snprintf(above, sizeof(above), "%s", rel);
 	}
 	fill_from_folders(b, above);
+	char source_dir[768];
+	snprintf(source_dir, sizeof(source_dir), "%s", path);
+	char *source_slash = strrchr(source_dir, '/');
+	if (source_slash)
+		*source_slash = '\0';
+	imported_author(source_dir, path, b);
 	if (b->series[0] && b->series_part < 0) {
 		b->series_part = series_number(stem, true, b->series);
 		if (b->series_part < 0) {
@@ -1656,6 +1699,8 @@ static void index_folder(const char *dir, const char *key, const namelist_t *par
 		snprintf(above, sizeof(above), "%s", relative(dir));
 	}
 	fill_from_folders(b, above);
+	if (parts->count > 0)
+		imported_author(dir, parts->items[0], b);
 	if (b->series[0] && b->series_part < 0) {
 		char stem[256] = "";
 		if (parts->count > 0) {
@@ -1684,6 +1729,7 @@ static void index_folder(const char *dir, const char *key, const namelist_t *par
 // paths, and says how many single-file books sit beside them.
 static int collect(const char *dir, const namelist_t *files, namelist_t *parts, namelist_t *singles) {
 	int books = 0;
+	bool imported = imported_book_folder(dir);
 	for (int i = 0; i < files->count && !scan_cancel; i++) {
 		const char *name = files->items[i];
 		if (!is_audio(name)) {
@@ -1693,7 +1739,7 @@ static int collect(const char *dir, const namelist_t *files, namelist_t *parts, 
 		if (snprintf(path, sizeof(path), "%s/%s", dir, name) >= (int)sizeof(path)) {
 			continue;
 		}
-		if (is_book_file(path, name)) {
+		if (!imported && is_book_file(path, name)) {
 			if (singles) {
 				namelist_add(singles, path);
 			}
@@ -1837,6 +1883,7 @@ static void *scan_thread_func(void *arg) {
 	(void)arg;
 	thread_be_background("audiobook scan");
 
+again:
 	printf("audiobooks: scanning %s\n", scan_root);
 
 	pthread_mutex_lock(&db_lock);
@@ -1874,12 +1921,24 @@ static void *scan_thread_func(void *arg) {
 	pthread_mutex_unlock(&db_lock);
 
 	printf("audiobooks: scan finished, %d books%s\n", scan_found, scan_cancel ? " (stopped early)" : "");
+	pthread_mutex_lock(&scan_request_lock);
+	if (!scan_cancel && scan_pending[0]) {
+		snprintf(scan_root, sizeof(scan_root), "%s", scan_pending);
+		scan_pending[0] = '\0';
+		scan_found = 0;
+		pthread_mutex_unlock(&scan_request_lock);
+		goto again;
+	}
+	scan_pending[0] = '\0';
 	scan_running = false;
+	pthread_mutex_unlock(&scan_request_lock);
 	return NULL;
 }
 
 bool audiobookdb_scan_start(const char *root) {
+	pthread_mutex_lock(&scan_request_lock);
 	if (!db || scan_running || !root || !root[0]) {
+		pthread_mutex_unlock(&scan_request_lock);
 		return false;
 	}
 
@@ -1891,11 +1950,31 @@ bool audiobookdb_scan_start(const char *root) {
 	if (pthread_create(&scan_thread, NULL, scan_thread_func, NULL) != 0) {
 		scan_running = false;
 		fprintf(stderr, "audiobooks: could not start the scan thread\n");
+		pthread_mutex_unlock(&scan_request_lock);
 		return false;
 	}
 
 	pthread_detach(scan_thread);
+	pthread_mutex_unlock(&scan_request_lock);
 	return true;
+}
+
+void audiobookdb_request_scan(const char *root) {
+	if (!root || !root[0] || strlen(root) >= sizeof(scan_pending))
+		return;
+	pthread_mutex_lock(&scan_request_lock);
+	if (scan_running) {
+		snprintf(scan_pending, sizeof(scan_pending), "%s", root);
+		pthread_mutex_unlock(&scan_request_lock);
+		return;
+	}
+	pthread_mutex_unlock(&scan_request_lock);
+	if (!audiobookdb_scan_start(root)) {
+		pthread_mutex_lock(&scan_request_lock);
+		if (scan_running)
+			snprintf(scan_pending, sizeof(scan_pending), "%s", root);
+		pthread_mutex_unlock(&scan_request_lock);
+	}
 }
 
 bool audiobookdb_scan_running(void) { return scan_running; }
@@ -1903,7 +1982,9 @@ bool audiobookdb_scan_running(void) { return scan_running; }
 int audiobookdb_scan_found(void) { return scan_found; }
 
 void audiobookdb_scan_stop(void) {
-	if (scan_running) {
+	pthread_mutex_lock(&scan_request_lock);
+	scan_pending[0] = '\0';
+	if (scan_running)
 		scan_cancel = true;
-	}
+	pthread_mutex_unlock(&scan_request_lock);
 }

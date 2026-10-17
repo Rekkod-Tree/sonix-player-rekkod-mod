@@ -27,6 +27,8 @@
 // and so the library -- applies over its own (metadata.c); 1.2.4 wrote one
 // for every MP4, and those are still read. Every saved track goes into the
 // index of saved tracks (yandexsaved.h), which the Yandex pages play from.
+// Explicitly typed audiobooks instead publish a complete local book under
+// Audiobooks; podcast episodes use Podcast. Neither changes the Music index.
 //
 // One file at a time, on a thread of its own at low priority, started on the
 // first request: nothing runs, and nothing is allocated, until something is
@@ -45,6 +47,16 @@
 bool yandexdl_track(const yandex_track_t *track);
 // Queues a whole album: its track list is asked for on the worker.
 bool yandexdl_album(const char *album_id, const char *title);
+// Complete book to the configured Audiobooks folder, one queued job. Available
+// without a session when its complete local publication is already present.
+// Generic track/album jobs also route confirmed audiobooks here on the worker.
+#define YANDEXDL_BOOK_MAX_PARTS 300
+bool yandexdl_audiobook(const char *album_id, const char *title);
+// Worker only: checks the complete on-card publication, never talks to a service.
+bool yandexdl_audiobook_path(const char *album_id, char *out, size_t size);
+// Local episode lookup for an explicit play action, never a row-bind loop.
+// No network/session; requires the matching provider namespace sidecar.
+bool yandexdl_local_episode(const yandex_track_t *episode, char *out, size_t size);
 
 typedef struct {
 	bool active;	// something is queued or downloading
@@ -58,11 +70,13 @@ void yandexdl_status(yandexdl_status_t *out);
 bool yandexdl_busy(void);
 
 typedef enum {
-	YANDEXDL_QUEUED,   // `count` more to save
-	YANDEXDL_SAVED,	   // one track is on the card (or already was): `text` its id
-	YANDEXDL_FAILED,   // `text`: "<title>: <reason>"
-	YANDEXDL_FINISHED, // the queue emptied: `count` saved, `text` the folder
-	YANDEXDL_STOPPED,  // dropped (no card, signed out): `text` why
+	YANDEXDL_QUEUED,		// `count` more to save
+	YANDEXDL_EPISODE_SAVED, // count=1 episode; text=permanent local file
+	YANDEXDL_BOOK_SAVED,	// count=1 book; text=local audiobook key (file or folder)
+	YANDEXDL_SAVED,			// one track is on the card (or already was): `text` its id
+	YANDEXDL_FAILED,		// `text`: "<title>: <reason>"
+	YANDEXDL_FINISHED,		// the queue emptied: count saved items; text=folder, empty for mixed destinations
+	YANDEXDL_STOPPED,		// dropped (no card, signed out): `text` why
 } yandexdl_event_t;
 void yandexdl_set_listener(void (*listener)(yandexdl_event_t event, int count, const char *text));
 

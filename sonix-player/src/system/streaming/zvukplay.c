@@ -246,7 +246,8 @@ static bool fetch_track(const zvuk_track_t *t, char *path, size_t size, char *er
 		return true;
 	}
 	zvuk_stream_t stream;
-	if (!zvuk_stream(t->id, &stream)) {
+	bool ready = t->content == ZVUK_CONTENT_TRACK ? zvuk_stream(t->id, &stream) : zvuk_spoken_stream(t->id, &stream);
+	if (!ready) {
 		streamerr_describe("zvuk", zvuk_last_error(), error, error_size);
 		return false;
 	}
@@ -456,7 +457,12 @@ static void play_queue_from(int start, const char *start_path) {
 		for (int i = 0; i < count; i++) {
 			ptrs[i] = names + offsets[i];
 		}
-		device_state_play_list(ptrs, count, start);
+		zvuk_track_t first;
+		bool ordered = zvuklist_is_episodes(q) || (zvuklist_track(q, start, &first) && first.content != ZVUK_CONTENT_TRACK);
+		if (ordered)
+			device_state_play_list_ordered(ptrs, count, start);
+		else
+			device_state_play_list(ptrs, count, start);
 		note_own_change(true);
 		claim_saved();
 		printf("zvuk: queue of %d tracks from %d\n", count, start);

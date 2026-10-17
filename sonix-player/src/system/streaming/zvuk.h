@@ -55,6 +55,8 @@
 // The file on the card the token comes from.
 #define ZVUK_TOKEN_FILE "zvuk_token.txt"
 
+typedef enum { ZVUK_CONTENT_TRACK = 0, ZVUK_CONTENT_CHAPTER, ZVUK_CONTENT_EPISODE } zvuk_content_t;
+
 typedef struct {
 	char id[ZVUK_ID_MAX];
 	char album_id[ZVUK_ID_MAX];	 // the release it is on
@@ -67,6 +69,8 @@ typedef struct {
 	int track_number;		  // its place on the release, 0 when not said
 	int year;				  // the release's, 0 when not said
 	bool available;			  // false = listed but nothing to play
+	zvuk_content_t content;
+	char published_at[40]; // spoken episode's ISO publication date, otherwise empty
 } zvuk_track_t;
 
 typedef struct {
@@ -156,6 +160,38 @@ int zvuk_tracks(const char *const *ids, int count, zvuk_track_t *out, int max);
 // A release's tracks, in order; `meta` (may be NULL) gets the release itself.
 int zvuk_album_tracks(const char *album_id, zvuk_track_t *out, int max, zvuk_album_t *meta);
 
+// Spoken-content contracts verified on the service as Book/Chapter and
+// Podcast/Episode. Worker only; availability is enforced by the stream call.
+typedef enum { ZVUK_SPOKEN_BOOK = 0, ZVUK_SPOKEN_PODCAST } zvuk_spoken_kind_t;
+#define ZVUK_SPOKEN_MAX_PARTS 300
+typedef struct {
+	char id[ZVUK_ID_MAX];
+	char title[ZVUK_TITLE_MAX];
+	char author[ZVUK_NAME_MAX];
+	char narrator[ZVUK_NAME_MAX];
+	char cover[ZVUK_URL_MAX];
+	char description[1024];
+	int part_count;
+	long duration;
+} zvuk_spoken_t;
+typedef struct {
+	zvuk_track_t track;	   // author, book/show title and cover copied from parent
+	char published_at[40]; // episodes, ISO date when supplied
+	long availability;	   // raw service value; no undocumented bit interpretation
+	long source_position;  // chapters, may begin at zero
+} zvuk_spoken_part_t;
+
+// Complete collection only: -1 on failure, including insufficient capacity.
+// Chapters sorted by their explicit position; episodes retain API order.
+// Allocate `out` on the heap for large books (the device worker stack is small).
+int zvuk_book_parts(const char *id, zvuk_spoken_part_t *out, int max, zvuk_spoken_t *meta);
+
+// Podcast refs stay compact: all IDs, but no eager episode structs. Caller
+// frees *ids; getEpisodes hydrates at most ZVUK_TRACKS_PER_CALL per worker call.
+// IDs are newest first by ISO publication date (stable for equal/absent dates).
+int zvuk_podcast_ids(const char *id, char (**ids)[ZVUK_ID_MAX], zvuk_spoken_t *meta);
+int zvuk_episodes(const char *const *ids, int count, zvuk_track_t *out, int max);
+
 // An artist's page in one request: its most listened-to tracks and its
 // releases. Returns tracks + albums, -1 on error.
 int zvuk_artist_page(const char *artist_id, zvuk_track_t *tracks, int max_tracks, int *n_tracks, zvuk_album_t *albums,
@@ -173,11 +209,14 @@ typedef enum {
 	ZVUK_SEARCH_ALBUMS,
 	ZVUK_SEARCH_ARTISTS,
 	ZVUK_SEARCH_PLAYLISTS,
+	ZVUK_SEARCH_BOOKS,
+	ZVUK_SEARCH_PODCASTS,
 	ZVUK_SEARCH_KINDS,
 } zvuk_search_kind_t;
 
 // One kind of result. `out` is an array of that kind's struct (zvuk_track_t,
-// zvuk_album_t, zvuk_artist_t, zvuk_playlist_t).
+// zvuk_album_t, zvuk_artist_t, zvuk_playlist_t). Book/show search results use
+// zvuk_album_t (id/title/author/image); fetch their chapters/episodes on open.
 int zvuk_search(const char *text, zvuk_search_kind_t kind, void *out, int max);
 
 // ---------------------------------------------------------------------------
@@ -235,6 +274,7 @@ typedef struct {
 // The address of the best file at or below the quality asked for (getStream).
 // Logs what was asked and what came. False with zvuk_last_error() set.
 bool zvuk_stream(const char *track_id, zvuk_stream_t *out);
+bool zvuk_spoken_stream(const char *part_id, zvuk_stream_t *out);
 
 // What the last stream request actually gave ("FLAC", "MP3 320 kbps"), for
 // the home page. Empty before the first. Any thread.

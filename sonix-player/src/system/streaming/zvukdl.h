@@ -35,6 +35,12 @@
 
 bool zvukdl_track(const zvuk_track_t *track);
 bool zvukdl_album(const char *album_id, const char *title);
+// Complete book in the configured Audiobooks folder; never Music's index.
+bool zvukdl_book(const char *book_id, const char *title);
+bool zvukdl_local_book(const char *book_id, char *out, size_t size);
+// One episode in the existing local Podcast shelf, with its own resume key.
+bool zvukdl_episode(const zvuk_track_t *episode);
+bool zvukdl_local_episode(const zvuk_track_t *episode, char *out, size_t size);
 
 typedef struct {
 	bool active;
@@ -48,11 +54,13 @@ void zvukdl_status(zvukdl_status_t *out);
 bool zvukdl_busy(void);
 
 typedef enum {
-	ZVUKDL_QUEUED,	 // `count` more to save, `text` what
-	ZVUKDL_SAVED,	 // one track is on the card
-	ZVUKDL_FAILED,	 // `text`: "<title>: <reason>"
-	ZVUKDL_FINISHED, // the queue emptied: `count` saved, `text` the folder
-	ZVUKDL_STOPPED,	 // dropped (no card, signed out): `text` why
+	ZVUKDL_QUEUED,		  // `count` more to save, `text` what
+	ZVUKDL_SAVED,		  // one track is on the card
+	ZVUKDL_FAILED,		  // `text`: "<title>: <reason>"
+	ZVUKDL_FINISHED,	  // the queue emptied: `count` saved, `text` the folder
+	ZVUKDL_STOPPED,		  // dropped (no card, signed out): `text` why
+	ZVUKDL_BOOK_SAVED,	  // complete local book key in text
+	ZVUKDL_EPISODE_SAVED, // local episode path in text
 } zvukdl_event_t;
 void zvukdl_set_listener(void (*listener)(zvukdl_event_t event, int count, const char *text));
 

@@ -72,6 +72,9 @@ bool audiobookdb_folder_matches(const char *folder, const char *rel);
 bool audiobookdb_set_folder(const char *rel);
 
 bool audiobookdb_scan_start(const char *root);
+// UI thread publication notification: coalesces a rescan behind an active scan.
+// Callers must recheck card ownership when processing a posted notification.
+void audiobookdb_request_scan(const char *root);
 bool audiobookdb_scan_running(void);
 int audiobookdb_scan_found(void);
 void audiobookdb_scan_stop(void);

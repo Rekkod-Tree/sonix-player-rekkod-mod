@@ -13,7 +13,9 @@
 // whether it was streamed into the cache or kept in the Podcast folder: the
 // two are the same episode, and stopping one halfway must leave the other
 // halfway too. Any other file in the Podcast folder -- the ones copied there
-// by hand -- is identified by its path under the card.
+// by hand -- is identified by its path under the card. Imported Yandex/Zvuk
+// episodes instead use their service and episode ID from the sidecar; their
+// numeric IDs never collide with Podcast Index or with the other service.
 //
 // The row also holds the title, the podcast's name, its id and its artwork,
 // as they were when the episode last played: "Continue listening" draws from

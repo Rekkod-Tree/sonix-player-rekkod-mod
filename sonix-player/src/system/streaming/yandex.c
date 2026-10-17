@@ -643,6 +643,20 @@ static void artists_of(const json_doc_t *doc, int obj, char *out, size_t size) {
 	}
 }
 
+static yandex_content_t content_type(const json_doc_t *doc, int object) {
+	char type[32] = "";
+	json_obj_str(doc, object, "type", type, sizeof(type));
+	if (strcmp(type, "audiobook") == 0)
+		return YANDEX_CONTENT_AUDIOBOOK;
+	if (strcmp(type, "podcast") == 0)
+		return YANDEX_CONTENT_PODCAST;
+	if (strcmp(type, "podcast-episode") == 0)
+		return YANDEX_CONTENT_EPISODE;
+	if (strcmp(type, "music") == 0 || strcmp(type, "single") == 0 || strcmp(type, "ep") == 0 || strcmp(type, "compilation") == 0 || strcmp(type, "album") == 0)
+		return YANDEX_CONTENT_MUSIC;
+	return YANDEX_CONTENT_UNKNOWN;
+}
+
 static void track_from(const json_doc_t *doc, int t, yandex_track_t *out) {
 	memset(out, 0, sizeof(*out));
 	id_of(doc, t, "id", out->id, sizeof(out->id));
@@ -665,6 +679,10 @@ static void track_from(const json_doc_t *doc, int t, yandex_track_t *out) {
 	yandex_cover_url(uri, 400, out->cover, sizeof(out->cover));
 	out->duration = (int)(json_obj_long(doc, t, "durationMs", 0) / 1000);
 	out->available = json_obj_bool(doc, t, "available", true);
+	out->content_type = content_type(doc, t);
+	json_obj_str(doc, t, "pubDate", out->pub_date, sizeof(out->pub_date));
+	json_obj_str(doc, t, "podcastEpisodeType", out->podcast_episode_type, sizeof(out->podcast_episode_type));
+	out->remember_position = json_obj_bool(doc, t, "rememberPosition", false);
 }
 
 static void album_from(const json_doc_t *doc, int a, yandex_album_t *out) {
@@ -677,6 +695,7 @@ static void album_from(const json_doc_t *doc, int a, yandex_album_t *out) {
 	yandex_cover_url(uri, 200, out->cover, sizeof(out->cover));
 	out->year = (int)json_obj_long(doc, a, "year", 0);
 	out->track_count = (int)json_obj_long(doc, a, "trackCount", 0);
+	out->content_type = content_type(doc, a);
 }
 
 static void artist_from(const json_doc_t *doc, int a, yandex_artist_t *out) {
@@ -1021,6 +1040,18 @@ int yandex_playlist_ids(const char *owner, const char *kind, yandex_ref_cb each,
 	return count;
 }
 
+// Music has always allowed a bounded view without a complete pager. Preserve
+// unavailable rows too: the GUI dims them rather than renumbering the album.
+static int album_tracks_from(const json_doc_t *doc, int album, yandex_track_t *out, int max) {
+	int volumes = json_get(doc, album, "volumes");
+	int nv = volumes >= 0 ? json_len(doc, volumes) : 0;
+	int got = 0;
+	for (int v = 0; v < nv && got < max; v++) {
+		got += tracks_from_array(doc, json_at(doc, volumes, v), out + got, max - got);
+	}
+	return got;
+}
+
 int yandex_album_tracks(const char *album_id, yandex_track_t *out, int max) {
 	char url[400];
 	snprintf(url, sizeof(url), "%s/albums/%s/with-tracks", api_url, album_id);
@@ -1029,50 +1060,139 @@ int yandex_album_tracks(const char *album_id, yandex_track_t *out, int max) {
 	if (!api(NULL, url, NULL, NULL, &body, &doc)) {
 		return -1;
 	}
-	int volumes = json_path(&doc, json_root(&doc), "result.volumes");
-	int nv = volumes >= 0 ? json_len(&doc, volumes) : 0;
-	int got = 0;
-	for (int v = 0; v < nv && got < max; v++) {
-		got += tracks_from_array(&doc, json_at(&doc, volumes, v), out + got, max - got);
-	}
+	int got = album_tracks_from(&doc, json_get(&doc, json_root(&doc), "result"), out, max);
 	api_done(body, &doc);
 	return got;
 }
 
-bool yandex_album_meta(const char *album_id, yandex_album_meta_t *out) {
+static void album_meta_from(const json_doc_t *doc, int a, const char *album_id, yandex_album_meta_t *out) {
 	memset(out, 0, sizeof(*out));
+	snprintf(out->id, sizeof(out->id), "%s", album_id);
+	json_obj_str(doc, a, "title", out->title, sizeof(out->title));
+	// A compilation's artist is the service's placeholder ("сборник") with
+	// "various" set: the conventional name says it to any player.
+	int artists = json_get(doc, a, "artists");
+	bool various = artists >= 0 && json_len(doc, artists) > 0 && json_obj_bool(doc, json_at(doc, artists, 0), "various", false);
+	if (various) {
+		snprintf(out->artist, sizeof(out->artist), "Various Artists");
+	} else {
+		artists_of(doc, a, out->artist, sizeof(out->artist));
+	}
+	json_obj_str(doc, a, "genre", out->genre, sizeof(out->genre));
+	out->year = (int)json_obj_long(doc, a, "year", 0);
+	if (!out->year) {
+		char date[32] = "";
+		json_obj_str(doc, a, "releaseDate", date, sizeof(date));
+		out->year = atoi(date);
+	}
+	char uri[300] = "";
+	json_obj_str(doc, a, "coverUri", uri, sizeof(uri));
+	yandex_cover_url(uri, 1000, out->cover, sizeof(out->cover));
+	int volumes = json_get(doc, a, "volumes");
+	out->discs = volumes >= 0 && json_len(doc, volumes) > 0 ? json_len(doc, volumes) : 1;
+	out->track_count = (int)json_obj_long(doc, a, "trackCount", 0);
+	out->content_type = content_type(doc, a);
+}
+
+static int album_complete_from(const json_doc_t *doc, int a, const char *album_id, yandex_track_t *out, int max, yandex_album_meta_t *meta_out) {
+	int volumes = json_get(doc, a, "volumes");
+	int count = 0;
+	if (volumes < 0 || doc->toks[volumes].type != JSON_ARRAY)
+		goto incomplete;
+	for (int v = 0; v < json_len(doc, volumes); v++) {
+		int volume = json_at(doc, volumes, v);
+		if (volume < 0 || doc->toks[volume].type != JSON_ARRAY)
+			goto incomplete;
+		int n = json_len(doc, volume);
+		if (n > max - count) {
+			set_error("%s", tr("book_download_limit"));
+			return -1;
+		}
+		count += n;
+	}
+	int pager = json_get(doc, a, "pager");
+	long expected = pager >= 0 ? json_obj_long(doc, pager, "total", -1) : json_obj_long(doc, a, "trackCount", -1);
+	if (count <= 0 || expected != count || (pager >= 0 && json_obj_long(doc, pager, "page", 0) != 0))
+		goto incomplete;
+	int got = 0;
+	for (int v = 0; v < json_len(doc, volumes); v++) {
+		int volume = json_at(doc, volumes, v);
+		for (int i = 0; i < json_len(doc, volume); i++) {
+			int t = json_at(doc, volume, i);
+			if (t < 0 || doc->toks[t].type != JSON_OBJECT)
+				goto incomplete;
+			track_from(doc, t, &out[got]);
+			if (!out[got].id[0] || !out[got].title[0])
+				goto incomplete;
+			for (int j = 0; j < got; j++) {
+				if (strcmp(out[j].id, out[got].id) == 0)
+					goto incomplete;
+			}
+			snprintf(out[got].album_id, sizeof(out[got].album_id), "%s", album_id);
+			if (!out[got].album[0])
+				json_obj_str(doc, a, "title", out[got].album, sizeof(out[got].album));
+			out[got].disc_number = v + 1;
+			out[got].track_number = i + 1;
+			got++;
+		}
+	}
+	album_meta_from(doc, a, album_id, meta_out);
+	if (!meta_out->title[0])
+		goto incomplete;
+	meta_out->track_count = count; // Books can report trackCount=0, with a valid pager.
+	return got;
+incomplete:
+	set_error("%s", tr("book_download_incomplete"));
+	return -1;
+}
+
+static int album_view_from(const json_doc_t *doc, int album, const char *album_id, yandex_track_t *out, int max, yandex_album_meta_t *meta_out) {
+	album_meta_from(doc, album, album_id, meta_out);
+	if (meta_out->content_type == YANDEX_CONTENT_AUDIOBOOK || meta_out->content_type == YANDEX_CONTENT_PODCAST) {
+		return album_complete_from(doc, album, album_id, out, max, meta_out);
+	}
+	return album_tracks_from(doc, album, out, max);
+}
+
+int yandex_album_view(const char *album_id, yandex_track_t *out, int max, yandex_album_meta_t *meta_out) {
+	if (!album_id || !out || !meta_out || max <= 0)
+		return -1;
+	memset(meta_out, 0, sizeof(*meta_out));
 	char url[400];
 	snprintf(url, sizeof(url), "%s/albums/%s/with-tracks", api_url, album_id);
 	char *body;
 	json_doc_t doc;
-	if (!api(NULL, url, NULL, NULL, &body, &doc)) {
-		return false;
-	}
+	if (!api(NULL, url, NULL, NULL, &body, &doc))
+		return -1;
+	int n = album_view_from(&doc, json_get(&doc, json_root(&doc), "result"), album_id, out, max, meta_out);
+	api_done(body, &doc);
+	return n;
+}
+
+int yandex_album_tracks_complete(const char *album_id, yandex_track_t *out, int max, yandex_album_meta_t *meta_out) {
+	if (!album_id || !out || !meta_out || max <= 0)
+		return -1;
+	char url[400];
+	snprintf(url, sizeof(url), "%s/albums/%s/with-tracks", api_url, album_id);
+	char *body;
+	json_doc_t doc;
+	if (!api(NULL, url, NULL, NULL, &body, &doc))
+		return -1;
 	int a = json_get(&doc, json_root(&doc), "result");
-	snprintf(out->id, sizeof(out->id), "%s", album_id);
-	json_obj_str(&doc, a, "title", out->title, sizeof(out->title));
-	// A compilation's artist is the service's placeholder ("сборник") with
-	// "various" set: the conventional name says it to any player.
-	int artists = json_get(&doc, a, "artists");
-	bool various = artists >= 0 && json_len(&doc, artists) > 0 && json_obj_bool(&doc, json_at(&doc, artists, 0), "various", false);
-	if (various) {
-		snprintf(out->artist, sizeof(out->artist), "Various Artists");
-	} else {
-		artists_of(&doc, a, out->artist, sizeof(out->artist));
-	}
-	json_obj_str(&doc, a, "genre", out->genre, sizeof(out->genre));
-	out->year = (int)json_obj_long(&doc, a, "year", 0);
-	if (!out->year) {
-		char date[32] = "";
-		json_obj_str(&doc, a, "releaseDate", date, sizeof(date));
-		out->year = atoi(date);
-	}
-	char uri[300] = "";
-	json_obj_str(&doc, a, "coverUri", uri, sizeof(uri));
-	yandex_cover_url(uri, 1000, out->cover, sizeof(out->cover));
-	int volumes = json_get(&doc, a, "volumes");
-	out->discs = volumes >= 0 && json_len(&doc, volumes) > 0 ? json_len(&doc, volumes) : 1;
-	out->track_count = (int)json_obj_long(&doc, a, "trackCount", 0);
+	int n = album_complete_from(&doc, a, album_id, out, max, meta_out);
+	api_done(body, &doc);
+	return n;
+}
+
+bool yandex_album_meta(const char *album_id, yandex_album_meta_t *out) {
+	char url[400];
+	snprintf(url, sizeof(url), "%s/albums/%s/with-tracks", api_url, album_id);
+	char *body;
+	json_doc_t doc;
+	memset(out, 0, sizeof(*out));
+	if (!api(NULL, url, NULL, NULL, &body, &doc))
+		return false;
+	album_meta_from(&doc, json_get(&doc, json_root(&doc), "result"), album_id, out);
 	api_done(body, &doc);
 	return out->title[0] != '\0';
 }
@@ -1471,6 +1591,75 @@ bool yandex_search(const char *text, yandex_artist_t *artists, int *n_artists, y
 	}
 	*n_albums = got;
 	*n_tracks = tracks_from_array(&doc, json_path(&doc, root, "result.tracks.results"), tracks, *n_tracks);
+	api_done(body, &doc);
+	return true;
+}
+
+bool yandex_album_link_id(const char *text, char *out, size_t size) {
+	if (!out || !size)
+		return false;
+	out[0] = '\0';
+	if (!text)
+		return false;
+	const char *prefixes[] = {"https://music.yandex.ru/album/", "http://music.yandex.ru/album/", "https://music.yandex.com/album/", "http://music.yandex.com/album/"};
+	for (size_t i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); i++) {
+		size_t prefix = strlen(prefixes[i]);
+		if (strncmp(text, prefixes[i], prefix) != 0)
+			continue;
+		const char *id = text + prefix;
+		size_t length = strspn(id, "0123456789");
+		if (!length || length >= size || (id[length] && id[length] != '/' && id[length] != '?' && id[length] != '#'))
+			return false;
+		memcpy(out, id, length);
+		out[length] = '\0';
+		return true;
+	}
+	return false;
+}
+
+static void spoken_search_from(const json_doc_t *doc, yandex_content_t kind, yandex_album_t *shows, int *n_shows, yandex_track_t *episodes, int *n_episodes) {
+	int show_cap = *n_shows, episode_cap = *n_episodes;
+	*n_shows = *n_episodes = 0;
+	int root = json_root(doc);
+	const char *sections[] = {"result.podcasts.results", "result.albums.results"};
+	for (size_t section = 0; section < sizeof(sections) / sizeof(sections[0]); section++) {
+		int array = json_path(doc, root, sections[section]);
+		for (int i = 0; i < json_len(doc, array) && *n_shows < show_cap; i++) {
+			yandex_album_t show;
+			album_from(doc, json_at(doc, array, i), &show);
+			if (show.content_type != kind || !show.id[0])
+				continue;
+			bool duplicate = false;
+			for (int j = 0; j < *n_shows; j++)
+				duplicate |= strcmp(shows[j].id, show.id) == 0;
+			if (!duplicate)
+				shows[(*n_shows)++] = show;
+		}
+	}
+	// Book search presents the whole book; an isolated chapter must not look
+	// like an independently complete audiobook download.
+	if (kind != YANDEX_CONTENT_PODCAST)
+		return;
+	int array = json_path(doc, root, "result.podcast_episodes.results");
+	for (int i = 0; i < json_len(doc, array) && *n_episodes < episode_cap; i++) {
+		yandex_track_t episode;
+		track_from(doc, json_at(doc, array, i), &episode);
+		if (episode.content_type == YANDEX_CONTENT_EPISODE && episode.id[0])
+			episodes[(*n_episodes)++] = episode;
+	}
+}
+
+bool yandex_search_spoken(const char *text, yandex_content_t kind, yandex_album_t *shows, int *n_shows, yandex_track_t *episodes, int *n_episodes) {
+	if (!text || !n_shows || !n_episodes || *n_shows < 0 || *n_episodes < 0 || (*n_shows && !shows) || (*n_episodes && !episodes) || (kind != YANDEX_CONTENT_AUDIOBOOK && kind != YANDEX_CONTENT_PODCAST))
+		return false;
+	char query[600], url[1024];
+	http_url_encode(text, query, sizeof(query));
+	snprintf(url, sizeof(url), "%s/search?text=%s&type=all&page=0", api_url, query);
+	char *body;
+	json_doc_t doc;
+	if (!api(NULL, url, NULL, NULL, &body, &doc))
+		return false;
+	spoken_search_from(&doc, kind, shows, n_shows, episodes, n_episodes);
 	api_done(body, &doc);
 	return true;
 }

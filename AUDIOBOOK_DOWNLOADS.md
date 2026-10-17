@@ -11,36 +11,48 @@ separate task. Podcasts must remain distinct from books.
   `pager.total=13`. Count the actual complete parts list, not `trackCount` alone.
 - [Yandex podcast](https://api.music.yandex.net/albums/11002256/with-tracks):
   `type=podcast`, 299 episodes, newest first. Episodes carry publication dates
-  and `type=podcast-episode`. The current album download limit is 150 tracks.
-- User examples for Zvuk:
+  and `type=podcast-episode`.
+- Authenticated Zvuk examples:
   [book](https://zvuk.com/abook/28850372),
   [podcast](https://zvuk.com/podcast/12874277).
-  The public metadata request returned HTTP 418; its book/chapter API contract
-  remains unverified. Current playback requests only the GraphQL `Track` type.
+  The book has 145 chapters, numbered 1-145, and a duration of 53,246 seconds.
+  The podcast returns 338 references, including two null entries: 336 valid
+  episodes remain. Sort chapters by position and episodes by publication date;
+  neither API array is ordered. Chapter/Episode streams are distinct from Track.
 
-Anonymous Yandex availability does not establish the user's subscription rights.
-No audiobook audio download or authenticated service test has been performed.
+Authenticated metadata, search and typed Zvuk streams were checked on the R1.
+Both Yandex examples report every part available on the saved session. Metadata
+availability alone does not prove a complete audio download.
 Service artist credits are not sufficient to distinguish author from narrator.
 
-## Proposed implementation
+## Implementation
 
-Reuse the existing download workers, card ownership guards, tagging and cover
-handling. Add an explicit audiobook destination to a complete-book job. Freeze
-the configured `audiobookdb_folder()` and card generation when queuing it.
+The existing workers use card ownership guards, tagging and cover handling.
+A complete-book job freezes the configured `audiobookdb_folder()` and card
+generation. The explicit limit is 300 chapters; larger books fail visibly.
 
-Use stable provider/book IDs for directory identity and deterministic ordered
+Downloads use stable provider/book IDs for directory identity and deterministic ordered
 chapter names. Validate complete paths against playback's 512-byte limit.
-Publish a newly downloaded book from a hidden staging directory only after every
+They publish a newly downloaded book from a hidden staging directory only after every
 required chapter succeeds; then rescan Audiobooks. A partial download must not
 silently become a complete book. Existing music downloads and saved-track
 indexes must retain their original paths.
 
-Reuse local audiobook resume: it already stores the book, chapter file and
+Local audiobook resume stores the book, chapter file and
 position. Keep these identities stable across rescans and repeated downloads.
 Do not delete an existing book before its replacement is ready. Cloud progress
 synchronization is not included in the initial scope.
 
-## Acceptance before release
+Podcast shows use album-style search rows and typed badges. Individual episodes
+are saved into the existing `Podcast/` shelf with stable, separate Yandex/Zvuk
+resume identities. There is no show-level archive download. Local listening
+progress is not synchronized with a service's streamed playback progress.
+
+Ordinary Music albums retain their existing bounded list parsing; only spoken
+collections receive the new strict completeness checks. List images remain
+disabled by default and do not add thumbnail requests or SD-cache writes.
+
+## Validation boundary
 
 - Confirm both supplied books' chapter count, order, title and artwork.
 - Download into a custom nested audiobook folder and listen offline.
@@ -51,5 +63,8 @@ synchronization is not included in the initial scope.
 - Handle lists above current 150/300-entry limits explicitly; never truncate
   silently. Keep podcast episodes and their progress separate from books.
 
-This document records the implementation boundary; audiobook service integration
-is not implemented by the accompanying lazy-title and cover fixes.
+Native fixtures cover complete publication, failed/missing parts, repeat saves,
+card generation changes, namespaces, real SQLite rescans and resume. Native UI
+checks use real HTTP download workers and decode the published audio. Hardware
+acceptance must be reported separately from these fixtures. Live USB handoff
+and the intermittent mass-storage disconnect are deferred at the user's request.

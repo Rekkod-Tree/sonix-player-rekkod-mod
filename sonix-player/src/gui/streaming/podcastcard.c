@@ -257,6 +257,14 @@ static void count_folder(const char *folder, podcastcard_show_t *show) {
 	closedir(dir);
 	if (sidecar[0]) {
 		show->downloaded = true;
+		// Imported folders include IDs for collision-free filenames. Their
+		// display name stays the show's title, not the storage suffix.
+		char service[24];
+		if (podcastcache_tag(sidecar, "source_service", service, sizeof(service)) && (strcmp(service, "yandex") == 0 || strcmp(service, "zvuk") == 0)) {
+			char title[sizeof(show->name)];
+			if (podcastcache_tag(sidecar, "album", title, sizeof(title)))
+				snprintf(show->name, sizeof(show->name), "%s", title);
+		}
 		char text[32];
 		if (podcastcache_tag(sidecar, "feed_id", text, sizeof(text))) {
 			show->feed_id = strtoll(text, NULL, 10);

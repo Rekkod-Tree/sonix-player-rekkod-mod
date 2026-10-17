@@ -10,6 +10,7 @@
 #include <time.h>
 
 #include "src/gui/fonts/fonts.h"
+#include "src/gui/library/audiobooks.h"
 #include "src/gui/nowplaying/player.h"
 #include "src/gui/shell/confirm.h"
 #include "src/gui/shell/icons.h"
@@ -25,15 +26,18 @@
 #include "src/gui/shell/theme.h"
 #include "src/gui/shell/toast.h"
 #include "src/gui/streaming/streamerror.h"
-#include "src/gui/streaming/svclist.h"
 #include "src/gui/streaming/streamrowart.h"
+#include "src/gui/streaming/svclist.h"
 #include "src/gui/streaming/svcui.h"
 #include "src/system/core/lang.h"
+#include "src/system/core/utils.h"
 #include "src/system/device/system.h"
 #include "src/system/library/library.h"
 #include "src/system/net/http.h"
+#include "src/system/playback/device_state.h"
 #include "src/system/playback/playlist.h"
 #include "src/system/streaming/cardimport.h"
+#include "src/system/streaming/podcaststate.h"
 #include "src/system/streaming/provider.h"
 #include "src/system/streaming/zvuk.h"
 #include "src/system/streaming/zvukdl.h"
@@ -48,7 +52,7 @@
 #define SLOT_COUNT 24
 #define ARTIST_TRACKS 20
 
-typedef enum { ROW_TRACK, ROW_ALBUM, ROW_ARTIST, ROW_PLAYLIST } row_kind_t;
+typedef enum { ROW_TRACK, ROW_ALBUM, ROW_ARTIST, ROW_PLAYLIST, ROW_BOOK, ROW_PODCAST } row_kind_t;
 
 typedef struct {
 	row_kind_t kind;
@@ -69,6 +73,8 @@ typedef enum {
 	JOB_PLAYLISTS,
 	JOB_PLAYLIST,
 	JOB_ALBUM,
+	JOB_BOOK,
+	JOB_PODCAST,
 	JOB_ARTIST,
 	JOB_SEARCH, // `n`: the kind (zvuk_search_kind_t)
 	// one page of the list on screen
@@ -104,6 +110,7 @@ typedef struct {
 	stream_err_t error_class;
 	zvuklist_t *list;
 	int count;
+	zvuk_spoken_t spoken;
 	row_t rows[];
 } job_result_t;
 
@@ -130,6 +137,7 @@ static int result_count;
 static zvuklist_t *result_list;
 static char result_error[512];
 static stream_err_t result_class;
+static zvuk_spoken_t result_spoken;
 
 static void job_done_async(void *user);
 
@@ -190,6 +198,8 @@ static void add_row(row_kind_t kind, const void *what) {
 		r->u.track = *(const zvuk_track_t *)what;
 		break;
 	case ROW_ALBUM:
+	case ROW_BOOK:
+	case ROW_PODCAST:
 		r->u.album = *(const zvuk_album_t *)what;
 		break;
 	case ROW_ARTIST:
@@ -202,6 +212,42 @@ static void add_row(row_kind_t kind, const void *what) {
 }
 
 static void run_list_job(const job_t *job) {
+	if (job->kind == JOB_BOOK || job->kind == JOB_PODCAST) {
+		int got = -1;
+		if (job->kind == JOB_BOOK) {
+			zvuk_spoken_part_t *parts = calloc(ZVUK_SPOKEN_MAX_PARTS, sizeof(*parts));
+			got = parts ? zvuk_book_parts(job->a, parts, ZVUK_SPOKEN_MAX_PARTS, &result_spoken) : -1;
+			if (got >= 0) {
+				result_list = zvuklist_new();
+				for (int i = 0; result_list && i < got; i++)
+					if (!zvuklist_add_track(result_list, &parts[i].track)) {
+						got = -1;
+						break;
+					}
+			}
+			free(parts);
+		} else {
+			char (*ids)[ZVUK_ID_MAX] = NULL;
+			got = zvuk_podcast_ids(job->a, &ids, &result_spoken);
+			if (got >= 0) {
+				result_list = zvuklist_new_episodes();
+				for (int i = 0; result_list && i < got; i++)
+					if (!zvuklist_add_id(result_list, ids[i])) {
+						got = -1;
+						break;
+					}
+			}
+			free(ids);
+			if (got >= 0)
+				got = list_from_ids(got, "podcast episodes");
+		}
+		if (got < 0 || !result_list) {
+			zvuklist_free(result_list);
+			result_list = NULL;
+			result_class = streamerr_describe("zvuk", zvuk_last_error(), result_error, sizeof(result_error));
+		}
+		return;
+	}
 	void *tmp = calloc(MAX_ROWS, sizeof(zvuk_track_t));
 	if (!tmp) {
 		snprintf(result_error, sizeof(result_error), "%s", tr("out_of_memory"));
@@ -267,9 +313,8 @@ static void run_list_job(const job_t *job) {
 	case JOB_SEARCH: {
 		zvuk_search_kind_t kind = (zvuk_search_kind_t)job->n;
 		got = zvuk_search(job->a, kind, tmp, kind == ZVUK_SEARCH_TRACKS ? 60 : 40);
-		static const row_kind_t ROWS[ZVUK_SEARCH_KINDS] = {ROW_TRACK, ROW_ALBUM, ROW_ARTIST, ROW_PLAYLIST};
-		static const size_t SIZES[ZVUK_SEARCH_KINDS] = {sizeof(zvuk_track_t), sizeof(zvuk_album_t),
-														sizeof(zvuk_artist_t), sizeof(zvuk_playlist_t)};
+		static const row_kind_t ROWS[ZVUK_SEARCH_KINDS] = {ROW_TRACK, ROW_ALBUM, ROW_ARTIST, ROW_PLAYLIST, ROW_BOOK, ROW_PODCAST};
+		static const size_t SIZES[ZVUK_SEARCH_KINDS] = {sizeof(zvuk_track_t), sizeof(zvuk_album_t), sizeof(zvuk_artist_t), sizeof(zvuk_playlist_t), sizeof(zvuk_album_t), sizeof(zvuk_album_t)};
 		for (int i = 0; i < got && (unsigned)kind < ZVUK_SEARCH_KINDS; i++) {
 			add_row(ROWS[kind], (const char *)tmp + (size_t)i * SIZES[kind]);
 		}
@@ -307,6 +352,7 @@ static job_result_t *job_result_new(const job_t *job) {
 	r->list = result_list;
 	result_list = NULL;
 	r->count = count;
+	r->spoken = result_spoken;
 	if (count > 0) {
 		memcpy(r->rows, result, (size_t)count * sizeof(row_t));
 	}
@@ -346,6 +392,7 @@ static void *worker_main(void *arg) {
 		result_class = STREAM_ERR_NONE;
 		result_count = 0;
 		result_list = NULL;
+		memset(&result_spoken, 0, sizeof(result_spoken));
 		streamerr_begin();
 		switch (job.kind) {
 		case JOB_PAGE:
@@ -431,6 +478,7 @@ static char list_artist_id[ZVUK_ID_MAX];
 static int page_asked = -1, page_failed = -1;
 static time_t page_failed_at;
 static char playing_id[ZVUK_ID_MAX];
+static bool list_book_saved;
 
 static int view_count(void) {
 	if (!shown) {
@@ -458,6 +506,12 @@ static bool view_row(int index, row_t *out) {
 
 static bool row_saved(const row_t *r) {
 	if (r->kind == ROW_TRACK) {
+		if (r->u.track.content == ZVUK_CONTENT_CHAPTER)
+			return list_kind == JOB_BOOK && list_book_saved;
+		if (r->u.track.content == ZVUK_CONTENT_EPISODE) {
+			char path[512];
+			return zvukdl_local_episode(&r->u.track, path, sizeof(path));
+		}
 		return r->u.track.id[0] && zvukdl_saved(r->u.track.id);
 	}
 	if (r->kind == ROW_ALBUM && r->u.album.id[0] && r->u.album.track_count > 0) {
@@ -473,6 +527,8 @@ static void row_texts(const row_t *r, char *name, size_t ns, char *detail, size_
 		snprintf(detail, ds, "%s", r->u.track.artist);
 		break;
 	case ROW_ALBUM:
+	case ROW_BOOK:
+	case ROW_PODCAST:
 		snprintf(name, ns, "%s", r->u.album.title);
 		if (r->u.album.year) {
 			snprintf(detail, ds, "%s \xC2\xB7 %d", r->u.album.artist, r->u.album.year);
@@ -554,8 +610,27 @@ static void list_bind(lv_obj_t *row, int index) {
 	case ROW_TRACK: {
 		char length[16];
 		length_text(r.u.track.duration, length, sizeof(length));
-		sx_row_set_subtitle(row, r.u.track.artist, row_saved(&r) ? tr("svc_badge_saved") : NULL, length);
-		if ((list_kind == JOB_ALBUM || list_kind == JOB_SAVED_ALBUM) && r.u.track.track_number > 0) {
+		if (r.u.track.content == ZVUK_CONTENT_EPISODE) {
+			char date[16] = "", resume[24] = "", path[512];
+			snprintf(date, sizeof(date), "%.10s", r.u.track.published_at);
+			const char *badge = NULL;
+			if (zvukdl_local_episode(&r.u.track, path, sizeof(path))) {
+				podcaststate_t state;
+				badge = tr("svc_badge_saved");
+				if (podcaststate_get(path, &state)) {
+					if (state.played)
+						badge = tr("podcast_heard");
+					else if (state.position > 0) {
+						formatDoubleSeconds(state.position, resume, sizeof(resume));
+						badge = resume;
+					}
+				}
+			}
+			sx_row_set_subtitle(row, date, badge, length);
+		} else {
+			sx_row_set_subtitle(row, r.u.track.artist, row_saved(&r) ? tr("svc_badge_saved") : NULL, length);
+		}
+		if ((list_kind == JOB_ALBUM || list_kind == JOB_SAVED_ALBUM || list_kind == JOB_BOOK) && r.u.track.track_number > 0) {
 			streamrowart_forget(row);
 			sx_row_set_number(row, r.u.track.track_number);
 		} else {
@@ -563,7 +638,7 @@ static void list_bind(lv_obj_t *row, int index) {
 		}
 		// Signed out (the token expired), the saved tracks still play but a
 		// star could only fail: none is offered.
-		sx_row_set_trail(row, zvuk_logged_in() ? SX_ROW_TRAIL_STAR : SX_ROW_TRAIL_NONE);
+		sx_row_set_trail(row, zvuk_logged_in() && r.u.track.content == ZVUK_CONTENT_TRACK ? SX_ROW_TRAIL_STAR : SX_ROW_TRAIL_NONE);
 		sx_row_set_starred(row, zvuk_is_liked(ZVUK_ITEM_TRACK, r.u.track.id));
 		sx_row_set_playing(row, playing_id[0] && strcmp(playing_id, r.u.track.id) == 0);
 		sx_row_set_swipes(row, r.u.track.available, r.u.track.available);
@@ -573,10 +648,12 @@ static void list_bind(lv_obj_t *row, int index) {
 		break;
 	}
 	case ROW_ALBUM:
-		sx_row_set_subtitle(row, detail, row_saved(&r) ? tr("svc_badge_saved") : NULL, NULL);
+	case ROW_BOOK:
+	case ROW_PODCAST:
+		sx_row_set_subtitle(row, detail, r.kind == ROW_BOOK ? tr("spoken_audiobook") : r.kind == ROW_PODCAST ? tr("spoken_podcast") : row_saved(&r) ? tr("svc_badge_saved") : NULL, NULL);
 		list_art(row, index, r.u.album.cover, svcui_tone(r.u.album.title));
 		sx_row_set_trail(row, SX_ROW_TRAIL_CHEVRON);
-		sx_row_set_swipes(row, true, true);
+		sx_row_set_swipes(row, r.kind == ROW_ALBUM, r.kind == ROW_ALBUM);
 		break;
 	case ROW_ARTIST:
 		streamrowart_forget(row);
@@ -642,6 +719,16 @@ static void album_saved_counts(int *saved, int *playable) {
 
 static void update_album_bar(void) {
 	if (!album_bar || lv_obj_is_hidden(album_bar)) {
+		return;
+	}
+	bool book = list_kind == JOB_BOOK, podcast = list_kind == JOB_PODCAST;
+	lv_obj_set_hidden(lv_obj_get_parent(album_btn_label), podcast);
+	if (book || podcast) {
+		char count[96];
+		lv_snprintf(count, sizeof(count), tr(book ? "spoken_chapter_count" : "spoken_episode_count"), view_count());
+		lv_label_set_text_fmt(album_state_label, "%s\n%s", tr(book ? "spoken_audiobook" : "spoken_podcast"), count);
+		if (book)
+			lv_label_set_text(album_btn_label, tr(list_book_saved ? "audiobooks" : "spoken_download_book"));
 		return;
 	}
 	int saved, playable;
@@ -766,13 +853,18 @@ static void paint_search_pills(int kind) {
 	for (int i = 0; i < ZVUK_SEARCH_KINDS; i++) {
 		sx_pill_set_active(search_pills[i], i == kind);
 	}
+	if ((unsigned)kind < ZVUK_SEARCH_KINDS) {
+		lv_obj_update_layout(search_bar);
+		lv_obj_scroll_to_view(search_pills[kind], LV_ANIM_OFF);
+	}
 }
 
 static void show_list(const list_step_t *step) {
 	ensure_list();
 	list_kind = step->kind;
+	list_book_saved = false;
 	lv_label_set_text(list_title, step->title);
-	bool is_album = (step->kind == JOB_ALBUM || step->kind == JOB_SAVED_ALBUM) && step->a[0];
+	bool is_album = (step->kind == JOB_ALBUM || step->kind == JOB_SAVED_ALBUM || step->kind == JOB_BOOK || step->kind == JOB_PODCAST) && step->a[0];
 	if (is_album) {
 		snprintf(list_album_id, sizeof(list_album_id), "%.*s", (int)sizeof(list_album_id) - 1, step->a);
 		snprintf(list_album_title, sizeof(list_album_title), "%s", step->title);
@@ -787,6 +879,11 @@ static void show_list(const list_step_t *step) {
 		paint_search_pills(step->n);
 	}
 	lv_obj_set_hidden(album_bar, !is_album);
+	if (is_album) {
+		lv_obj_set_hidden(lv_obj_get_parent(album_btn_label), step->kind == JOB_PODCAST);
+		lv_label_set_text(album_state_label, step->kind == JOB_BOOK ? tr("spoken_audiobook") : step->kind == JOB_PODCAST ? tr("spoken_podcast") : "");
+		lv_label_set_text(album_btn_label, tr(step->kind == JOB_BOOK ? "spoken_download_book" : "zvuk_save_album"));
+	}
 	lv_obj_set_hidden(artist_bar, !is_artist);
 	lv_obj_set_hidden(search_bar, !is_search);
 	place_list(is_album || is_artist || is_search ? 72 : 0);
@@ -824,6 +921,14 @@ static void error_sign_in(void) {
 
 static void fill_list(void) {
 	int count = view_count();
+	if (shown && (list_kind == JOB_BOOK || list_kind == JOB_PODCAST) && shown->spoken.title[0]) {
+		lv_label_set_text(list_title, shown->spoken.title);
+		snprintf(list_album_title, sizeof(list_album_title), "%s", shown->spoken.title);
+		if (list_kind == JOB_BOOK) {
+			char path[512];
+			list_book_saved = zvukdl_local_book(list_album_id, path, sizeof(path));
+		}
+	}
 	playing_update();
 	svclist_set_count(list, count, false);
 	lv_obj_set_hidden(list_message, true);
@@ -852,6 +957,15 @@ static void play_rows(int tapped) {
 	if (have && r.kind == ROW_TRACK && !r.u.track.available) {
 		toast_error(tr("zvuk_no_file"));
 		return;
+	}
+	if (have && r.kind == ROW_TRACK && r.u.track.content == ZVUK_CONTENT_EPISODE) {
+		char path[512];
+		if (zvukdl_local_episode(&r.u.track, path, sizeof(path))) {
+			const char *one[] = {path};
+			device_state_play_list_ordered_at(one, 1, 0, podcaststate_resume_point(path));
+			player_refresh_now_playing();
+			return;
+		}
 	}
 	lv_obj_set_hidden(list_spin, false);
 	if (shown && shown->list) {
@@ -918,6 +1032,10 @@ static void list_tap(lv_obj_t *row, void *user) {
 	case ROW_ALBUM:
 		open_list(r.u.album.title, list_kind == JOB_SAVED ? JOB_SAVED_ALBUM : JOB_ALBUM, r.u.album.id, NULL, 0);
 		break;
+	case ROW_BOOK:
+	case ROW_PODCAST:
+		open_list(r.u.album.title, r.kind == ROW_BOOK ? JOB_BOOK : JOB_PODCAST, r.u.album.id, NULL, 0);
+		break;
 	case ROW_ARTIST:
 		open_list(r.u.artist.name, JOB_ARTIST, r.u.artist.id, NULL, 0);
 		break;
@@ -960,6 +1078,8 @@ static void star_undo(void *user) {
 }
 
 static void track_like(const zvuk_track_t *t, bool like) {
+	if (t->content != ZVUK_CONTENT_TRACK)
+		return;
 	star_track = *t;
 	star_apply(like);
 	svcui_star_toast(like, "svc_liked", "svc_unliked", t->title, star_undo, NULL);
@@ -1110,7 +1230,12 @@ static void save_refused(void) { toast_error(tr("zvuk_save_refused")); }
 
 static void do_row_save(void *user) {
 	(void)user;
-	if (menu_row.kind == ROW_ALBUM) {
+	if (menu_row.kind == ROW_BOOK) {
+		if (!zvukdl_book(menu_row.u.album.id, menu_row.u.album.title))
+			save_refused();
+	} else if (menu_row.kind == ROW_PODCAST) {
+		return;
+	} else if (menu_row.kind == ROW_ALBUM) {
 		if (!zvukdl_album(menu_row.u.album.id, menu_row.u.album.title)) {
 			save_refused();
 		}
@@ -1160,11 +1285,21 @@ static void list_hold(lv_obj_t *row, void *user) {
 	if (index < 0 || !view_row(index, &menu_row)) {
 		return;
 	}
+	if (menu_row.kind == ROW_PODCAST) {
+		list_tap(row, user);
+		return; // A show is opened, never bulk-downloaded as an archive.
+	}
+	if (menu_row.kind == ROW_BOOK) {
+		sx_sheet_item_t item = {.label = tr("spoken_download_book"), .icon = &icon_download, .action = do_row_save};
+		sx_sheet_menu(menu_row.u.album.title, menu_row.u.album.artist, &item, 1);
+		return;
+	}
 	sx_sheet_item_t items[7];
 	memset(items, 0, sizeof(items));
 	int n = 0;
 	bool saved = row_saved(&menu_row);
-	bool some = saved || (menu_row.kind == ROW_ALBUM && zvukdl_album_saved_count(menu_row.u.album.id) > 0);
+	bool spoken = menu_row.kind == ROW_TRACK && menu_row.u.track.content != ZVUK_CONTENT_TRACK;
+	bool some = !spoken && (saved || (menu_row.kind == ROW_ALBUM && zvukdl_album_saved_count(menu_row.u.album.id) > 0));
 	bool queueable = (menu_row.kind == ROW_TRACK && menu_row.u.track.available) || menu_row.kind == ROW_ALBUM;
 	if (queueable) {
 		items[n++] = (sx_sheet_item_t){.label = tr("queue_play_next"),
@@ -1179,6 +1314,8 @@ static void list_hold(lv_obj_t *row, void *user) {
 	bool liked = false;
 	switch (menu_row.kind) {
 	case ROW_TRACK:
+		if (menu_row.u.track.content != ZVUK_CONTENT_TRACK)
+			break;
 		liked = zvuk_is_liked(ZVUK_ITEM_TRACK, menu_row.u.track.id);
 		items[n++] = (sx_sheet_item_t){.label = tr(liked ? "zvuk_unlike" : "zvuk_like"),
 									   .icon = liked ? &icon_star_filled : &icon_star,
@@ -1194,6 +1331,9 @@ static void list_hold(lv_obj_t *row, void *user) {
 	case ROW_PLAYLIST:
 		liked = zvuk_is_liked(ZVUK_ITEM_PLAYLIST, menu_row.u.playlist.id);
 		break;
+	case ROW_BOOK:
+	case ROW_PODCAST:
+		break;
 	}
 	if (menu_row.kind != ROW_TRACK) {
 		items[n++] = (sx_sheet_item_t){.label = tr(liked ? "zvuk_unlike" : "zvuk_like"),
@@ -1205,9 +1345,8 @@ static void list_hold(lv_obj_t *row, void *user) {
 		if (saved) {
 			items[n++] = (sx_sheet_item_t){.label = tr("zvuk_saved_on_card"), .checked = true};
 		} else if (menu_row.kind == ROW_ALBUM || menu_row.u.track.available) {
-			items[n++] = (sx_sheet_item_t){.label = tr(menu_row.kind == ROW_ALBUM ? "zvuk_save_album" : "zvuk_save"),
-										   .icon = &icon_download,
-										   .action = do_row_save};
+			const char *key = menu_row.kind == ROW_ALBUM ? "zvuk_save_album" : menu_row.u.track.content == ZVUK_CONTENT_CHAPTER ? "spoken_download_book" : menu_row.u.track.content == ZVUK_CONTENT_EPISODE ? "spoken_download_episode" : "zvuk_save";
+			items[n++] = (sx_sheet_item_t){.label = tr(key), .icon = &icon_download, .action = do_row_save};
 		}
 	}
 	if (some) {
@@ -1258,6 +1397,16 @@ static void album_save_cb(lv_event_t *e) {
 	if (switcher_back_drag_active()) {
 		return;
 	}
+	if (list_kind == JOB_PODCAST)
+		return; // Episodes are saved individually.
+	if (list_kind == JOB_BOOK) {
+		if (list_book_saved) {
+			if (audiobooks_screen)
+				switch_screen(audiobooks_screen);
+		} else if (!zvukdl_book(list_album_id, list_album_title))
+			save_refused();
+		return;
+	}
 	int saved, playable;
 	album_saved_counts(&saved, &playable);
 	if (playable > 0 && saved == playable) {
@@ -1306,7 +1455,11 @@ static lv_timer_t *list_timer;
 
 static void list_timer_cb(lv_timer_t *t) {
 	(void)t;
-	if (list && playing_update()) {
+	static unsigned resume_revision;
+	unsigned revision = podcaststate_revision();
+	bool changed_resume = list_kind == JOB_PODCAST && resume_revision != revision;
+	resume_revision = revision;
+	if (list && (playing_update() || changed_resume)) {
 		svclist_rebind(list);
 	}
 }
@@ -1365,13 +1518,12 @@ static void build_list_page(gui_config_t *cfg) {
 
 	// The kinds of result: pills under the title, as on the Subsonic page.
 	search_bar = bar_create(list_screen, LV_FLEX_ALIGN_START);
-	// Four kinds do not fit the width in every language: the row scrolls
+	// The kinds do not fit the width in every language: the row scrolls
 	// sideways, as chips do.
 	lv_obj_set_scrollable(search_bar, true);
 	lv_obj_set_scroll_dir(search_bar, LV_DIR_HOR);
 	lv_obj_set_scrollbar_mode(search_bar, LV_SCROLLBAR_MODE_OFF);
-	static const char *const KINDS[ZVUK_SEARCH_KINDS] = {"zvuk_tracks", "zvuk_albums", "zvuk_artists",
-														 "zvuk_playlists"};
+	static const char *const KINDS[ZVUK_SEARCH_KINDS] = {"zvuk_tracks", "zvuk_albums", "zvuk_artists", "zvuk_playlists", "spoken_audiobook", "spoken_podcast"};
 	for (int i = 0; i < ZVUK_SEARCH_KINDS; i++) {
 		search_pills[i] = sx_pill(search_bar, tr(KINDS[i]), i, search_pill_cb);
 	}
@@ -1405,9 +1557,40 @@ static void build_list_page(gui_config_t *cfg) {
 
 static lv_obj_t *search_field;
 
+static bool spoken_link(const char *text, job_kind_t *kind, char *id, size_t size) {
+	static const struct {
+		const char *prefix;
+		job_kind_t kind;
+	} links[] = {{"https://zvuk.com/abook/", JOB_BOOK}, {"https://zvuk.com/podcast/", JOB_PODCAST}};
+	for (size_t i = 0; text && i < sizeof(links) / sizeof(links[0]); i++) {
+		size_t prefix = strlen(links[i].prefix);
+		if (strncmp(text, links[i].prefix, prefix))
+			continue;
+		const char *number = text + prefix;
+		size_t len = strspn(number, "0123456789");
+		if (!len || len >= size || len >= ZVUK_ID_MAX || (number[len] && number[len] != '?' && number[len] != '#'))
+			return false;
+		snprintf(id, size, "%.*s", (int)len, number);
+		*kind = links[i].kind;
+		return true;
+	}
+	return false;
+}
+
+bool zvukpage_open_link(const char *url) {
+	job_kind_t kind;
+	char id[ZVUK_ID_MAX];
+	if (!spoken_link(url, &kind, id, sizeof(id)))
+		return false;
+	open_list(tr(kind == JOB_BOOK ? "spoken_audiobook" : "spoken_podcast"), kind, id, NULL, 0);
+	return true;
+}
+
 static void search_accept_cb(lv_event_t *e) {
 	(void)e;
 	const char *text = lv_textarea_get_text(search_field);
+	if (zvukpage_open_link(text))
+		return;
 	if (text && text[0]) {
 		open_list(text, JOB_SEARCH, text, NULL, ZVUK_SEARCH_TRACKS);
 	}
@@ -1524,6 +1707,19 @@ static void save_note_async(void *user) {
 	case ZVUKDL_SAVED:
 		refresh_marks();
 		update_album_bar();
+		break;
+	case ZVUKDL_BOOK_SAVED:
+		if (list_kind == JOB_BOOK) {
+			char path[512];
+			list_book_saved = zvukdl_local_book(list_album_id, path, sizeof(path));
+		}
+		refresh_marks();
+		update_album_bar();
+		toast_success(tr("spoken_book_saved"));
+		break;
+	case ZVUKDL_EPISODE_SAVED:
+		refresh_marks();
+		toast_success(tr("spoken_episode_saved"));
 		break;
 	case ZVUKDL_FAILED:
 		toast_error(note->text);

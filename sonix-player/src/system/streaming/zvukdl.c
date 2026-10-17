@@ -15,14 +15,19 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "src/gui/shell/gui.h"
 #include "src/system/core/lang.h"
 #include "src/system/core/utils.h"
 #include "src/system/device/system.h"
 #include "src/system/device/usb.h"
+#include "src/system/library/audiobookdb.h"
 #include "src/system/library/library.h"
 #include "src/system/library/mp4flac.h"
 #include "src/system/net/http.h"
+#include "src/system/streaming/bookdownload.h"
 #include "src/system/streaming/podcastdl.h"
+#include "src/system/streaming/podcastimport.h"
+#include "src/system/streaming/streamcover.h"
 #include "src/system/streaming/zvukcache.h"
 
 // See zvukdl.h.
@@ -32,6 +37,7 @@
 
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static char root[400];
+static unsigned card_epoch;
 
 // ===========================================================================
 // the index
@@ -812,6 +818,8 @@ static FILE *sink_open(FILE *out, bool flac, const tags_t *tags) {
 
 typedef struct {
 	bool album; // only the id and title: expanded on the worker
+	bool book;
+	char book_folder[AUDIOBOOKDB_FOLDER_MAX];
 	zvuk_track_t track;
 } entry_t;
 
@@ -819,6 +827,7 @@ static pthread_cond_t ready = PTHREAD_COND_INITIALIZER;
 static entry_t *queue;
 static int queue_len;
 static bool worker_started, running;
+static bool music_saved_pending;
 static unsigned generation;
 static zvukdl_status_t status;
 static void (*listener)(zvukdl_event_t, int, const char *);
@@ -1079,6 +1088,281 @@ static bool save_track(const zvuk_track_t *t, unsigned asked, char *why, size_t 
 	return ok;
 }
 
+static bool spoken_same_card(const char *expected_root, unsigned epoch) {
+	pthread_mutex_lock(&lock);
+	bool same = epoch == card_epoch && strcmp(root, expected_root) == 0;
+	pthread_mutex_unlock(&lock);
+	return same;
+}
+
+static int spoken_pin(const char *expected_root, unsigned epoch) {
+	char current[400];
+	int pin = storage_pin_card(current, sizeof(current));
+	if (pin < 0)
+		return -1;
+	pthread_mutex_lock(&lock);
+	bool same = epoch == card_epoch && strcmp(current, expected_root) == 0;
+	pthread_mutex_unlock(&lock);
+	if (!same) {
+		close(pin);
+		return -1;
+	}
+	return pin;
+}
+
+static bool tag_line(FILE *f, const char *key, const char *value) {
+	if (fprintf(f, "%s=", key) < 0)
+		return false;
+	for (const unsigned char *p = (const unsigned char *)value; *p; p++)
+		if (fputc(*p < 0x20 ? ' ' : *p, f) == EOF)
+			return false;
+	return fputc('\n', f) != EOF;
+}
+
+static bool book_tags(const char *path, const zvuk_track_t *t) {
+	char tags[600], tmp[620];
+	if (snprintf(tags, sizeof(tags), "%s.tags", path) >= (int)sizeof(tags) || snprintf(tmp, sizeof(tmp), "%s.part", tags) >= (int)sizeof(tmp))
+		return false;
+	FILE *f = fopen(tmp, "wb");
+	if (!f)
+		return false;
+	bool ok = tag_line(f, "title", t->title) && tag_line(f, "artist", t->artist) && tag_line(f, "album", t->album) && tag_line(f, "album_artist", t->artist) && fprintf(f, "track=%d\n", t->track_number) >= 0;
+	if (fflush(f) != 0 || fsync(fileno(f)) != 0)
+		ok = false;
+	if (fclose(f) != 0)
+		ok = false;
+	if (ok)
+		ok = rename(tmp, tags) == 0;
+	if (!ok)
+		remove(tmp);
+	return ok;
+}
+
+// Caller holds a pin. Metadata/stream-info calls happen before this function;
+// only the cancellable audio transfer holds the card busy until checked close.
+static bool save_spoken_file(const zvuk_track_t *t, const zvuk_stream_t *stream, unsigned asked, const char *card, unsigned epoch, const char *path, int total, char *why, size_t why_size) {
+	if (!save_allowed(asked, why, why_size) || stream->got == ZVUK_QUALITY_FLAC)
+		return false;
+	char part[540];
+	if (snprintf(part, sizeof(part), "%s.part", path) >= (int)sizeof(part))
+		return false;
+	tags_t tags = {0};
+	snprintf(tags.title, sizeof(tags.title), "%s", t->title);
+	snprintf(tags.artist, sizeof(tags.artist), "%s", t->artist);
+	snprintf(tags.album_artist, sizeof(tags.album_artist), "%s", t->artist);
+	snprintf(tags.album, sizeof(tags.album), "%s", t->album);
+	tags.track = t->track_number;
+	tags.tracks = total;
+	FILE *out = fopen(part, "wb");
+	if (!out)
+		return false;
+	FILE *sink = sink_open(out, false, &tags);
+	uint64_t samples = 0;
+	bool ok = zvukcache_fetch(t->id, stream, sink ? sink : out, progress_cb, (void *)(uintptr_t)asked, &samples, why, why_size);
+	if (sink && fclose(sink) != 0)
+		ok = false;
+	if (fflush(out) != 0 || fsync(fileno(out)) != 0)
+		ok = false;
+	if (fclose(out) != 0)
+		ok = false;
+	ok = ok && save_allowed(asked, why, why_size);
+	if (ok)
+		ok = rename(part, path) == 0;
+	if (!ok && spoken_same_card(card, epoch))
+		remove(part);
+	return ok;
+}
+
+typedef struct {
+	char folder[512];
+	unsigned generation;
+} spoken_scan_t;
+static void spoken_scan_async(void *user) {
+	spoken_scan_t *scan = user;
+	char folder[AUDIOBOOKDB_FOLDER_MAX], current[512], why[128];
+	audiobookdb_folder(folder, sizeof(folder));
+	const char *card = storage_sd_root();
+	if (card && snprintf(current, sizeof(current), "%s/%s", card, folder) < (int)sizeof(current) && strcmp(current, scan->folder) == 0 && save_allowed(scan->generation, why, sizeof(why)))
+		audiobookdb_request_scan(current);
+	free(scan);
+}
+
+static bool save_book(const entry_t *entry, unsigned asked, char *saved_path, size_t path_size, char *why, size_t why_size) {
+	char card[400], directory[512];
+	why[0] = '\0';
+	pthread_mutex_lock(&lock);
+	unsigned epoch = card_epoch;
+	pthread_mutex_unlock(&lock);
+	int pin = storage_pin_card(card, sizeof(card));
+	if (pin < 0) {
+		snprintf(why, why_size, "%s", tr("download_no_card"));
+		return false;
+	}
+	bool ok = false;
+	bookdownload_t *transaction = NULL;
+	zvuk_spoken_part_t *parts = NULL;
+	char *cover = NULL;
+	size_t cover_size = 0;
+	if (!save_allowed(asked, why, why_size))
+		goto done;
+	if (!bookdownload_path(card, entry->book_folder, "zvuk", entry->track.album_id, directory, sizeof(directory)))
+		goto done;
+	if (bookdownload_ready(directory, saved_path, path_size)) {
+		ok = true;
+		goto done;
+	}
+	struct stat st;
+	if (lstat(directory, &st) == 0) {
+		snprintf(why, why_size, "%s", tr("book_download_conflict"));
+		goto done;
+	}
+	close(pin);
+	pin = -1;
+	parts = calloc(BOOKDOWNLOAD_MAX_PARTS, sizeof(*parts));
+	transaction = calloc(1, sizeof(*transaction));
+	if (!parts || !transaction) {
+		snprintf(why, why_size, "%s", tr("out_of_memory"));
+		goto done;
+	}
+	zvuk_spoken_t book;
+	int count = zvuk_book_parts(entry->track.album_id, parts, BOOKDOWNLOAD_MAX_PARTS, &book);
+	if (count < 0) {
+		snprintf(why, why_size, "%s", zvuk_last_error());
+		goto done;
+	}
+	if (count == 1)
+		snprintf(parts[0].track.title, sizeof(parts[0].track.title), "%s", book.title);
+	if (!save_allowed(asked, why, why_size) || (pin = spoken_pin(card, epoch)) < 0)
+		goto done;
+	char parent[512];
+	snprintf(parent, sizeof(parent), "%s", directory);
+	*strrchr(parent, '/') = '\0';
+	if (!make_dirs(card, parent) || !bookdownload_begin(transaction, directory))
+		goto done;
+	close(pin);
+	pin = -1;
+	for (int i = 0; i < count; i++) {
+		zvuk_stream_t stream;
+		if (!save_allowed(asked, why, why_size))
+			goto done;
+		if (!zvuk_spoken_stream(parts[i].track.id, &stream)) {
+			snprintf(why, why_size, "%s", zvuk_last_error());
+			goto done;
+		}
+		if (!save_allowed(asked, why, why_size) || (pin = spoken_pin(card, epoch)) < 0)
+			goto done;
+		char filename[80], path[512];
+		if (snprintf(filename, sizeof(filename), "%04d-%s.mp3", i + 1, parts[i].track.id) >= (int)sizeof(filename) || snprintf(path, sizeof(path), "%s/%s", transaction->folder, filename) >= (int)sizeof(path))
+			goto done;
+		if (!save_spoken_file(&parts[i].track, &stream, asked, card, epoch, path, count, why, why_size) || !book_tags(path, &parts[i].track) || !bookdownload_record(transaction, filename))
+			goto done;
+		close(pin);
+		pin = -1;
+	}
+	if (!save_allowed(asked, why, why_size))
+		goto done;
+	if (book.cover[0])
+		http_get_ex(book.cover, zvuk_stream_headers(), false, &cover, &cover_size, STREAMCOVER_MAX_BYTES, 15, NULL);
+	if (!save_allowed(asked, why, why_size) || (pin = spoken_pin(card, epoch)) < 0)
+		goto done;
+	char artwork[600];
+	if (cover && snprintf(artwork, sizeof(artwork), "%s/cover.jpg", transaction->folder) < (int)sizeof(artwork))
+		streamcover_store(artwork, cover, cover_size);
+	if (!bookdownload_publish(transaction, count))
+		goto done;
+	ok = bookdownload_ready(directory, saved_path, path_size);
+done:
+	if (transaction && transaction->owned && spoken_same_card(card, epoch)) {
+		if (pin < 0)
+			pin = spoken_pin(card, epoch);
+		if (pin >= 0)
+			bookdownload_abort(transaction);
+	}
+	free(parts);
+	free(transaction);
+	free(cover);
+	if (pin >= 0)
+		close(pin);
+	if (ok) {
+		spoken_scan_t *scan = calloc(1, sizeof(*scan));
+		if (scan) {
+			snprintf(scan->folder, sizeof(scan->folder), "%s", directory);
+			*strrchr(scan->folder, '/') = '\0';
+			scan->generation = asked;
+			if (!gui_post(spoken_scan_async, scan))
+				free(scan);
+		}
+	} else if (!why[0])
+		snprintf(why, why_size, "%s", tr("download_failed"));
+	return ok;
+}
+
+static bool save_episode(const zvuk_track_t *episode, unsigned asked, char *saved_path, size_t path_size, char *why, size_t why_size) {
+	why[0] = '\0';
+	char card[400], folder[512], base[512], stage[512] = "", stage_tags[540] = "", tags[540];
+	pthread_mutex_lock(&lock);
+	unsigned epoch = card_epoch;
+	pthread_mutex_unlock(&lock);
+	int pin = storage_pin_card(card, sizeof(card));
+	if (pin < 0)
+		return false;
+	bool ok = false;
+	bool published_tags = false;
+	if (!save_allowed(asked, why, why_size) || !podcastimport_paths(card, "zvuk", episode->album_id, episode->album, episode->id, episode->title, folder, sizeof(folder), base, sizeof(base)) || snprintf(saved_path, path_size, "%s/%s.mp3", folder, base) >= (int)path_size)
+		goto done;
+	snprintf(tags, sizeof(tags), "%s.tags", saved_path);
+	char key[96], expected_key[96];
+	snprintf(expected_key, sizeof(expected_key), "s:zvuk:%s", episode->id);
+	if (exists(saved_path) && podcastimport_key(saved_path, key, sizeof(key)) && strcmp(key, expected_key) == 0) {
+		ok = true;
+		goto done;
+	}
+	if (exists(saved_path)) {
+		// A completed older import missing only display tags needs no audio
+		// download. The namespace helper preserves the existing file.
+		ok = podcastimport_write_tags(saved_path, "zvuk", episode->album_id, episode->album, episode->id, episode->title, episode->artist, episode->cover, episode->published_at);
+		goto done;
+	}
+	if (snprintf(stage, sizeof(stage), "%s/.%s.mp3.part", folder, base) >= (int)sizeof(stage) || snprintf(stage_tags, sizeof(stage_tags), "%s.tags", stage) >= (int)sizeof(stage_tags))
+		goto done;
+	close(pin);
+	pin = -1;
+	zvuk_stream_t stream;
+	if (!zvuk_spoken_stream(episode->id, &stream)) {
+		snprintf(why, why_size, "%s", zvuk_last_error());
+		goto done;
+	}
+	if (!save_allowed(asked, why, why_size) || (pin = spoken_pin(card, epoch)) < 0)
+		goto done;
+	if (!make_dirs(card, folder) || !save_spoken_file(episode, &stream, asked, card, epoch, stage, 0, why, why_size))
+		goto done;
+	// Helper writes the service's own namespace, never Podcast Index IDs.
+	ok = podcastimport_write_tags(stage, "zvuk", episode->album_id, episode->album, episode->id, episode->title, episode->artist, episode->cover, episode->published_at);
+	if (ok)
+		ok = save_allowed(asked, why, why_size) && rename(stage_tags, tags) == 0;
+	published_tags = ok;
+	if (ok)
+		ok = rename(stage, saved_path) == 0;
+done:
+	if (!ok && spoken_same_card(card, epoch)) {
+		if (pin < 0)
+			pin = spoken_pin(card, epoch);
+		if (pin >= 0) {
+			if (stage[0])
+				remove(stage);
+			if (stage_tags[0])
+				remove(stage_tags);
+			if (published_tags)
+				remove(tags);
+		}
+	}
+	if (pin >= 0)
+		close(pin);
+	if (!ok && !why[0])
+		snprintf(why, why_size, "%s", tr("download_failed"));
+	return ok;
+}
+
 static void library_look(void *user) {
 	(void)user;
 	if (storage_sd_root() && storage_sd_root()[0]) {
@@ -1103,7 +1387,21 @@ static void *worker_main(void *arg) {
 		status.percent = -1;
 		pthread_mutex_unlock(&lock);
 
-		if (e.album) {
+		if (e.book || e.track.content == ZVUK_CONTENT_EPISODE) {
+			char why[256], saved_path[512];
+			bool ok = e.book ? save_book(&e, asked, saved_path, sizeof(saved_path), why, sizeof(why)) : save_episode(&e.track, asked, saved_path, sizeof(saved_path), why, sizeof(why));
+			pthread_mutex_lock(&lock);
+			bool current = asked == generation;
+			if (current) {
+				status.done += ok;
+				status.failed += !ok;
+			}
+			status.queued = queue_len;
+			running = false;
+			pthread_mutex_unlock(&lock);
+			if (current)
+				tell(ok ? (e.book ? ZVUKDL_BOOK_SAVED : ZVUKDL_EPISODE_SAVED) : ZVUKDL_FAILED, ok ? 1 : 0, ok ? saved_path : why);
+		} else if (e.album) {
 			zvuk_track_t *tracks = calloc(300, sizeof(*tracks));
 			int n = tracks ? zvuk_album_tracks(e.track.album_id, tracks, 300, NULL) : -1;
 			// What is on the card already is not saved again (asked outside
@@ -1139,6 +1437,7 @@ static void *worker_main(void *arg) {
 			if (current) {
 				status.done += ok;
 				status.failed += !ok;
+				music_saved_pending = music_saved_pending || ok;
 			}
 			status.queued = queue_len;
 			running = false;
@@ -1152,18 +1451,20 @@ static void *worker_main(void *arg) {
 			}
 		}
 		pthread_mutex_lock(&lock);
-		bool finished = queue_len == 0 && !running;
+		bool finished = asked == generation && queue_len == 0 && !running;
 		int done_count = status.done;
+		bool scan_music = finished && music_saved_pending;
 		if (finished) {
 			status.active = false;
 			status.title[0] = '\0';
+			music_saved_pending = false;
 		}
 		pthread_mutex_unlock(&lock);
 		if (finished) {
 			char where[700];
 			snprintf(where, sizeof(where), "%s/%s", "Music", ZVUKDL_FOLDER);
-			tell(ZVUKDL_FINISHED, done_count, where);
-			if (done_count > 0) {
+			tell(ZVUKDL_FINISHED, done_count, e.book ? e.book_folder : e.track.content == ZVUK_CONTENT_EPISODE ? PODCASTDL_FOLDER : where);
+			if (scan_music) {
 				library_look(NULL);
 			}
 		}
@@ -1187,8 +1488,12 @@ static bool enqueue(const entry_t *e) {
 	if (!status.active) {
 		memset(&status, 0, sizeof(status));
 		status.active = true;
+		music_saved_pending = false;
 	}
-	queue[queue_len++] = *e;
+	queue[queue_len] = *e;
+	if (e->book)
+		audiobookdb_folder(queue[queue_len].book_folder, sizeof(queue[queue_len].book_folder));
+	queue_len++;
 	status.queued = queue_len;
 	if (!worker_started) {
 		pthread_t th;
@@ -1209,6 +1514,10 @@ bool zvukdl_track(const zvuk_track_t *track) {
 	if (!track || !track->id[0]) {
 		return false;
 	}
+	if (track->content == ZVUK_CONTENT_EPISODE)
+		return zvukdl_episode(track);
+	if (track->content == ZVUK_CONTENT_CHAPTER)
+		return zvukdl_book(track->album_id, track->album);
 	entry_t e = {.album = false, .track = *track};
 	return enqueue(&e);
 }
@@ -1223,6 +1532,49 @@ bool zvukdl_album(const char *album_id, const char *title) {
 	snprintf(e.track.album_id, sizeof(e.track.album_id), "%s", album_id);
 	snprintf(e.track.title, sizeof(e.track.title), "%s", title ? title : "");
 	return enqueue(&e);
+}
+
+bool zvukdl_book(const char *book_id, const char *title) {
+	if (!book_id || !book_id[0] || strlen(book_id) >= ZVUK_ID_MAX || strspn(book_id, "0123456789") != strlen(book_id))
+		return false;
+	entry_t e = {.book = true};
+	snprintf(e.track.album_id, sizeof(e.track.album_id), "%s", book_id);
+	snprintf(e.track.title, sizeof(e.track.title), "%s", title ? title : "");
+	return enqueue(&e);
+}
+
+bool zvukdl_local_book(const char *book_id, char *out, size_t size) {
+	char card[400], folder[AUDIOBOOKDB_FOLDER_MAX], path[512];
+	int pin = storage_pin_card(card, sizeof(card));
+	if (pin < 0)
+		return false;
+	audiobookdb_folder(folder, sizeof(folder));
+	bool ok = bookdownload_path(card, folder, "zvuk", book_id, path, sizeof(path)) && bookdownload_ready(path, out, size);
+	close(pin);
+	return ok;
+}
+
+bool zvukdl_episode(const zvuk_track_t *episode) {
+	if (!episode || episode->content != ZVUK_CONTENT_EPISODE || !episode->id[0] || !episode->album_id[0])
+		return false;
+	entry_t e = {.track = *episode};
+	return enqueue(&e);
+}
+
+bool zvukdl_local_episode(const zvuk_track_t *episode, char *out, size_t size) {
+	if (!episode || episode->content != ZVUK_CONTENT_EPISODE || !out || !size)
+		return false;
+	out[0] = '\0';
+	char card[400], folder[512], base[512], path[512], key[96], wanted[96];
+	int pin = storage_pin_card(card, sizeof(card));
+	if (pin < 0)
+		return false;
+	snprintf(wanted, sizeof(wanted), "s:zvuk:%s", episode->id);
+	bool ok = podcastimport_paths(card, "zvuk", episode->album_id, episode->album, episode->id, episode->title, folder, sizeof(folder), base, sizeof(base)) && snprintf(path, sizeof(path), "%s/%s.mp3", folder, base) < (int)sizeof(path) && exists(path) && podcastimport_key(path, key, sizeof(key)) && strcmp(key, wanted) == 0 && strlen(path) < size;
+	if (ok)
+		snprintf(out, size, "%s", path);
+	close(pin);
+	return ok;
 }
 
 void zvukdl_status(zvukdl_status_t *out) {
@@ -1246,6 +1598,7 @@ void zvukdl_cancel_all(void) {
 	generation++;
 	status.active = false;
 	status.title[0] = '\0';
+	music_saved_pending = false;
 	pthread_mutex_unlock(&lock);
 	zvukcache_fetch_cancel();
 	if (any) {
@@ -1257,6 +1610,7 @@ void zvukdl_set_root(const char *sd_root) {
 	pthread_mutex_lock(&lock);
 	bool changed = strcmp(root, sd_root ? sd_root : "") != 0;
 	if (changed) {
+		card_epoch++;
 		snprintf(root, sizeof(root), "%s", sd_root ? sd_root : "");
 		index_forget();
 	}

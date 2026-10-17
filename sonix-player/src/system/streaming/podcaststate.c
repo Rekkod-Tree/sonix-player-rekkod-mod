@@ -14,6 +14,7 @@
 #include "src/system/library/metadata.h"
 #include "src/system/streaming/podcastcache.h"
 #include "src/system/streaming/podcastdl.h"
+#include "src/system/streaming/podcastimport.h"
 
 // The table lives in podcast.db with the followed podcasts (podcastsubs.c). The
 // connection is kept open between pieces of work and opened again when the file
@@ -136,8 +137,8 @@ static void absolute(const char *stored, char *out, size_t size) {
 	}
 }
 
-// "e:<id>" for an episode of the catalogue, "f:<path under the card>" for a
-// file of the Podcast folder that is not one. False for anything else.
+// "e:<id>" for Podcast Index, "s:<service>:<id>" for imported provider
+// episodes, otherwise "f:<path under the card>". False outside Podcasts.
 static bool key_for(const char *path, long long episode_id, char *out, size_t size) {
 	if (episode_id > 0) {
 		snprintf(out, size, "e:%lld", episode_id);
@@ -145,6 +146,13 @@ static bool key_for(const char *path, long long episode_id, char *out, size_t si
 	}
 	if (!path || !path[0] || !podcastdl_owns(path)) {
 		return false;
+	}
+	const char *name = strrchr(path, '/');
+	if (!name || name[1] == '.') {
+		return false; // Downloader staging files never acquire listening state.
+	}
+	if (podcastimport_key(path, out, size)) {
+		return true;
 	}
 	snprintf(out, size, "f:%s", relative(path));
 	return true;
@@ -621,7 +629,7 @@ void podcaststate_forget(const char *path) {
 		return;
 	}
 	pthread_mutex_lock(&current_lock);
-	if (current_valid && strcmp(current_key, key) == 0) {
+	if (current_valid && (strcmp(current_key, key) == 0 || strcmp(current.path, path) == 0)) {
 		current_valid = false;
 	}
 	pthread_mutex_unlock(&current_lock);
@@ -631,8 +639,10 @@ void podcaststate_forget(const char *path) {
 	revision++;
 	if (db) {
 		sqlite3_stmt *stmt = NULL;
-		if (sqlite3_prepare_v2(db, "DELETE FROM PODCAST_EPISODES WHERE key=?", -1, &stmt, NULL) == SQLITE_OK) {
+		// The UI may have removed the sidecar already, losing its service ID.
+		if (sqlite3_prepare_v2(db, "DELETE FROM PODCAST_EPISODES WHERE key=? OR path=?", -1, &stmt, NULL) == SQLITE_OK) {
 			sqlite3_bind_text(stmt, 1, key, -1, SQLITE_STATIC);
+			sqlite3_bind_text(stmt, 2, relative(path), -1, SQLITE_TRANSIENT);
 			sqlite3_step(stmt);
 			sqlite3_finalize(stmt);
 		}

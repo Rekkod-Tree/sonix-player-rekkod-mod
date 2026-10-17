@@ -831,6 +831,19 @@ static void playlist_from(const json_doc_t *doc, int p, zvuk_playlist_t *out) {
 
 static const char Q_STREAM[] = "query getStream($ids: [ID!]!) { mediaContents(ids: $ids) { __typename ... on Track { "
 							   "stream { expire expireDelta flac flacdrm high mid } } } }";
+static const char Q_STREAM_SPOKEN[] = "query getStream($ids: [ID!]!) { mediaContents(ids: $ids) { __typename "
+									  "... on Chapter { stream { expire expireDelta high mid } } "
+									  "... on Episode { stream { expire expireDelta high mid } } } }";
+// Public client evidence: oshokin/zvuk-grabber c9079597 graphql.go and
+// trudenboy/zvuk-music ed491f61 queries/getPodcasts.graphql/getStream.graphql.
+// A book is not a Release, nor its chapters ordinary getTracks entries.
+static const char Q_BOOK_PARTS[] = "query getBookChapters($ids: [ID!]!) { getBooks(ids: $ids) { title fullDuration description "
+								   "image { src } bookAuthors { rname } performers { rname } "
+								   "chapters { __typename id title duration availability position } } }";
+static const char Q_PODCAST_IDS[] = "query getPodcastEpisodes($ids: [ID!]!) { getPodcasts(ids: $ids) { title description image { src } "
+									"authors { name } episodes { id publicationDate } } }";
+static const char Q_EPISODES[] = "query getEpisodes($ids: [ID!]!) { getEpisodes(ids: $ids) { __typename id title duration availability "
+								 "publicationDate image { src } podcast { id title image { src } authors { name } } } }";
 static const char Q_TRACKS[] = "query getTracks($ids: [ID!]!) { getTracks(ids: $ids) { " TRACK_FIELDS " } }";
 static const char Q_LIKED[] = "query userTracks($orderBy: TrackOrderByType, $orderDirection: OrderDirectionType) { "
 							  "collection { tracks(orderBy: $orderBy, orderDirection: $orderDirection) { id } } }";
@@ -859,6 +872,10 @@ static const char *const Q_SEARCH[ZVUK_SEARCH_KINDS] = {
 							"$limit) { items { id title } } } }",
 	[ZVUK_SEARCH_PLAYLISTS] = "query search($query: String, $limit: Int = 2) { search(query: $query) { "
 							  "playlists(limit: $limit) { items { id title } } } }",
+	[ZVUK_SEARCH_BOOKS] = "query search($query: String, $limit: Int = 2) { search(query: $query) { "
+						  "books(limit: $limit) { items { id title authorNames } } } }",
+	[ZVUK_SEARCH_PODCASTS] = "query search($query: String, $limit: Int = 2) { search(query: $query) { "
+							 "podcasts(limit: $limit) { items { id title image { src } authors { name } } } } }",
 };
 static const char Q_ADD[] = "mutation addItemToCollection($id: ID, $type: CollectionItemType) { collection { "
 							"addItem(id: $id, type: $type) } }";
@@ -1274,6 +1291,215 @@ int zvuk_album_tracks(const char *album_id, zvuk_track_t *out, int max, zvuk_alb
 	return got;
 }
 
+static bool spoken_id_valid(const char *id) {
+	if (!id || !id[0] || strlen(id) >= ZVUK_ID_MAX)
+		return false;
+	for (const char *p = id; *p; p++)
+		if (*p < '0' || *p > '9')
+			return false;
+	return true;
+}
+
+static void spoken_names(const json_doc_t *doc, int parent, const char *field, const char *name, char *out, size_t size) {
+	out[0] = '\0';
+	int array = json_get(doc, parent, field);
+	size_t used = 0;
+	for (int i = 0; i < json_len(doc, array) && used < size; i++) {
+		char text[ZVUK_NAME_MAX];
+		json_obj_str(doc, json_at(doc, array, i), name, text, sizeof(text));
+		if (text[0])
+			used += (size_t)snprintf(out + used, size - used, "%s%s", used ? ", " : "", text);
+	}
+}
+
+static void spoken_parent(const json_doc_t *doc, int parent, const char *id, bool book, zvuk_spoken_t *out) {
+	memset(out, 0, sizeof(*out));
+	snprintf(out->id, sizeof(out->id), "%s", id);
+	json_obj_str(doc, parent, "title", out->title, sizeof(out->title));
+	json_obj_str(doc, parent, "description", out->description, sizeof(out->description));
+	image_of(doc, parent, 600, out->cover, sizeof(out->cover));
+	spoken_names(doc, parent, book ? "bookAuthors" : "authors", book ? "rname" : "name", out->author, sizeof(out->author));
+	if (book) {
+		spoken_names(doc, parent, "performers", "rname", out->narrator, sizeof(out->narrator));
+		out->duration = json_obj_long(doc, parent, "fullDuration", 0);
+	}
+}
+
+static int chapter_position_cmp(const void *a, const void *b) {
+	long x = ((const zvuk_spoken_part_t *)a)->source_position;
+	long y = ((const zvuk_spoken_part_t *)b)->source_position;
+	return (x > y) - (x < y);
+}
+
+static int book_parts_from(const json_doc_t *doc, int parent, const char *id, zvuk_spoken_part_t *out, int max, zvuk_spoken_t *meta) {
+	if (parent < 0 || doc->toks[parent].type != JSON_OBJECT || !out || max <= 0)
+		return -1;
+	int array = json_get(doc, parent, "chapters");
+	int count = json_len(doc, array);
+	if (count <= 0 || count > max || count > ZVUK_SPOKEN_MAX_PARTS)
+		return -1; // never publish a silently truncated book
+	zvuk_spoken_t book;
+	spoken_parent(doc, parent, id, true, &book);
+	if (!book.title[0])
+		return -1;
+	for (int i = 0; i < count; i++) {
+		int child = json_at(doc, array, i);
+		char type[32];
+		json_obj_str(doc, child, "__typename", type, sizeof(type));
+		memset(&out[i], 0, sizeof(out[i]));
+		zvuk_track_t *t = &out[i].track;
+		id_of(doc, child, "id", t->id, sizeof(t->id));
+		json_obj_str(doc, child, "title", t->title, sizeof(t->title));
+		out[i].source_position = json_obj_long(doc, child, "position", -1);
+		out[i].availability = json_obj_long(doc, child, "availability", -1);
+		if (strcmp(type, "Chapter") != 0 || !spoken_id_valid(t->id) || !t->title[0] || out[i].source_position < 0)
+			return -1;
+		for (int j = 0; j < i; j++)
+			if (strcmp(t->id, out[j].track.id) == 0 || out[i].source_position == out[j].source_position)
+				return -1;
+		snprintf(t->album_id, sizeof(t->album_id), "%s", book.id);
+		snprintf(t->album, sizeof(t->album), "%s", book.title);
+		snprintf(t->artist, sizeof(t->artist), "%s", book.author);
+		snprintf(t->cover, sizeof(t->cover), "%s", book.cover);
+		t->duration = (int)json_obj_long(doc, child, "duration", 0);
+		t->content = ZVUK_CONTENT_CHAPTER;
+		t->available = true; // raw availability is not an undocumented permission bit
+	}
+	qsort(out, (size_t)count, sizeof(*out), chapter_position_cmp);
+	for (int i = 0; i < count; i++) {
+		if (i && out[i].source_position != out[i - 1].source_position + 1)
+			return -1; // missing chapter positions must not become a complete book
+		out[i].track.track_number = i + 1;
+	}
+	book.part_count = count;
+	if (meta)
+		*meta = book;
+	return count;
+}
+
+int zvuk_book_parts(const char *id, zvuk_spoken_part_t *out, int max, zvuk_spoken_t *meta) {
+	if (meta)
+		memset(meta, 0, sizeof(*meta));
+	if (!spoken_id_valid(id) || !out || max <= 0)
+		return -1;
+	char vars[96], *body;
+	snprintf(vars, sizeof(vars), "{\"ids\":[\"%s\"]}", id);
+	json_doc_t doc;
+	int data;
+	if (!gql("getBookChapters", Q_BOOK_PARTS, vars, &body, &doc, &data))
+		return -1;
+	int errors = json_get(&doc, json_root(&doc), "errors");
+	int count = json_len(&doc, errors) > 0 ? -1 : book_parts_from(&doc, json_path(&doc, data, "getBooks.0"), id, out, max, meta);
+	done(body, &doc);
+	if (count < 0)
+		set_error("%s", tr("zvuk_unreadable_reply"));
+	return count;
+}
+
+typedef struct {
+	char id[ZVUK_ID_MAX], date[40];
+	int order;
+} episode_ref_t;
+static int episode_date_cmp(const void *a, const void *b) {
+	const episode_ref_t *x = a, *y = b;
+	int date = strcmp(y->date, x->date); // ISO dates: newest first; absent last
+	return date ? date : (x->order > y->order) - (x->order < y->order);
+}
+
+int zvuk_podcast_ids(const char *id, char (**ids)[ZVUK_ID_MAX], zvuk_spoken_t *meta) {
+	if (!ids)
+		return -1;
+	*ids = NULL;
+	if (meta)
+		memset(meta, 0, sizeof(*meta));
+	if (!spoken_id_valid(id))
+		return -1;
+	char vars[96], *body;
+	snprintf(vars, sizeof(vars), "{\"ids\":[\"%s\"]}", id);
+	json_doc_t doc;
+	int data;
+	if (!gql("getPodcastEpisodes", Q_PODCAST_IDS, vars, &body, &doc, &data))
+		return -1;
+	int parent = json_path(&doc, data, "getPodcasts.0");
+	int array = json_get(&doc, parent, "episodes");
+	int count = json_len(&doc, array);
+	bool ok = json_len(&doc, json_get(&doc, json_root(&doc), "errors")) == 0 && parent >= 0 && doc.toks[parent].type == JSON_OBJECT && array >= 0 && doc.toks[array].type == JSON_ARRAY && count <= 10000;
+	char (*refs)[ZVUK_ID_MAX] = ok && count > 0 ? calloc((size_t)count, ZVUK_ID_MAX) : NULL;
+	episode_ref_t *ordered = ok && count > 0 ? calloc((size_t)count, sizeof(*ordered)) : NULL;
+	if (ok && count > 0 && (!refs || !ordered))
+		ok = false;
+	int kept = 0;
+	for (int i = 0; ok && i < count; i++) {
+		int child = json_at(&doc, array, i);
+		// Real shows contain nullable episode slots. They have no playable ID;
+		// keep the remaining show rather than rejecting its whole catalogue.
+		if (child >= 0 && doc.toks[child].type == JSON_NULL)
+			continue;
+		id_of(&doc, child, "id", ordered[kept].id, ZVUK_ID_MAX);
+		json_obj_str(&doc, child, "publicationDate", ordered[kept].date, sizeof(ordered[kept].date));
+		ordered[kept].order = i;
+		ok = spoken_id_valid(ordered[kept].id);
+		if (ok)
+			kept++;
+	}
+	if (ok && count > 0 && kept == 0)
+		ok = false; // An unavailable response is not an explicitly empty show.
+	if (ok && kept > 0) {
+		qsort(ordered, (size_t)kept, sizeof(*ordered), episode_date_cmp);
+		for (int i = 0; i < kept; i++)
+			snprintf(refs[i], ZVUK_ID_MAX, "%s", ordered[i].id);
+	}
+	free(ordered);
+	if (ok && meta) {
+		spoken_parent(&doc, parent, id, false, meta);
+		meta->part_count = kept;
+	}
+	done(body, &doc);
+	if (!ok) {
+		free(refs);
+		set_error("%s", tr("zvuk_unreadable_reply"));
+		return -1;
+	}
+	*ids = refs;
+	return kept;
+}
+
+static void each_episode(const json_doc_t *doc, int child, void *out, int index) {
+	zvuk_track_t *t = &((zvuk_track_t *)out)[index];
+	memset(t, 0, sizeof(*t));
+	id_of(doc, child, "id", t->id, sizeof(t->id));
+	json_obj_str(doc, child, "title", t->title, sizeof(t->title));
+	json_obj_str(doc, child, "publicationDate", t->published_at, sizeof(t->published_at));
+	t->duration = (int)json_obj_long(doc, child, "duration", 0);
+	int podcast = json_get(doc, child, "podcast");
+	id_of(doc, podcast, "id", t->album_id, sizeof(t->album_id));
+	json_obj_str(doc, podcast, "title", t->album, sizeof(t->album));
+	spoken_names(doc, podcast, "authors", "name", t->artist, sizeof(t->artist));
+	image_of(doc, child, 600, t->cover, sizeof(t->cover));
+	if (!t->cover[0])
+		image_of(doc, podcast, 600, t->cover, sizeof(t->cover));
+	t->content = ZVUK_CONTENT_EPISODE;
+	t->available = spoken_id_valid(t->id);
+}
+
+int zvuk_episodes(const char *const *ids, int count, zvuk_track_t *out, int max) {
+	if (!ids || !out || count <= 0 || count > ZVUK_TRACKS_PER_CALL || max <= 0)
+		return -1;
+	char (*copy)[ZVUK_ID_MAX] = calloc((size_t)count, ZVUK_ID_MAX);
+	if (!copy)
+		return -1;
+	for (int i = 0; i < count; i++) {
+		if (!spoken_id_valid(ids[i])) {
+			free(copy);
+			return -1;
+		}
+		snprintf(copy[i], ZVUK_ID_MAX, "%s", ids[i]);
+	}
+	int got = details("getEpisodes", Q_EPISODES, copy, count, "getEpisodes", each_episode, out, max);
+	free(copy);
+	return got;
+}
+
 int zvuk_artist_page(const char *artist_id, zvuk_track_t *tracks, int max_tracks, int *n_tracks, zvuk_album_t *albums,
 					 int max_albums, int *n_albums) {
 	*n_tracks = *n_albums = 0;
@@ -1311,8 +1537,7 @@ int zvuk_search(const char *text, zvuk_search_kind_t kind, void *out, int max) {
 	if (!gql("search", Q_SEARCH[kind], vars, &body, &doc, &data)) {
 		return -1;
 	}
-	static const char *const PATHS[ZVUK_SEARCH_KINDS] = {"search.tracks.items", "search.releases.items",
-														 "search.artists.items", "search.playlists.items"};
+	static const char *const PATHS[ZVUK_SEARCH_KINDS] = {"search.tracks.items", "search.releases.items", "search.artists.items", "search.playlists.items", "search.books.items", "search.podcasts.items"};
 	int arr = json_path(&doc, data, PATHS[kind]);
 	int got = 0;
 	for (int i = 0; i < json_len(&doc, arr) && got < max; i++) {
@@ -1321,6 +1546,27 @@ int zvuk_search(const char *text, zvuk_search_kind_t kind, void *out, int max) {
 			continue;
 		}
 		switch (kind) {
+		case ZVUK_SEARCH_BOOKS:
+		case ZVUK_SEARCH_PODCASTS: {
+			zvuk_album_t *item = &((zvuk_album_t *)out)[got];
+			memset(item, 0, sizeof(*item));
+			id_of(&doc, obj, "id", item->id, sizeof(item->id));
+			json_obj_str(&doc, obj, "title", item->title, sizeof(item->title));
+			if (kind == ZVUK_SEARCH_PODCASTS) {
+				image_of(&doc, obj, 600, item->cover, sizeof(item->cover));
+				spoken_names(&doc, obj, "authors", "name", item->artist, sizeof(item->artist));
+			} else {
+				int authors = json_get(&doc, obj, "authorNames");
+				size_t used = 0;
+				for (int a = 0; a < json_len(&doc, authors) && used < sizeof(item->artist); a++) {
+					char name[ZVUK_NAME_MAX];
+					json_str(&doc, json_at(&doc, authors, a), name, sizeof(name));
+					if (name[0])
+						used += (size_t)snprintf(item->artist + used, sizeof(item->artist) - used, "%s%s", used ? ", " : "", name);
+				}
+			}
+			break;
+		}
 		case ZVUK_SEARCH_TRACKS:
 			track_from(&doc, obj, -1, &((zvuk_track_t *)out)[got]);
 			break;
@@ -1397,7 +1643,7 @@ static void host_of(const char *url, char *out, size_t size) {
 	snprintf(out, size, "%.*s", (int)strcspn(p, "/?:"), p);
 }
 
-bool zvuk_stream(const char *track_id, zvuk_stream_t *out) {
+static bool stream_with_query(const char *track_id, zvuk_stream_t *out, const char *query) {
 	memset(out, 0, sizeof(*out));
 	out->asked = zvuk_get_quality();
 	char vars[96], *body;
@@ -1405,8 +1651,16 @@ bool zvuk_stream(const char *track_id, zvuk_stream_t *out) {
 	json_doc_t doc;
 	int data;
 	bool diag = diag_thread || session_fresh;
-	if (!gql("getStream", Q_STREAM, vars, &body, &doc, &data)) {
+	if (!gql("getStream", query, vars, &body, &doc, &data)) {
 		return false;
+	}
+	char type[32];
+	json_obj_str(&doc, json_path(&doc, data, "mediaContents.0"), "__typename", type, sizeof(type));
+	if (query == Q_STREAM && (strcmp(type, "Chapter") == 0 || strcmp(type, "Episode") == 0)) {
+		// Restored cache IDs may lack a type. Music keeps its original query;
+		// known spoken items use the direct API below and need only one call.
+		done(body, &doc);
+		return stream_with_query(track_id, out, Q_STREAM_SPOKEN);
 	}
 	int stream = json_path(&doc, data, "mediaContents.0.stream");
 	char urls[ZVUK_QUALITY_COUNT][1024] = {"", "", ""};
@@ -1447,7 +1701,12 @@ bool zvuk_stream(const char *track_id, zvuk_stream_t *out) {
 		streamerr_hint(STREAM_ERR_OTHER); // the service's own sentence says it best
 		return false;
 	}
-	if (out->got == ZVUK_QUALITY_MID && out->asked != ZVUK_QUALITY_MID) {
+	bool spoken = strcmp(type, "Chapter") == 0 || strcmp(type, "Episode") == 0;
+	if (spoken) {
+		// These formats do not advertise FLAC; a valid spoken MP3 is not
+		// evidence that the account needs a different subscription.
+		needs_subscription = false;
+	} else if (out->got == ZVUK_QUALITY_MID && out->asked != ZVUK_QUALITY_MID) {
 		needs_subscription = true;
 	} else if (out->got != ZVUK_QUALITY_MID) {
 		needs_subscription = false;
@@ -1457,6 +1716,10 @@ bool zvuk_stream(const char *track_id, zvuk_stream_t *out) {
 	pthread_mutex_unlock(&format_lock);
 	return true;
 }
+
+bool zvuk_stream(const char *track_id, zvuk_stream_t *out) { return stream_with_query(track_id, out, Q_STREAM); }
+
+bool zvuk_spoken_stream(const char *part_id, zvuk_stream_t *out) { return stream_with_query(part_id, out, Q_STREAM_SPOKEN); }
 
 // ---------------------------------------------------------------------------
 // the developer options' check, and the probe after a sign-in

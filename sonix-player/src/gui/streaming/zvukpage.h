@@ -33,6 +33,8 @@ extern const lv_image_dsc_t icon_zvuk_badge;
 
 // "Show album" from the player.
 bool zvukpage_open_album(const char *album_id, const char *title);
+// Official audiobook/podcast URLs; search names still use the music API.
+bool zvukpage_open_link(const char *url);
 
 // The developer options' "Zvuk: connection check": the profile and one
 // getStream on the worker, the result in a sheet. An lv_event_cb_t.

@@ -20,15 +20,17 @@ typedef struct {
 	uint32_t album;
 } ref_t;
 
-// The details of one entry, compact: the four strings in one allocation,
-// "title\0artist\0album\0cover\0" (the cover a full https:// URL). NULL text
+// The details of one entry, compact: the six strings in one allocation,
+// "title\0artist\0album\0cover\0pub_date\0episode_type\0" (the cover a full https:// URL). NULL text
 // = no details yet.
 typedef struct {
 	char *text;
 	uint16_t duration;
-	uint8_t track_number;
+	uint16_t track_number;
 	uint8_t disc_number;
 	bool available;
+	uint8_t content_type;
+	bool remember_position;
 } detail_t;
 
 typedef struct {
@@ -101,7 +103,7 @@ yandexlist_t *yandexlist_ref(yandexlist_t *l) {
 // The bytes of a packed text: its four strings and their terminators.
 static size_t text_size(const char *text) {
 	size_t n = 0;
-	for (int i = 0; i < 4; i++) {
+	for (int i = 0; i < 6; i++) {
 		n += strlen(text + n) + 1;
 	}
 	return n;
@@ -245,15 +247,19 @@ static page_t *page_for_locked(yandexlist_t *l, int index) {
 
 // The four strings of a track in one allocation.
 static char *pack_text(const yandex_track_t *t) {
-	size_t a = strlen(t->title) + 1, b = strlen(t->artist) + 1, c = strlen(t->album) + 1, d = strlen(t->cover) + 1;
-	char *text = malloc(a + b + c + d);
-	if (!text) {
+	const char *fields[] = {t->title, t->artist, t->album, t->cover, t->pub_date, t->podcast_episode_type};
+	size_t size = 0;
+	for (size_t i = 0; i < 6; i++)
+		size += strlen(fields[i]) + 1;
+	char *text = malloc(size);
+	if (!text)
 		return NULL;
+	char *p = text;
+	for (size_t i = 0; i < 6; i++) {
+		size_t n = strlen(fields[i]) + 1;
+		memcpy(p, fields[i], n);
+		p += n;
 	}
-	memcpy(text, t->title, a);
-	memcpy(text + a, t->artist, b);
-	memcpy(text + a + b, t->album, c);
-	memcpy(text + a + b + c, t->cover, d);
 	return text;
 }
 
@@ -275,9 +281,11 @@ static void set_detail_locked(yandexlist_t *l, int index, const yandex_track_t *
 	d->text = text;
 	l->text_bytes += text_size(text);
 	d->duration = (uint16_t)(t->duration > 0 && t->duration < 65535 ? t->duration : 0);
-	d->track_number = (uint8_t)(t->track_number > 0 && t->track_number < 256 ? t->track_number : 0);
+	d->track_number = (uint16_t)(t->track_number > 0 && t->track_number < 65536 ? t->track_number : 0);
 	d->disc_number = (uint8_t)(t->disc_number > 0 && t->disc_number < 256 ? t->disc_number : 0);
 	d->available = t->available;
+	d->content_type = (uint8_t)t->content_type;
+	d->remember_position = t->remember_position;
 }
 
 bool yandexlist_add_track(yandexlist_t *l, const yandex_track_t *t) {
@@ -421,10 +429,16 @@ static void unpack_locked(yandexlist_t *l, int index, const detail_t *d, yandex_
 	snprintf(out->album, sizeof(out->album), "%s", p);
 	p += strlen(p) + 1;
 	snprintf(out->cover, sizeof(out->cover), "%s", p);
+	p += strlen(p) + 1;
+	snprintf(out->pub_date, sizeof(out->pub_date), "%s", p);
+	p += strlen(p) + 1;
+	snprintf(out->podcast_episode_type, sizeof(out->podcast_episode_type), "%s", p);
 	out->duration = d->duration;
 	out->track_number = d->track_number;
 	out->disc_number = d->disc_number;
 	out->available = d->available;
+	out->content_type = (yandex_content_t)d->content_type;
+	out->remember_position = d->remember_position;
 }
 
 bool yandexlist_track(yandexlist_t *l, int index, yandex_track_t *out) {

@@ -1,9 +1,14 @@
 #define _GNU_SOURCE 1 // fopencookie
 
 #include "yandexdl.h"
+#include "src/system/library/audiobookdb.h"
+#include "src/system/streaming/bookdownload.h"
+#include "src/system/streaming/podcastimport.h"
+#include "src/system/streaming/streamcover.h"
 
 #include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -36,6 +41,8 @@
 
 typedef struct {
 	bool album; // `track` holds only the album's id and title, expanded later
+	bool book;
+	char book_folder[AUDIOBOOKDB_FOLDER_MAX];
 	yandex_track_t track;
 } entry_t;
 
@@ -46,6 +53,7 @@ static int queue_len;
 static bool worker_started;
 static bool running; // an entry is being worked on
 static char root[400];
+static unsigned card_epoch; // only a card/root change, unlike user cancellation
 static unsigned generation; // raised by every cancel: work from before it stops
 static yandexdl_status_t status;
 static void (*listener)(yandexdl_event_t, int, const char *);
@@ -831,18 +839,22 @@ static FILE *sink_open(FILE *out, const char *ext, const tags_t *tags, bool *tag
 
 // The m4a's tags beside it, where the player reads them: what 1.2.4 wrote for
 // every .m4a, now only for one the MP4 sink could not tag (see above).
-static void write_sidecar(const char *path, const tags_t *t) {
+static bool write_sidecar(const char *path, const tags_t *t) {
 	char name[1350], tmp[1370];
 	snprintf(name, sizeof(name), "%.1300s.tags", path);
 	snprintf(tmp, sizeof(tmp), "%s.tmp", name);
 	FILE *f = fopen(tmp, "w");
 	if (!f) {
-		return;
+		return false;
 	}
-	fprintf(f, "title=%s\nartist=%s\nalbum=%s\nalbum_artist=%s\ntrack=%d\ndisc=%d\nyear=%d\ngenre=%s\n", t->title, t->artist, t->album, t->album_artist, t->track, t->disc, t->year, t->genre);
-	if (fclose(f) != 0 || rename(tmp, name) != 0) {
+	bool ok = fprintf(f, "title=%s\nartist=%s\nalbum=%s\nalbum_artist=%s\ntrack=%d\ndisc=%d\nyear=%d\ngenre=%s\n", t->title, t->artist, t->album, t->album_artist, t->track, t->disc, t->year, t->genre) > 0;
+	if (fclose(f) != 0)
+		ok = false;
+	if (!ok || rename(tmp, name) != 0) {
 		remove(tmp);
+		return false;
 	}
+	return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -947,12 +959,44 @@ static bool save_allowed(unsigned asked, char *why, size_t why_size) {
 	return true;
 }
 
-static bool save_track_pinned(const yandex_track_t *t, unsigned asked, const char *card_root, char *why, size_t why_size) {
+typedef struct {
+	char cached[512];
+	char ext[16];
+	unsigned epoch;
+	yandex_file_t file;
+} book_source_t;
+
+static bool book_card_current(const char *expected_root, unsigned epoch) {
+	pthread_mutex_lock(&lock);
+	bool same = epoch == card_epoch && strcmp(root, expected_root) == 0;
+	pthread_mutex_unlock(&lock);
+	return same;
+}
+
+// Metadata/stream-info HTTP must not keep the card mounted. Audio itself is
+// fetched only after the caller re-admits the card and opens its output file.
+static bool book_source(const yandex_track_t *t, book_source_t *source) {
+	memset(source, 0, sizeof(*source));
+	if (yandexcache_find(t->id, source->cached, sizeof(source->cached))) {
+		const char *dot = strrchr(source->cached, '.');
+		snprintf(source->ext, sizeof(source->ext), "%s", dot ? dot + 1 : "");
+		if (yandex_get_quality() == YANDEX_QUALITY_LOSSLESS && strcmp(source->ext, "flac") != 0)
+			source->cached[0] = '\0';
+	}
+	if (!source->cached[0]) {
+		if (!yandex_file_info(t->id, &source->file))
+			return false;
+		snprintf(source->ext, sizeof(source->ext), "%s", yandexcache_extension(source->file.codec));
+	}
+	return true;
+}
+
+static bool save_track_pinned_to(const yandex_track_t *t, unsigned asked, const char *card_root, const char *book_folder, int book_order, const book_source_t *prepared, char *saved_out, size_t saved_size, char *why, size_t why_size) {
 	why[0] = '\0';
 	if (!save_allowed(asked, why, why_size)) {
 		return false;
 	}
-	if (t->album_id[0] && (!meta_ok || strcmp(meta.id, t->album_id) != 0)) {
+	if (!book_folder && t->album_id[0] && (!meta_ok || strcmp(meta.id, t->album_id) != 0)) {
 		meta_ok = yandex_album_meta(t->album_id, &meta);
 		if (!meta_ok) {
 			fprintf(stderr, "yandexdl: no album details for %s (%s), the track's own used\n", t->album_id, yandex_last_error());
@@ -962,6 +1006,13 @@ static bool save_track_pinned(const yandex_track_t *t, unsigned asked, const cha
 		return false;
 	}
 	bool have_meta = meta_ok && strcmp(meta.id, t->album_id) == 0;
+	if (!book_folder && have_meta && meta.content_type == YANDEX_CONTENT_AUDIOBOOK) {
+		// A failed earlier classification must not save a newly identified
+		// chapter as music. The next book job can fetch the complete parts list.
+		snprintf(why, why_size, "%s", tr("book_download_wrong_type"));
+		return false;
+	}
+	bool podcast = !book_folder && (t->content_type == YANDEX_CONTENT_EPISODE || (have_meta && meta.content_type == YANDEX_CONTENT_PODCAST));
 
 	tags_t tags;
 	memset(&tags, 0, sizeof(tags));
@@ -969,6 +1020,8 @@ static bool save_track_pinned(const yandex_track_t *t, unsigned asked, const cha
 	snprintf(tags.artist, sizeof(tags.artist), "%s", t->artist);
 	snprintf(tags.album, sizeof(tags.album), "%s", have_meta ? meta.title : t->album);
 	snprintf(tags.album_artist, sizeof(tags.album_artist), "%s", have_meta && meta.artist[0] ? meta.artist : t->artist);
+	if (book_folder)
+		tags.album_artist[0] = '\0'; // Yandex artist credits do not establish an author role.
 	if (have_meta && meta.genre[0]) {
 		// The service names genres by slug ("rusrock"): given a capital.
 		snprintf(tags.genre, sizeof(tags.genre), "%s", meta.genre);
@@ -981,6 +1034,8 @@ static bool save_track_pinned(const yandex_track_t *t, unsigned asked, const cha
 	tags.disc = t->disc_number;
 	tags.discs = have_meta ? meta.discs : 0;
 	tags.year = have_meta ? meta.year : 0;
+	if (book_folder && have_meta && meta.track_count == 1)
+		snprintf(tags.title, sizeof(tags.title), "%s", meta.title);
 
 	// <music>/Yandex Music/<album artist>/<album (year)>/<NN - title>
 	char music[600], artist_dir[160], album_dir[200], album_name[220], base[220], title[200];
@@ -1002,6 +1057,13 @@ static bool save_track_pinned(const yandex_track_t *t, unsigned asked, const cha
 	}
 	char folder[1024];
 	snprintf(folder, sizeof(folder), "%s/%s/%s/%s", music, LIBRARY_FOLDER, artist_dir, album_dir);
+	if (book_folder) {
+		snprintf(folder, sizeof(folder), "%s", book_folder);
+		snprintf(base, sizeof(base), "%04d-%s", book_order, t->id);
+	} else if (podcast && !podcastimport_paths(card_root, "yandex", t->album_id, tags.album, t->id, t->title, folder, sizeof(folder), base, sizeof(base))) {
+		snprintf(why, why_size, "%s", tr("download_failed"));
+		return false;
+	}
 
 	static const char *const EXTS[] = {"flac", "mp3", "m4a"};
 	for (size_t i = 0; i < sizeof(EXTS) / sizeof(EXTS[0]); i++) {
@@ -1014,14 +1076,30 @@ static bool save_track_pinned(const yandex_track_t *t, unsigned asked, const cha
 			// Into the index all the same: this is how a file saved before
 			// there was one (1.2.4) becomes known to the Yandex pages.
 			printf("yandexdl: %s is already there\n", existing);
-			remember(t, &tags, have_meta ? meta.track_count : 0, existing);
+			if (book_folder) {
+				if (!write_sidecar(existing, &tags))
+					return false;
+				if (saved_out)
+					snprintf(saved_out, saved_size, "%s.%s", base, EXTS[i]);
+			} else if (podcast) {
+				if (!podcastimport_write_tags(existing, "yandex", t->album_id, tags.album, t->id, t->title, t->artist, t->cover, t->pub_date))
+					return false;
+				if (saved_out) {
+					size_t length = strlen(existing);
+					if (length >= saved_size)
+						return false;
+					memcpy(saved_out, existing, length + 1);
+				}
+			} else {
+				remember(t, &tags, have_meta ? meta.track_count : 0, existing);
+			}
 			return true;
 		}
 	}
 	if (!save_allowed(asked, why, why_size)) {
 		return false;
 	}
-	if (!make_dirs(card_root, folder)) {
+	if (!book_folder && !make_dirs(card_root, folder)) {
 		snprintf(why, why_size, "%s", strerror(errno));
 		return false;
 	}
@@ -1031,7 +1109,7 @@ static bool save_track_pinned(const yandex_track_t *t, unsigned asked, const cha
 	const char *ext = NULL;
 	yandex_file_t file;
 	memset(&file, 0, sizeof(file));
-	if (yandexcache_find(t->id, cached, sizeof(cached))) {
+	if (!prepared && yandexcache_find(t->id, cached, sizeof(cached))) {
 		const char *dot = strrchr(cached, '.');
 		ext = dot ? dot + 1 : "";
 		if (yandex_get_quality() == YANDEX_QUALITY_LOSSLESS && strcmp(ext, "flac") != 0) {
@@ -1039,7 +1117,7 @@ static bool save_track_pinned(const yandex_track_t *t, unsigned asked, const cha
 			ext = NULL;
 		}
 	}
-	if (!cached[0]) {
+	if (!prepared && !cached[0]) {
 		if (!yandex_file_info(t->id, &file)) {
 			snprintf(why, why_size, "%s", yandex_last_error());
 			return false;
@@ -1047,9 +1125,19 @@ static bool save_track_pinned(const yandex_track_t *t, unsigned asked, const cha
 		ext = yandexcache_extension(file.codec);
 	}
 
+	if (prepared) {
+		snprintf(cached, sizeof(cached), "%s", prepared->cached);
+		file = prepared->file;
+		ext = prepared->ext;
+	}
+
 	char path[1300], part[1320];
 	snprintf(path, sizeof(path), "%.1024s/%.220s.%.8s", folder, base, ext);
 	snprintf(part, sizeof(part), "%.1024s/.%.220s.%.8s.part", folder, base, ext);
+	if ((book_folder || podcast) && (strlen(path) >= 512 || strlen(part) >= 512)) {
+		snprintf(why, why_size, "%s", tr("book_download_limit"));
+		return false;
+	}
 	pthread_mutex_lock(&lock);
 	snprintf(status.title, sizeof(status.title), "%.95s", t->title);
 	// Not half a letter at the end of a cut title (at worst a whole one goes).
@@ -1101,17 +1189,35 @@ static bool save_track_pinned(const yandex_track_t *t, unsigned asked, const cha
 	if (ok && samples) {
 		mp4flac_patch_total_samples(part, samples);
 	}
+	bool podcast_tags_published = false;
+	char episode_tags[600] = "";
+	if (ok && podcast) {
+		char staging_tags[600];
+		snprintf(staging_tags, sizeof(staging_tags), "%.512s.tags", part);
+		snprintf(episode_tags, sizeof(episode_tags), "%.512s.tags", path);
+		ok = podcastimport_write_tags(part, "yandex", t->album_id, tags.album, t->id, t->title, t->artist, t->cover, t->pub_date) && save_allowed(asked, why, why_size);
+		if (ok)
+			ok = rename(staging_tags, episode_tags) == 0;
+		podcast_tags_published = ok;
+		if (!ok)
+			remove(staging_tags);
+	}
+	ok = ok && save_allowed(asked, why, why_size);
 	if (ok && rename(part, path) != 0) {
 		snprintf(why, why_size, "%s", strerror(errno));
 		ok = false;
 	}
+	if (!ok && podcast_tags_published)
+		remove(episode_tags);
 	if (!ok) {
+		if (book_folder && prepared && !book_card_current(card_root, prepared->epoch))
+			return false;
 		remove(part);
 		// The folders this file would have been the first in: rmdir only
 		// takes them when they are empty.
 		char parent[1024];
 		snprintf(parent, sizeof(parent), "%s", folder);
-		for (int up = 0; up < 3; up++) {
+		for (int up = 0; up < (book_folder ? 0 : 3); up++) {
 			if (rmdir(parent) != 0) {
 				break;
 			}
@@ -1126,38 +1232,235 @@ static bool save_track_pinned(const yandex_track_t *t, unsigned asked, const cha
 		}
 		return false;
 	}
-	if (strcmp(ext, "m4a") == 0 && !tagged) {
+	if (!podcast && !book_folder && strcmp(ext, "m4a") == 0 && !tagged) {
 		fprintf(stderr, "yandexdl: %s could not be tagged inside, the tags go beside it\n", path);
 		write_sidecar(path, &tags);
 	}
-	fetch_cover(folder, have_meta && meta.cover[0] ? meta.cover : t->cover);
+	if (!book_folder)
+		fetch_cover(folder, have_meta && meta.cover[0] ? meta.cover : t->cover);
 	if (!save_allowed(asked, why, why_size)) {
 		return false;
 	}
-	remember(t, &tags, have_meta ? meta.track_count : 0, path);
+	if (book_folder) {
+		if (!write_sidecar(path, &tags)) {
+			snprintf(why, why_size, "%s", tr("download_failed"));
+			return false;
+		}
+		if (saved_out)
+			snprintf(saved_out, saved_size, "%s.%s", base, ext);
+	} else if (!podcast) {
+		remember(t, &tags, have_meta ? meta.track_count : 0, path);
+	} else if (saved_out) {
+		size_t length = strlen(path);
+		if (length >= saved_size)
+			return false;
+		memcpy(saved_out, path, length + 1);
+	}
 	printf("yandexdl: saved %s\n", path);
 	return true;
 }
+
+static bool save_track_pinned(const yandex_track_t *t, unsigned asked, const char *card_root, char *why, size_t why_size) { return save_track_pinned_to(t, asked, card_root, NULL, 0, NULL, NULL, 0, why, why_size); }
 
 // ---------------------------------------------------------------------------
 // the worker
 // ---------------------------------------------------------------------------
 
-static bool save_track(const yandex_track_t *t, unsigned asked, char *why, size_t why_size) {
+static bool save_track_with_path(const yandex_track_t *t, unsigned asked, char *why, size_t why_size, char *saved, size_t saved_size) {
 	char card_root[sizeof(root)];
 	int pin = storage_pin_card(card_root, sizeof(card_root));
 	if (pin < 0) {
 		snprintf(why, why_size, "%s", tr("download_no_card"));
 		return false;
 	}
-	bool ok = save_track_pinned(t, asked, card_root, why, why_size);
+	bool ok = saved ? save_track_pinned_to(t, asked, card_root, NULL, 0, NULL, saved, saved_size, why, why_size) : save_track_pinned(t, asked, card_root, why, why_size);
 	close(pin);
 	return ok;
 }
 
+static bool save_track(const yandex_track_t *t, unsigned asked, char *why, size_t why_size) { return save_track_with_path(t, asked, why, why_size, NULL, 0); }
+
 static void library_look(void *user) {
 	(void)user;
 	library_card_returned(storage_sd_root());
+}
+
+typedef struct {
+	char path[512];
+	unsigned generation;
+} book_scan_t;
+
+static void book_scan_async(void *user) {
+	book_scan_t *request = user;
+	char why[128], folder[AUDIOBOOKDB_FOLDER_MAX], path[512];
+	audiobookdb_folder(folder, sizeof(folder));
+	const char *sd = storage_sd_root();
+	if (sd && snprintf(path, sizeof(path), "%s/%s", sd, folder) < (int)sizeof(path) && strcmp(path, request->path) == 0 && save_allowed(request->generation, why, sizeof(why))) {
+		audiobookdb_request_scan(path);
+	}
+	free(request);
+}
+
+static bool book_directory(const entry_t *entry, const char *card_root, char *out, size_t size) { return bookdownload_path(card_root, entry->book_folder, "yandex", entry->track.album_id, out, size); }
+
+static int book_pin(const char *expected_root, unsigned epoch) {
+	char current_root[400];
+	int pin = storage_pin_card(current_root, sizeof(current_root));
+	if (pin < 0)
+		return -1;
+	pthread_mutex_lock(&lock);
+	bool same_card = epoch == card_epoch && strcmp(current_root, expected_root) == 0;
+	pthread_mutex_unlock(&lock);
+	if (!same_card) {
+		close(pin);
+		return -1;
+	}
+	return pin;
+}
+
+static bool save_book(const entry_t *entry, unsigned asked, char *book_path, size_t path_size, char *why, size_t why_size) {
+	why[0] = '\0';
+	char card_root[400], directory[512];
+	pthread_mutex_lock(&lock);
+	unsigned epoch = card_epoch;
+	pthread_mutex_unlock(&lock);
+	int pin = storage_pin_card(card_root, sizeof(card_root));
+	if (pin < 0) {
+		snprintf(why, why_size, "%s", tr("download_no_card"));
+		return false;
+	}
+	bool ok = false;
+	bookdownload_t *book = NULL;
+	yandex_track_t *tracks = NULL;
+	char *cover = NULL;
+	size_t cover_size = 0;
+	if (!save_allowed(asked, why, why_size))
+		goto done;
+	if (!book_directory(entry, card_root, directory, sizeof(directory))) {
+		snprintf(why, why_size, "%s", tr("book_download_limit"));
+		goto done;
+	}
+	if (bookdownload_ready(directory, book_path, path_size)) {
+		ok = true;
+		goto done;
+	}
+	struct stat st;
+	if (lstat(directory, &st) == 0) {
+		snprintf(why, why_size, "%s", tr("book_download_conflict"));
+		goto done;
+	}
+	close(pin);
+	pin = -1;
+	tracks = calloc(BOOKDOWNLOAD_MAX_PARTS, sizeof(*tracks));
+	book = calloc(1, sizeof(*book));
+	if (!tracks || !book) {
+		snprintf(why, why_size, "%s", tr("out_of_memory"));
+		goto done;
+	}
+	yandex_album_meta_t book_meta;
+	int n = yandex_album_tracks_complete(entry->track.album_id, tracks, BOOKDOWNLOAD_MAX_PARTS, &book_meta);
+	if (n < 0) {
+		snprintf(why, why_size, "%s", yandex_last_error());
+		goto done;
+	}
+	if (book_meta.content_type != YANDEX_CONTENT_AUDIOBOOK) {
+		snprintf(why, why_size, "%s", tr("book_download_wrong_type"));
+		goto done;
+	}
+	for (int i = 0; i < n; i++) {
+		if (!tracks[i].available) {
+			snprintf(why, why_size, "%s", tr("book_download_unavailable"));
+			goto done;
+		}
+		if (!tracks[i].id[0] || strspn(tracks[i].id, "0123456789") != strlen(tracks[i].id)) {
+			snprintf(why, why_size, "%s", tr("book_download_incomplete"));
+			goto done;
+		}
+	}
+	if (!save_allowed(asked, why, why_size) || (pin = book_pin(card_root, epoch)) < 0)
+		goto done;
+	char parent[512];
+	snprintf(parent, sizeof(parent), "%s", directory);
+	*strrchr(parent, '/') = '\0';
+	if (!make_dirs(card_root, parent) || !bookdownload_begin(book, directory)) {
+		snprintf(why, why_size, "%s", tr("book_download_conflict"));
+		goto done;
+	}
+	close(pin);
+	pin = -1;
+	meta = book_meta;
+	meta_ok = true;
+	for (int i = 0; i < n; i++) {
+		book_source_t source;
+		if (!save_allowed(asked, why, why_size))
+			goto done;
+		if (!book_source(&tracks[i], &source)) {
+			snprintf(why, why_size, "%s", yandex_last_error());
+			goto done;
+		}
+		source.epoch = epoch;
+		if (!save_allowed(asked, why, why_size) || (pin = book_pin(card_root, epoch)) < 0)
+			goto done;
+		// Anchor every output/tag/rename to this mount's actual directory,
+		// even if physical removal lazily detaches its public mountpoint.
+		const char *relative_stage = book->folder + strlen(card_root) + 1;
+		int stage_fd = openat(pin, relative_stage, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+		if (stage_fd < 0)
+			goto done;
+		char anchored[64], filename[80];
+		snprintf(anchored, sizeof(anchored), "/proc/self/fd/%d", stage_fd);
+		if (source.cached[0] && strncmp(source.cached, card_root, strlen(card_root)) == 0 && source.cached[strlen(card_root)] == '/') {
+			char relative[512];
+			snprintf(relative, sizeof(relative), "%s", source.cached + strlen(card_root) + 1);
+			snprintf(source.cached, sizeof(source.cached), "/proc/self/fd/%d/%.460s", pin, relative);
+		}
+		bool saved = save_track_pinned_to(&tracks[i], asked, card_root, anchored, i + 1, &source, filename, sizeof(filename), why, why_size);
+		close(stage_fd); // The synchronous saver has closed both its sink and output.
+		if (!saved || !book_card_current(card_root, epoch) || !bookdownload_record(book, filename))
+			goto done;
+		close(pin);
+		pin = -1;
+	}
+	// Artwork is optional, and its HTTP wait owns no card descriptor.
+	if (!save_allowed(asked, why, why_size))
+		goto done;
+	if (book_meta.cover[0])
+		http_get(book_meta.cover, &cover, &cover_size, STREAMCOVER_MAX_BYTES, 20);
+	if (!save_allowed(asked, why, why_size) || (pin = book_pin(card_root, epoch)) < 0)
+		goto done;
+	char artwork[512];
+	if (cover && snprintf(artwork, sizeof(artwork), "%s/cover.jpg", book->folder) < (int)sizeof(artwork)) {
+		streamcover_store(artwork, cover, cover_size);
+	}
+	if (!bookdownload_publish(book, n))
+		goto done;
+	ok = bookdownload_ready(directory, book_path, path_size);
+done:
+	if (book && book->owned) {
+		// USB may already own the card. Leave a private stage for the next
+		// retry rather than write to an exported or replacement card.
+		if (pin < 0)
+			pin = book_pin(card_root, epoch);
+		if (pin >= 0 && book_card_current(card_root, epoch))
+			bookdownload_abort(book);
+	}
+	free(cover);
+	free(tracks);
+	free(book);
+	if (pin >= 0)
+		close(pin);
+	if (ok) {
+		book_scan_t *scan = calloc(1, sizeof(*scan));
+		if (scan) {
+			snprintf(scan->path, sizeof(scan->path), "%s", directory);
+			*strrchr(scan->path, '/') = '\0';
+			scan->generation = asked;
+			if (!gui_post(book_scan_async, scan))
+				free(scan);
+		}
+	} else if (!why[0])
+		snprintf(why, why_size, "%s", tr("download_failed"));
+	return ok;
 }
 
 static void *worker_main(void *arg) {
@@ -1165,6 +1468,10 @@ static void *worker_main(void *arg) {
 	// Nice ten: a saved album is not urgent, but SCHED_IDLE would starve it
 	// for as long as anything plays (see thread_be_low_priority).
 	thread_be_low_priority("yandex save");
+	bool music_dirty = false;
+	unsigned destinations = 0;
+	char books_where[AUDIOBOOKDB_FOLDER_MAX] = "";
+	unsigned batch_generation = 0;
 	for (;;) {
 		pthread_mutex_lock(&lock);
 		while (queue_len == 0) {
@@ -1177,8 +1484,51 @@ static void *worker_main(void *arg) {
 		running = true;
 		unsigned asked = generation;
 		pthread_mutex_unlock(&lock);
+		if (batch_generation != asked) {
+			music_dirty = false;
+			destinations = 0;
+			batch_generation = asked;
+		}
 
-		if (e.album) {
+		if (e.track.content_type == YANDEX_CONTENT_AUDIOBOOK)
+			e.book = true;
+		if (!e.book && e.track.album_id[0]) {
+			char directory[512], local_book[512], card_root[400];
+			int pin = storage_pin_card(card_root, sizeof(card_root));
+			if (pin >= 0) {
+				e.book = book_directory(&e, card_root, directory, sizeof(directory)) && bookdownload_ready(directory, local_book, sizeof(local_book));
+				close(pin);
+			}
+			if (!e.book && (!meta_ok || strcmp(meta.id, e.track.album_id) != 0)) {
+				meta_ok = yandex_album_meta(e.track.album_id, &meta);
+			}
+			if (meta_ok && strcmp(meta.id, e.track.album_id) == 0 && meta.content_type == YANDEX_CONTENT_AUDIOBOOK)
+				e.book = true;
+		}
+		if (e.book) {
+			char why[256] = "", book_path[512] = "";
+			bool ok = save_book(&e, asked, book_path, sizeof(book_path), why, sizeof(why));
+			pthread_mutex_lock(&lock);
+			bool stale = asked != generation;
+			if (!stale) {
+				if (ok)
+					status.done++;
+				else
+					status.failed++;
+			}
+			pthread_mutex_unlock(&lock);
+			if (!stale && ok) {
+				destinations |= 2;
+				snprintf(books_where, sizeof(books_where), "%s", e.book_folder);
+			}
+			if (!stale)
+				tell(ok ? YANDEXDL_BOOK_SAVED : YANDEXDL_FAILED, ok ? 1 : 0, ok ? book_path : why);
+		} else if (e.album && meta_ok && strcmp(meta.id, e.track.album_id) == 0 && meta.content_type == YANDEX_CONTENT_PODCAST) {
+			pthread_mutex_lock(&lock);
+			status.failed++;
+			pthread_mutex_unlock(&lock);
+			tell(YANDEXDL_FAILED, 1, tr("book_download_wrong_type")); // Episodes are selected individually.
+		} else if (e.album) {
 			// An album: its tracks go to the head of the queue, in order.
 			yandex_track_t *tracks = calloc(150, sizeof(*tracks));
 			int n = tracks ? yandex_album_tracks(e.track.album_id, tracks, 150) : -1;
@@ -1200,7 +1550,8 @@ static void *worker_main(void *arg) {
 				int k = 0;
 				for (int i = 0; i < n && k < take; i++) {
 					if (tracks[i].available) {
-						queue[k].album = false;
+						memset(&queue[k], 0, sizeof(queue[k]));
+						strcpy(queue[k].book_folder, e.book_folder);
 						queue[k++].track = tracks[i];
 					}
 				}
@@ -1215,8 +1566,9 @@ static void *worker_main(void *arg) {
 			free(tracks);
 			printf("yandexdl: album %s, %d tracks to save\n", e.track.album_id, take);
 		} else {
-			char why[256];
-			bool ok = save_track(&e.track, asked, why, sizeof(why));
+			char why[256], saved_path[512] = "";
+			bool known_music = meta_ok && strcmp(meta.id, e.track.album_id) == 0 && meta.content_type == YANDEX_CONTENT_MUSIC && e.track.content_type != YANDEX_CONTENT_EPISODE;
+			bool ok = known_music ? save_track(&e.track, asked, why, sizeof(why)) : save_track_with_path(&e.track, asked, why, sizeof(why), saved_path, sizeof(saved_path));
 			pthread_mutex_lock(&lock);
 			bool stale = asked != generation;
 			if (!stale) {
@@ -1224,7 +1576,11 @@ static void *worker_main(void *arg) {
 			}
 			pthread_mutex_unlock(&lock);
 			if (ok && !stale) {
-				tell(YANDEXDL_SAVED, 1, e.track.id);
+				bool episode = e.track.content_type == YANDEX_CONTENT_EPISODE || (meta_ok && strcmp(meta.id, e.track.album_id) == 0 && meta.content_type == YANDEX_CONTENT_PODCAST);
+				if (!episode)
+					music_dirty = true;
+				destinations |= episode ? 4 : 1;
+				tell(episode ? YANDEXDL_EPISODE_SAVED : YANDEXDL_SAVED, 1, episode ? saved_path : e.track.id);
 			}
 			if (!ok && !stale) {
 				fprintf(stderr, "yandexdl: %s not saved: %s\n", e.track.id, why);
@@ -1251,11 +1607,14 @@ static void *worker_main(void *arg) {
 			char where[700];
 			snprintf(where, sizeof(where), "%s/%s", strrchr(music, '/') ? strrchr(music, '/') + 1 : music, LIBRARY_FOLDER);
 			printf("yandexdl: queue done, %d saved\n", saved);
-			if (saved > 0) {
+			if (music_dirty) {
 				// "Detect changes" finds the new folders: only those are read.
 				gui_post(library_look, NULL);
 			}
-			tell(YANDEXDL_FINISHED, saved, where);
+			const char *destination = destinations == 1 ? where : destinations == 2 ? books_where : destinations == 4 ? PODCASTDL_FOLDER : "";
+			tell(YANDEXDL_FINISHED, saved, destination);
+			destinations = 0;
+			music_dirty = false;
 		}
 	}
 	return NULL;
@@ -1277,7 +1636,9 @@ static bool enqueue(const entry_t *e) {
 		return false;
 	}
 	queue = grown;
-	queue[queue_len++] = *e;
+	queue[queue_len] = *e;
+	audiobookdb_folder(queue[queue_len].book_folder, sizeof(queue[queue_len].book_folder));
+	queue_len++;
 	if (!status.active) {
 		status.active = true;
 		status.done = status.failed = 0;
@@ -1326,6 +1687,62 @@ bool yandexdl_album(const char *album_id, const char *title) {
 	return ok;
 }
 
+bool yandexdl_audiobook(const char *album_id, const char *title) {
+	if (!album_id || !album_id[0] || strlen(album_id) >= YANDEX_ID_MAX || strspn(album_id, "0123456789") != strlen(album_id))
+		return false;
+	entry_t e = {.book = true};
+	snprintf(e.track.album_id, sizeof(e.track.album_id), "%s", album_id);
+	snprintf(e.track.album, sizeof(e.track.album), "%s", title ? title : "");
+	bool ok = enqueue(&e);
+	if (ok)
+		tell(YANDEXDL_QUEUED, 0, title);
+	return ok;
+}
+
+bool yandexdl_audiobook_path(const char *album_id, char *out, size_t size) {
+	if (!album_id || !out || !size)
+		return false;
+	out[0] = '\0';
+	char card_root[400], folder[AUDIOBOOKDB_FOLDER_MAX], directory[512];
+	int pin = storage_pin_card(card_root, sizeof(card_root));
+	if (pin < 0)
+		return false;
+	audiobookdb_folder(folder, sizeof(folder));
+	bool ok = bookdownload_path(card_root, folder, "yandex", album_id, directory, sizeof(directory)) && bookdownload_ready(directory, out, size);
+	close(pin);
+	return ok;
+}
+
+bool yandexdl_local_episode(const yandex_track_t *episode, char *out, size_t size) {
+	if (!out || !size)
+		return false;
+	out[0] = '\0';
+	if (!episode || episode->content_type != YANDEX_CONTENT_EPISODE)
+		return false;
+	char card[400], folder[512], base[220], path[512], key[96], wanted[96];
+	int pin = storage_pin_card(card, sizeof(card));
+	if (pin < 0)
+		return false;
+	bool found = false;
+	snprintf(wanted, sizeof(wanted), "s:yandex:%s", episode->id);
+	if (podcastimport_paths(card, "yandex", episode->album_id, episode->album, episode->id, episode->title, folder, sizeof(folder), base, sizeof(base))) {
+		static const char *const extensions[] = {"flac", "mp3", "m4a"};
+		for (size_t i = 0; i < sizeof(extensions) / sizeof(extensions[0]); i++) {
+			int n = snprintf(path, sizeof(path), "%s/%s.%s", folder, base, extensions[i]);
+			struct stat st;
+			if (n <= 0 || (size_t)n >= sizeof(path) || (size_t)n >= size || lstat(path, &st) != 0 || !S_ISREG(st.st_mode) || st.st_size <= 0)
+				continue;
+			if (podcastimport_key(path, key, sizeof(key)) && strcmp(key, wanted) == 0) {
+				memcpy(out, path, (size_t)n + 1);
+				found = true;
+				break;
+			}
+		}
+	}
+	close(pin);
+	return found;
+}
+
 void yandexdl_status(yandexdl_status_t *out) {
 	pthread_mutex_lock(&lock);
 	*out = status;
@@ -1361,6 +1778,7 @@ void yandexdl_set_root(const char *sd_root) {
 	if (changed) {
 		yandexdl_cancel_all();
 		pthread_mutex_lock(&lock);
+		card_epoch++;
 		snprintf(root, sizeof(root), "%s", next);
 		pthread_mutex_unlock(&lock);
 	}

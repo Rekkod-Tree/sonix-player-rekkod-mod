@@ -20,6 +20,7 @@ struct zvuklist {
 	int pages_room;
 	unsigned clock;
 	bool pinned; // details came whole: never let go
+	bool episodes; // lazy pages use getEpisodes instead of getTracks
 };
 
 // The strings of a track end to end, NUL after each, after a small header of
@@ -29,10 +30,11 @@ typedef struct {
 	int track_number;
 	int year;
 	bool available;
+	zvuk_content_t content;
 } head_t;
 
 static char *pack(const zvuk_track_t *t) {
-	const char *parts[] = {t->id, t->album_id, t->artist_id, t->title, t->artist, t->album, t->cover};
+	const char *parts[] = {t->id, t->album_id, t->artist_id, t->title, t->artist, t->album, t->cover, t->published_at};
 	size_t len = sizeof(head_t);
 	for (size_t i = 0; i < sizeof(parts) / sizeof(parts[0]); i++) {
 		len += strlen(parts[i]) + 1;
@@ -41,7 +43,7 @@ static char *pack(const zvuk_track_t *t) {
 	if (!p) {
 		return NULL;
 	}
-	head_t h = {t->duration, t->track_number, t->year, t->available};
+	head_t h = {t->duration, t->track_number, t->year, t->available, t->content};
 	memcpy(p, &h, sizeof(h));
 	char *at = p + sizeof(h);
 	for (size_t i = 0; i < sizeof(parts) / sizeof(parts[0]); i++) {
@@ -60,12 +62,11 @@ static void unpack(const char *p, zvuk_track_t *t) {
 	t->track_number = h.track_number;
 	t->year = h.year;
 	t->available = h.available;
+	t->content = h.content;
 	struct {
 		char *out;
 		size_t size;
-	} parts[] = {{t->id, sizeof(t->id)},		 {t->album_id, sizeof(t->album_id)}, {t->artist_id, sizeof(t->artist_id)},
-				 {t->title, sizeof(t->title)}, {t->artist, sizeof(t->artist)},		 {t->album, sizeof(t->album)},
-				 {t->cover, sizeof(t->cover)}};
+	} parts[] = {{t->id, sizeof(t->id)}, {t->album_id, sizeof(t->album_id)}, {t->artist_id, sizeof(t->artist_id)}, {t->title, sizeof(t->title)}, {t->artist, sizeof(t->artist)}, {t->album, sizeof(t->album)}, {t->cover, sizeof(t->cover)}, {t->published_at, sizeof(t->published_at)}};
 	const char *at = p + sizeof(h);
 	for (size_t i = 0; i < sizeof(parts) / sizeof(parts[0]); i++) {
 		snprintf(parts[i].out, parts[i].size, "%s", at);
@@ -81,6 +82,15 @@ zvuklist_t *zvuklist_new(void) {
 	}
 	return l;
 }
+
+zvuklist_t *zvuklist_new_episodes(void) {
+	zvuklist_t *l = zvuklist_new();
+	if (l)
+		l->episodes = true;
+	return l;
+}
+
+bool zvuklist_is_episodes(zvuklist_t *l) { return l && l->episodes; }
 
 zvuklist_t *zvuklist_ref(zvuklist_t *l) {
 	if (l) {
@@ -187,12 +197,16 @@ zvuklist_t *zvuklist_clone(zvuklist_t *l) {
 				c->packed[i] = pack(&t);
 				if (c->packed[i]) {
 					c->page_use[i / ZVUKLIST_PAGE] = 1;
+				} else {
+					ok = false;
 				}
 			}
 			c->count++;
 		}
 	}
 	c->pinned = l->pinned;
+	c->episodes = l->episodes;
+	c->clock = 1; // copied pages have age 1; the next fetched page must be newer
 	pthread_mutex_unlock(&l->lock);
 	if (!ok) {
 		zvuklist_free(c);
@@ -257,12 +271,22 @@ bool zvuklist_track(zvuklist_t *l, int index, zvuk_track_t *out) {
 	return ok;
 }
 
+static bool page_ready_locked(zvuklist_t *l, int page) {
+	int first = page * ZVUKLIST_PAGE;
+	if (page < 0 || first < 0 || first >= l->count)
+		return false;
+	for (int i = first; i < l->count && i < first + ZVUKLIST_PAGE; i++)
+		if (!l->packed[i])
+			return false;
+	return true;
+}
+
 bool zvuklist_page_ready(zvuklist_t *l, int page) {
 	if (!l) {
 		return false;
 	}
 	pthread_mutex_lock(&l->lock);
-	bool ready = page >= 0 && page * ZVUKLIST_PAGE < l->count && l->page_use[page] != 0;
+	bool ready = page_ready_locked(l, page);
 	pthread_mutex_unlock(&l->lock);
 	return ready;
 }
@@ -306,7 +330,8 @@ int zvuklist_fetch_page(zvuklist_t *l, int page) {
 		snprintf(ids[n], sizeof(ids[n]), "%llu", (unsigned long long)l->ids[i]);
 		ptrs[n] = ids[n];
 	}
-	bool ready = n > 0 && l->page_use[page] != 0;
+	bool ready = page_ready_locked(l, page);
+	bool episodes = l->episodes;
 	pthread_mutex_unlock(&l->lock);
 	if (n == 0 || ready) {
 		return n;
@@ -315,7 +340,7 @@ int zvuklist_fetch_page(zvuklist_t *l, int page) {
 	if (!got) {
 		return -1;
 	}
-	int count = zvuk_tracks(ptrs, n, got, ZVUKLIST_PAGE);
+	int count = episodes ? zvuk_episodes(ptrs, n, got, ZVUKLIST_PAGE) : zvuk_tracks(ptrs, n, got, ZVUKLIST_PAGE);
 	if (count < 0) {
 		free(got);
 		return -1;
@@ -339,6 +364,7 @@ int zvuklist_fetch_page(zvuklist_t *l, int page) {
 		zvuk_track_t gone;
 		if (!match) {
 			memset(&gone, 0, sizeof(gone));
+			gone.content = episodes ? ZVUK_CONTENT_EPISODE : ZVUK_CONTENT_TRACK;
 			snprintf(gone.id, sizeof(gone.id), "%.*s", ZVUK_ID_MAX - 1, ids[k]);
 			snprintf(gone.title, sizeof(gone.title), "\xE2\x80\x94");
 			match = &gone;
@@ -350,7 +376,7 @@ int zvuklist_fetch_page(zvuklist_t *l, int page) {
 	evict(l);
 	pthread_mutex_unlock(&l->lock);
 	free(got);
-	return filled;
+	return filled == n ? filled : -1;
 }
 
 size_t zvuklist_memory(zvuklist_t *l) {

@@ -29,6 +29,9 @@
 typedef struct zvuklist zvuklist_t;
 
 zvuklist_t *zvuklist_new(void);
+// Same compact IDs and page cache, with getEpisodes for unloaded pages.
+zvuklist_t *zvuklist_new_episodes(void);
+bool zvuklist_is_episodes(zvuklist_t *list);
 zvuklist_t *zvuklist_ref(zvuklist_t *list);
 void zvuklist_free(zvuklist_t *list);
 // The ids and the details loaded now, for a queue that must not change with

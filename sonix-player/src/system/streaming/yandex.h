@@ -36,6 +36,14 @@
 #define YANDEX_NAME_MAX 128
 #define YANDEX_URL_MAX 512
 
+typedef enum {
+	YANDEX_CONTENT_UNKNOWN = 0,
+	YANDEX_CONTENT_MUSIC,
+	YANDEX_CONTENT_AUDIOBOOK,
+	YANDEX_CONTENT_PODCAST,
+	YANDEX_CONTENT_EPISODE,
+} yandex_content_t;
+
 typedef struct {
 	char id[YANDEX_ID_MAX];		  // the track id, digits ("12345")
 	char album_id[YANDEX_ID_MAX]; // its first album, digits; empty for a user upload
@@ -47,6 +55,10 @@ typedef struct {
 	int track_number;
 	int disc_number; // the album's volume, 1 for most; 0 when not said
 	bool available;	 // false = in the catalogue but not playable here
+	yandex_content_t content_type;
+	char pub_date[40];
+	char podcast_episode_type[24];
+	bool remember_position;
 } yandex_track_t;
 
 typedef struct {
@@ -56,6 +68,7 @@ typedef struct {
 	char cover[YANDEX_URL_MAX];
 	int year;
 	int track_count;
+	yandex_content_t content_type;
 } yandex_album_t;
 
 typedef struct {
@@ -140,9 +153,17 @@ typedef struct {
 	int year;					  // 0 when not said
 	int discs;					  // volumes, at least 1
 	int track_count;
+	yandex_content_t content_type;
 } yandex_album_meta_t;
 // /albums/<id>/with-tracks, the album's fields only.
 bool yandex_album_meta(const char *album_id, yandex_album_meta_t *out);
+// Complete ordered parts only: refuses missing/truncated/oversized responses.
+// -1 on failure, with yandex_last_error(). No silently dropped unavailable parts.
+int yandex_album_tracks_complete(const char *album_id, yandex_track_t *out, int max, yandex_album_meta_t *meta);
+// One request for a GUI album view: ordinary music keeps its original bounded
+// listing; books/podcasts require the complete list. Metadata is returned even
+// when spoken-content completeness fails (but not on an HTTP failure).
+int yandex_album_view(const char *album_id, yandex_track_t *out, int max, yandex_album_meta_t *meta);
 int yandex_artist_albums(const char *artist_id, yandex_album_t *out, int max);
 // The rest of the collection. Lists of rows return how many they put in
 // `out` (at most `max`), -1 on error.
@@ -178,6 +199,12 @@ bool yandex_liked_albums_known(void);
 // /search?type=all. The counts are capacities on the way in and what was
 // filled on the way out.
 bool yandex_search(const char *text, yandex_artist_t *artists, int *n_artists, yandex_album_t *albums, int *n_albums, yandex_track_t *tracks, int *n_tracks);
+
+// The same response's spoken sections. Shows use album rows; podcast episodes
+// stay individual tracks. AUDIOBOOK returns complete-book rows, not chapters.
+bool yandex_search_spoken(const char *text, yandex_content_t kind, yandex_album_t *shows, int *n_shows, yandex_track_t *episodes, int *n_episodes);
+// A copied service album/track URL opens the parent, without fetching that URL.
+bool yandex_album_link_id(const char *text, char *out, size_t size);
 
 // Likes. `like` false removes it. A like written updates the mirror below.
 // A dislike also tells a running My Wave, with how long the track was heard

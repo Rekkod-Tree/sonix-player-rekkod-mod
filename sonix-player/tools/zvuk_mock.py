@@ -56,6 +56,7 @@ file), and 300 generated tracks (2000-2299) liked, for the paging.
 """
 
 import json
+import datetime
 import os
 import re
 import sys
@@ -107,6 +108,46 @@ FLAC_FILE = {"1001": "moovfirst.mp4", "1002": "moovlast.mp4", "1003": "native.fl
              "1007": "moovlast.mp4", "1008": "moovfirst.mp4"}
 DRM_ONLY = {"1004"}
 NO_FILE = {"1009"}
+
+# Deterministic spoken catalogue for the real GUI's link/search entry points.
+# The API response shape matches the production queries; IDs are fixtures.
+BOOK_ID = "8101"
+PODCAST_ID = "8201"
+CHAPTER_IDS = [str(9101 + i) for i in range(13)]
+EPISODE_IDS = [str(100000 + i) for i in range(338)]
+
+
+def book_obj():
+    return {"id": BOOK_ID, "title": "Fixture Complete Book", "fullDuration": 26000,
+            "description": "A complete thirteen-part offline book.",
+            "image": {"src": "/cover/book"},
+            "bookAuthors": [{"rname": "Fixture Author"}],
+            "performers": [{"rname": "Fixture Narrator"}],
+            # Reverse the response order to test explicit chapter positions.
+            "chapters": [{"__typename": "Chapter", "id": tid,
+                          "title": "Chapter %02d" % (i + 1), "duration": 2000,
+                          "availability": 1, "position": i}
+                         for i, tid in reversed(list(enumerate(CHAPTER_IDS)))]}
+
+
+def episode_date(index):
+    day = datetime.date(2026, 10, 17) - datetime.timedelta(days=337 - index)
+    return day.isoformat() + "T12:00:00Z"
+
+
+def podcast_obj():
+    return {"id": PODCAST_ID, "title": "Fixture Road Podcast", "description": "338 separate episodes.",
+            "image": {"src": "/cover/podcast"}, "authors": [{"name": "Fixture Host"}],
+            "episodes": [{"id": tid, "publicationDate": episode_date(i)} for i, tid in enumerate(EPISODE_IDS)]}
+
+
+def episode_obj(tid):
+    index = EPISODE_IDS.index(tid)
+    return {"__typename": "Episode", "id": tid, "title": "Episode %03d" % (index + 1),
+            "duration": 1800 + index, "publicationDate": episode_date(index),
+            "image": {"src": "/cover/episode-" + tid},
+            "podcast": {"id": PODCAST_ID, "title": "Fixture Road Podcast",
+                        "image": {"src": "/cover/podcast"}, "authors": [{"name": "Fixture Host"}]}}
 
 lock = threading.Lock()
 liked = {
@@ -327,6 +368,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def graphql(self, op, v, token, query):
         ids = [str(i) for i in v.get("ids", [])]
+        if op == "getBookChapters":
+            return {"getBooks": [book_obj()] if BOOK_ID in ids else []}
+        if op == "getPodcastEpisodes":
+            return {"getPodcasts": [podcast_obj()] if PODCAST_ID in ids else []}
+        if op == "getEpisodes":
+            if len(ids) > 50:
+                raise AssertionError("GUI must hydrate at most one bounded episode page")
+            return {"getEpisodes": [episode_obj(tid) for tid in ids if tid in EPISODE_IDS]}
         if op == "getStream":
             out = []
             for tid in ids:
@@ -346,7 +395,8 @@ class Handler(BaseHTTPRequestHandler):
                         s["flacdrm"] = "http://127.0.0.1:%d/cdn/drm.bin?exp=0" % PORT
                     elif tid in FLAC_FILE:
                         s["flac"] = self.link(tid, FLAC_FILE[tid], stale)
-                out.append({"__typename": "Track", "stream": s})
+                kind = "Chapter" if tid in CHAPTER_IDS else "Episode" if tid in EPISODE_IDS else "Track"
+                out.append({"__typename": kind, "stream": s})
             return {"mediaContents": out}
         if op == "getTracks":
             return {"getTracks": [track_obj(t) for t in ids if t in TITLES]}
@@ -387,6 +437,15 @@ class Handler(BaseHTTPRequestHandler):
             text = (v.get("query") or "").lower()
             limit = int(v.get("limit") or 2)
             res = {}
+            if "books(" in query:
+                res["books"] = {"items": [{"id": BOOK_ID, "title": "Fixture Complete Book",
+                                            "authorNames": ["Fixture Author"]}]
+                                if text in "fixture complete book" else []}
+            if "podcasts(" in query:
+                res["podcasts"] = {"items": [{"id": PODCAST_ID, "title": "Fixture Road Podcast",
+                                               "image": {"src": "/cover/podcast"},
+                                               "authors": [{"name": "Fixture Host"}]}]
+                                   if text in "fixture road podcast" else []}
             if "tracks(" in query:
                 res["tracks"] = {"items": [track_obj(t) for t in sorted(TITLES) if text in TITLES[t].lower()
                                            or any(text in ARTISTS[RELEASES[r][2]].lower()

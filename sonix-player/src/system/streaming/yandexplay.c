@@ -491,7 +491,12 @@ static void play_queue_from(int start, const char *start_path) {
 	for (int i = 0; i < count; i++) {
 		ptrs[i] = names + offsets[i];
 	}
-	device_state_play_list(ptrs, count, start);
+	yandex_track_t selected;
+	bool spoken = yandexlist_track(q, start, &selected) && (selected.content_type == YANDEX_CONTENT_AUDIOBOOK || selected.content_type == YANDEX_CONTENT_EPISODE);
+	if (spoken)
+		device_state_play_list_ordered(ptrs, count, start);
+	else
+		device_state_play_list(ptrs, count, start);
 	free(ptrs);
 	free(offsets);
 	free(names);
