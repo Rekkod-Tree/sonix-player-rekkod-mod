@@ -46,7 +46,6 @@ bool firmware_update_file_find(char *out, size_t out_size);
 
 typedef enum {
 	FIRMWARE_UPDATE_SIMULATED,
-	FIRMWARE_UPDATE_RECOVERY_REQUIRED,
 	FIRMWARE_UPDATE_PREPARE_FAILED,
 	FIRMWARE_UPDATE_BOOTMODE_UNCERTAIN,
 } firmware_update_result_t;
@@ -54,6 +53,7 @@ typedef enum {
 // Arms recovery only after checked card release. Returns on a preparation
 // failure (restoring card services), or on the host without changing anything.
 // An uncertain selector failure must not trigger any automatic reboot.
+// Recovery repair is optional; ordinary updates neither inspect nor patch it.
 //
 // Stops playback and flushes the filesystems first: the card is about to be
 // read by the recovery kernel, and an unflushed write on it is how a good

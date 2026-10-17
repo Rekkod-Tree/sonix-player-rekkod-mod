@@ -14,10 +14,8 @@
 
 #include "src/system/audio/audio.h"
 #include "src/system/core/config.h"
-#include "src/system/core/sha256.h"
 #include "src/system/device/clock.h"
 #include "src/system/device/power.h"
-#include "src/system/device/recovery_r1.h"
 #include "src/system/device/sysinfo.h"
 #include "src/system/device/system.h"
 #include "src/system/playback/device_state.h"
@@ -106,35 +104,6 @@ bool firmware_update_file_find(char *out, size_t out_size) {
 }
 
 #ifndef HOST_BUILD
-static bool recovery_safe_for_update(void) {
-	// R1's stock recovery mounts SD read/write, then directly reboots. Do not
-	// silently reintroduce that path after fixing the application's handoff.
-	if (strcasecmp(sysinfo_device_name(), "HiBy R1") != 0)
-		return true;
-	// Match the repair utility's raw character-device readback. A block alias
-	// could still cache the old bytes immediately after the one-time repair.
-	int fd = open(R1_RECOVERY_DEVICE, O_RDONLY | O_CLOEXEC);
-	if (fd < 0)
-		return false;
-	sha256_ctx sha;
-	sha256_init(&sha);
-	unsigned char data[16384];
-	size_t left = R1_RECOVERY_SIZE;
-	while (left) {
-		ssize_t n = read(fd, data, left < sizeof(data) ? left : sizeof(data));
-		if (n < 0 && errno == EINTR)
-			continue;
-		if (n <= 0)
-			break;
-		sha256_update(&sha, data, (size_t)n);
-		left -= (size_t)n;
-	}
-	bool ok = close(fd) == 0 && left == 0;
-	char digest[SHA256_HEX_LEN];
-	sha256_final_hex(&sha, digest);
-	return ok && strcmp(digest, R1_RECOVERY_NEW_SHA256) == 0;
-}
-
 static bool set_bootmode(bool recovery) {
 	const char *command = recovery ? "/usr/bin/bootmode.sh Recovery" : "/usr/bin/bootmode.sh Normal";
 	if (system(command) != 0)
@@ -177,11 +146,6 @@ firmware_update_result_t firmware_update_start(void) {
 	// follows holds this thread for seconds, and a frozen page reads as a
 	// device that has hung. A dark one reads as a device that is restarting.
 	power_screen_off();
-	if (!recovery_safe_for_update()) {
-		fprintf(stderr, "firmware: R1 recovery read-only safety not confirmed; update cancelled\n");
-		power_screen_on();
-		return FIRMWARE_UPDATE_RECOVERY_REQUIRED;
-	}
 
 	// Playback down first: the card is about to be handed to the recovery
 	// kernel, and the decoder still has it open.

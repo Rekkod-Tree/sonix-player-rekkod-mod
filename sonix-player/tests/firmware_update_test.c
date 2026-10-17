@@ -48,7 +48,7 @@ bool recovery_prep_active(void) { return fixture_recovery_busy; }
 #undef sleep
 #undef reboot
 
-enum { SELECTOR_FD = 42, RECOVERY_FD = 43 };
+enum { SELECTOR_FD = 42 };
 typedef struct {
 	int command_result;
 	bool bad_contents;
@@ -66,29 +66,6 @@ static int screen_holds, auto_off_disables;
 static int selector;
 static size_t position;
 static jmp_buf restarted;
-static const char *model_name, *recovery_digest;
-static size_t recovery_readable, recovery_position, recovery_hashed;
-static bool recovery_missing, recovery_read_error, recovery_close_error, recovery_eintr;
-static int recovery_opens, recovery_closes;
-
-const char *sysinfo_device_name(void) { return model_name; }
-// Digest fixtures isolate the update policy from the already separate SHA
-// implementation. Byte accounting still verifies the complete partition read.
-void sha256_init(sha256_ctx *ctx) {
-	memset(ctx, 0, sizeof(*ctx));
-	recovery_hashed = 0;
-}
-void sha256_update(sha256_ctx *ctx, const void *data, size_t length) {
-	(void)ctx;
-	(void)data;
-	recovery_hashed += length;
-	assert(recovery_hashed <= R1_RECOVERY_SIZE);
-}
-void sha256_final_hex(sha256_ctx *ctx, char out[SHA256_HEX_LEN]) {
-	(void)ctx;
-	snprintf(out, SHA256_HEX_LEN, "%s", recovery_digest);
-}
-
 void power_screen_off(void) { screen_off = true; }
 void power_screen_on(void) { screen_on = true; }
 void power_hold_screen_on(bool hold) {
@@ -136,15 +113,6 @@ static int fixture_system(const char *command) {
 	return plan[selector].command_result;
 }
 static int fixture_open(const char *path, int flags, ...) {
-	if (strcmp(path, R1_RECOVERY_DEVICE) == 0) {
-		assert(flags == (O_RDONLY | O_CLOEXEC));
-		recovery_opens++;
-		if (recovery_missing) {
-			errno = ENOENT;
-			return -1;
-		}
-		return RECOVERY_FD;
-	}
 	assert(strcmp(path, "/dev/mtd5") == 0 && flags == (O_RDONLY | O_CLOEXEC));
 	opens++;
 	if (plan[selector].open_fails) {
@@ -154,25 +122,6 @@ static int fixture_open(const char *path, int flags, ...) {
 	return SELECTOR_FD;
 }
 static ssize_t fixture_read(int fd, void *out, size_t size) {
-	if (fd == RECOVERY_FD) {
-		if (recovery_eintr) {
-			recovery_eintr = false;
-			errno = EINTR;
-			return -1;
-		}
-		if (recovery_read_error) {
-			errno = EIO;
-			return -1;
-		}
-		assert(recovery_position <= recovery_readable);
-		if (size > 8191)
-			size = 8191;
-		if (size > recovery_readable - recovery_position)
-			size = recovery_readable - recovery_position;
-		memset(out, 0, size);
-		recovery_position += size;
-		return (ssize_t)size;
-	}
 	assert(fd == SELECTOR_FD && position <= plan[selector].readable);
 	if (plan[selector].interrupted_read) {
 		plan[selector].interrupted_read = false;
@@ -194,14 +143,6 @@ static ssize_t fixture_read(int fd, void *out, size_t size) {
 	return (ssize_t)size;
 }
 static int fixture_close(int fd) {
-	if (fd == RECOVERY_FD) {
-		recovery_closes++;
-		if (recovery_close_error) {
-			errno = EIO;
-			return -1;
-		}
-		return 0;
-	}
 	assert(fd == SELECTOR_FD);
 	closes++;
 	if (plan[selector].close_fails) {
@@ -230,12 +171,7 @@ static void reset(void) {
 	prepared = cancelled = commands = opens = closes = shell_reboots = syscall_reboots = 0;
 	syncs = waits = cache_clears = clock_flushes = 0;
 	screen_holds = auto_off_disables = 0;
-	model_name = "HiBy R3 Pro II";
-	recovery_digest = R1_RECOVERY_NEW_SHA256;
-	recovery_readable = R1_RECOVERY_SIZE;
-	recovery_position = recovery_hashed = 0;
-	recovery_missing = recovery_read_error = recovery_close_error = recovery_eintr = false;
-	recovery_opens = recovery_closes = 0;
+
 }
 static void expect_refusal(firmware_update_result_t expected) {
 	assert(firmware_update_start() == expected);
@@ -245,52 +181,19 @@ static void expect_refusal(firmware_update_result_t expected) {
 	assert(screen_holds == uncertain && auto_off_disables == uncertain);
 }
 
-static void expect_recovery_refusal(void) {
-	assert(firmware_update_start() == FIRMWARE_UPDATE_RECOVERY_REQUIRED);
-	assert(screen_off && screen_on);
-	assert(!remembered && !audio_stopped && cache_clears == 0 && clock_flushes == 0);
-	assert(prepared == 0 && cancelled == 0 && commands == 0 && opens == 0);
-	assert(shell_reboots == 0 && syscall_reboots == 0 && syncs == 0 && waits == 0);
-	assert(screen_holds == 0 && auto_off_disables == 0);
-	assert(recovery_opens == 1 && recovery_closes == !recovery_missing);
-}
-
 int main(void) {
 	reset();
 	fixture_recovery_busy = true;
 	assert(firmware_update_start() == FIRMWARE_UPDATE_PREPARE_FAILED);
 	assert(!screen_off && !screen_on && !remembered && !audio_stopped);
-	assert(prepared == 0 && commands == 0 && opens == 0 && recovery_opens == 0);
+	assert(prepared == 0 && commands == 0 && opens == 0);
 	assert(shell_reboots == 0 && syscall_reboots == 0);
 	fixture_recovery_busy = false;
 	puts("PASS: active recovery preparation refuses update without side effects");
-	for (int failure = 0; failure < 7; failure++) {
-		reset();
-		model_name = failure == 6 ? "hIbY r1" : "HiBy R1";
-		recovery_missing = failure == 0;
-		recovery_readable = failure == 1 ? R1_RECOVERY_SIZE - 1 : R1_RECOVERY_SIZE;
-		recovery_read_error = failure == 2;
-		recovery_close_error = failure == 3;
-		if (failure == 4)
-			recovery_digest = "0000000000000000000000000000000000000000000000000000000000000000";
-		if (failure >= 5)
-			recovery_digest = R1_RECOVERY_OLD_SHA256;
-		expect_recovery_refusal();
-	}
-	puts("PASS: missing/short/unreadable/unconfirmed/stock R1 recovery refuses before playback, storage or selector changes");
-	reset();
-	model_name = "HiBy R1";
-	recovery_eintr = true;
-	preparation_ok = false;
-	expect_refusal(FIRMWARE_UPDATE_PREPARE_FAILED);
-	assert(recovery_opens == 1 && recovery_closes == 1 && recovery_hashed == R1_RECOVERY_SIZE);
-	assert(recovery_position == R1_RECOVERY_SIZE && commands == 0);
-	puts("PASS: exact approved R1 recovery read, including EINTR and short reads, reaches card preparation");
-
 	reset();
 	preparation_ok = false;
 	expect_refusal(FIRMWARE_UPDATE_PREPARE_FAILED);
-	assert(commands == 0 && opens == 0 && cancelled == 0 && recovery_opens == 0);
+	assert(commands == 0 && opens == 0 && cancelled == 0);
 	puts("PASS: failed card preparation never touches selector or reboots");
 
 	reset();
@@ -333,8 +236,7 @@ int main(void) {
 		assert(shell_reboots == 1 && syscall_reboots == fallback && cancelled == 0);
 		assert(!screen_on && syncs == 1 && waits == fallback + 1);
 		assert(screen_holds == 0 && auto_off_disables == 0);
-		assert(recovery_opens == 0);
 	}
-	puts("PASS: confirmed selector alone reaches intercepted reboot, including fallback");
+	puts("PASS: confirmed selector reaches intercepted reboot without reading or patching recovery, including fallback");
 	return 0;
 }

@@ -196,6 +196,9 @@ endif
 # and missing-profile errors must remain fatal. Never collect profiles on SD.
 TARGET_PGO ?= off
 TARGET_PROFILE_DIR ?= /tmp/sonix-pgo
+# Explicit source paths relative to src/ for edits made without retraining.
+# Only these C objects omit profile use; all others keep strict profile checks.
+TARGET_PGO_UNPROFILED ?=
 ifeq ($(TARGET_PGO),generate)
 TARGET_CFLAGS += -fprofile-generate=$(TARGET_PROFILE_DIR) -fprofile-update=prefer-atomic -DSONIX_PROFILE_GENERATE=1
 TARGET_LDFLAGS += -fprofile-generate=$(TARGET_PROFILE_DIR)
@@ -445,7 +448,7 @@ check-abi:
 # included. Rewritten only when they differ, so a change of flags rebuilds
 # everything and nothing else does.
 TARGET_FLAGS_STAMP = build_target/.flags
-TARGET_FLAGS_LINE = $(TARGET_CFLAGS) | $(TARGET_CXXFLAGS) | $(TARGET_DEFAULT_OPT) $(TARGET_HOT_OPT) $(TARGET_HOT_PATTERNS) | $(TARGET_LDFLAGS)
+TARGET_FLAGS_LINE = $(TARGET_CFLAGS) | $(TARGET_CXXFLAGS) | $(TARGET_DEFAULT_OPT) $(TARGET_HOT_OPT) $(TARGET_HOT_PATTERNS) | $(TARGET_LDFLAGS) | unprofiled=$(TARGET_PGO_UNPROFILED)
 $(TARGET_FLAGS_STAMP): FORCE
 	@mkdir -p $(dir $@)
 	@echo '$(TARGET_FLAGS_LINE)' | cmp -s - $@ || \
@@ -455,7 +458,7 @@ FORCE:
 
 build_target/%.o: src/%.c $(TARGET_FLAGS_STAMP)
 	@mkdir -p $(dir $@)
-	$(CROSS_CC) $(TARGET_CFLAGS) $(TARGET_OPT) -c $< -o $@
+	$(CROSS_CC) $(if $(and $(filter use,$(TARGET_PGO)),$(filter $(patsubst src/%,%,$<),$(TARGET_PGO_UNPROFILED))),$(filter-out -fprofile-use=% -fprofile-correction -Werror=coverage-mismatch -Werror=missing-profile,$(TARGET_CFLAGS)),$(TARGET_CFLAGS)) $(TARGET_OPT) -c $< -o $@
 
 build_target/%.opp: src/%.cpp $(TARGET_FLAGS_STAMP)
 	@mkdir -p $(dir $@)

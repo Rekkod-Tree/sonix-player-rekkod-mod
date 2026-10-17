@@ -10,7 +10,19 @@ The normal Sonix `.upt` contains the normal kernel and rootfs. It does **not** u
 
 Sonix now requires a checked `syncfs`, closure of its root descriptor and successful ordinary unmount before arming recovery. Failure restores its own card claim and local services without rebooting. The boot selector is read back; failed recovery selection must be followed by a verified Normal restoration. An uncertain selector cancels the automatic reboot and disables idle auto-off in memory.
 
-R1 updates also require the reviewed read-only recovery SHA-256. Unknown, unreadable and old recovery images stop before playback or card-service shutdown. Other models retain their existing update path and are not claimed verified by this R1 work.
+From alpha17, normal updates do not inspect a recovery hash or require its repair.
+The user may keep the original recovery and install compatible firmware through
+the normal update menu. Card sync/unmount and boot-selector verification still
+apply. Updates remain blocked while a recovery repair is active or uncertain.
+The separate repair wizard continues to require the exact supported recovery,
+verified backups and explicit confirmation before any write. Alpha13-alpha16's
+mandatory update hash policy is historical and is removed by alpha17.
+
+Keeping the original recovery retains its RW-card/reboot behavior. Successful
+card preparation in Sonix covers only the first handoff, not recovery's later
+mount. Repair is therefore useful but voluntary. It changes neither firmware
+format nor brand/version checks; compatibility with every third-party or stock
+image is not established by the one-byte comparison or the tested mod update.
 
 The one-time recovery candidate changes one decompressed byte: `mount -rw` becomes `mount -r `, preserving command length. A same-size LZO replacement leaves every other file, filesystem record and partition byte outside the reviewed compressed extent unchanged. It addresses recoveryd's SD source mount; USB-storage mdev and arbitrary external mount-service requests are outside this acceptance.
 
@@ -40,7 +52,8 @@ already prepared image needs no repair. For the single supported original image,
 the wizard saves and reads back both recovery partitions in a new
 `RecoveryBackup/r1-.../` directory on the card (at least 40 MB free), then offers
 the separate repair confirmation. Applying requires external power and at least
-50% battery. Unknown images stay blocked. Do not delete the verified backups.
+50% battery. Unknown images cannot be repaired by the wizard; this does not block
+normal firmware updates from alpha17. Do not delete the verified backups.
 
 After an uncertain write/readback, normal shutdown, standby and software reboot
 remain blocked: keep the player powered and seek recovery assistance. There is
@@ -48,7 +61,7 @@ no automatic second erase or rollback. Hardware power loss cannot be prevented
 by the UI. The tested R1 is already repaired; the wizard must not rewrite it.
 
 The first installation from an older, unguarded firmware still uses that old
-firmware's recovery. The new wizard protects subsequent updates and cannot
+firmware's recovery. The optional repair addresses subsequent recovery SD reads and cannot
 retroactively prevent an unclean flag from that first transition. It also does
 not repair pre-existing FAT damage. An alpha15 installation that already blocks
 its stock recovery needs a separate supported transition; renaming the image
@@ -66,7 +79,13 @@ The user subsequently installed the staged alpha13 image through the repaired re
 
 The user explicitly authorized the one-time repair after preparation. The utility applied eraseblock 34 on the R1, verified the complete raw partition, and a separate `--check` reported the repaired image already present. The full SHA-256 matched `259b7d112b0bb49277dbf2dc9008411ddd839563601d17169dd97a428b8e56a0`; bad-block and ECC-failure counters remained zero. The normal boot selector was unchanged and alpha12 kept running. No reboot was requested; the temporary helper and replacement block were removed. Evidence: workspace `output/recovery-ro-patch/helper-device-{preapply,apply,postapply}.log` and `application-result.json`.
 
-Native fixtures cover update preparation/rollback, selector failures, the R1 image guard and 24 repair scenarios using real offline image/block hashes; all privileged operations are intercepted. MIPS compilation and ABI checks pass. Full extraction of both recovery images compared 1693 file paths, 134 directories and 482 symlinks; metadata and all content except the one byte match.
+Current update fixtures cover preparation/rollback and selector failures, and
+reject any recovery-partition access from the ordinary update path. The former
+R1 update hash gate is removed. The separate repair utility retains 24 offline
+scenarios using real image/block hashes; all privileged operations are intercepted.
+The earlier MIPS compilation and ABI checks passed. Full extraction of both
+recovery images compared 1693 file paths, 134 directories and 482 symlinks;
+metadata and all content except the one byte match.
 
 Before installation, the exact stock BusyBox loop command successfully read the real `.upt` from an isolated read-only card bind on R1; `LO_FLAGS_READ_ONLY`, OTA metadata and cleanup were checked. The original card mount remained read/write. The compiled repair helper also passed its actual pre-apply `--check`: the raw original image, normal selector, exact geometry and all 192 good blocks matched. These preparatory checks were subsequently followed by the accepted update cycle described above.
 

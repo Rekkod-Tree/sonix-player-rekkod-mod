@@ -1,6 +1,4 @@
 #include "fwupdate.h"
-#include "src/gui/settings/recoverywizard.h"
-#include "src/gui/shell/confirm.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -545,8 +543,6 @@ static void show_release(void) {
 }
 
 static const char *update_failure_key(firmware_update_result_t result) {
-	if (result == FIRMWARE_UPDATE_RECOVERY_REQUIRED)
-		return "system_update_recovery_required";
 	if (result == FIRMWARE_UPDATE_BOOTMODE_UNCERTAIN)
 		return "system_update_bootmode_failed";
 	return "system_update_prepare_failed";
@@ -557,10 +553,7 @@ static void install_cb(lv_timer_t *timer) {
 	firmware_update_result_t result = firmware_update_start();
 	if (result == FIRMWARE_UPDATE_SIMULATED)
 		close_card();
-	else if (result == FIRMWARE_UPDATE_RECOVERY_REQUIRED) {
-		close_card();
-		confirm_show("recovery_wizard_title", "system_update_recovery_required", "recovery_wizard_continue", recoverywizard_open, NULL);
-	} else
+	else
 		show_notice(tr(update_failure_key(result)));
 }
 
@@ -662,9 +655,7 @@ static void sd_run(void *unused) {
 	}
 	printf("firmware: update file %s\n", path);
 	firmware_update_result_t result = firmware_update_start();
-	if (result == FIRMWARE_UPDATE_RECOVERY_REQUIRED)
-		confirm_show("recovery_wizard_title", "system_update_recovery_required", "recovery_wizard_continue", recoverywizard_open, NULL);
-	else if (result != FIRMWARE_UPDATE_SIMULATED)
+	if (result != FIRMWARE_UPDATE_SIMULATED)
 		gui_notify_popup(update_failure_key(result));
 }
 

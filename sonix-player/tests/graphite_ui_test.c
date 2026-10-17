@@ -1053,7 +1053,101 @@ static void surface_states(void) {
 #include "graphite_components.inc"
 #include "graphite_upstream.inc"
 
+static void player_home_gestures(void) {
+	int height = lv_display_get_vertical_resolution(lv_display_get_default());
+	player_layout_t saved = player_layout_get();
+	device_state_t before, after;
+	device_state_get(&before);
+	for (int layout = PLAYER_LAYOUT_STANDARD; layout <= PLAYER_LAYOUT_STUDIO; layout++) {
+		player_sheet_close(false);
+		switch_screen_no_history(music_screen);
+		player_layout_set((player_layout_t)layout);
+		player_sheet_open(false);
+		lv_obj_update_layout(player_screen);
+		capture(layout == PLAYER_LAYOUT_STANDARD ? "home-gesture-player-standard" : layout == PLAYER_LAYOUT_ALTERNATIVE ? "home-gesture-player-waveform" : "home-gesture-player-studio");
+		int bottom = height - 8;
+		input(5, height - 40, true);
+		input(5, height - 140, true);
+		input(5, height - 140, false);
+		assert(player_sheet_is_open()); // An upward drag outside the edge is not Home.
+		assert(!sx_sheet_is_open());
+		input(240, bottom, true);
+		input(240, bottom, false);
+		assert(player_sheet_is_open());
+		input(240, bottom, true);
+		input(240, bottom - 40, true);
+		input(240, bottom - 40, false);
+		assert(player_sheet_is_open());
+		input(240, bottom, true);
+		input(350, bottom - 20, true);
+		input(350, bottom - 20, false);
+		assert(player_sheet_is_open());
+		input(240, bottom, true);
+		input(240, bottom - 100, true);
+		assert(player_sheet_is_open());
+		lv_obj_t *edge = NULL;
+		for (uint32_t i = 0; i < lv_obj_get_child_count(player_screen); i++) {
+			lv_obj_t *child = lv_obj_get_child(player_screen, i);
+			if (lv_obj_get_height(child) == 24 && lv_obj_get_y(child) == height - 24)
+				edge = child;
+		}
+		assert(edge);
+		lv_obj_send_event(edge, LV_EVENT_PRESS_LOST, pointer);
+		input(240, bottom - 100, false);
+		assert(player_sheet_is_open() && lv_screen_active() == music_screen);
+		input(240, bottom, true);
+		input(240, bottom - 25, true);
+		input(240, bottom - 100, true);
+		assert(player_sheet_is_open()); // Home commits on release, not while held.
+		input(240, bottom - 100, false);
+		assert(!player_sheet_is_open() && lv_screen_active() == main_menu_screen);
+		capture(layout == PLAYER_LAYOUT_STANDARD ? "player-home-standard" : layout == PLAYER_LAYOUT_ALTERNATIVE ? "player-home-waveform" : "player-home-studio");
+		// Home resets the stack, including the previous Music page.
+		back_btn_cb(NULL);
+		assert(lv_screen_active() == main_menu_screen);
+	}
+	device_state_get(&after);
+	assert(strcmp(before.current_file, after.current_file) == 0 && before.volume == after.volume && before.status == after.status);
+	player_layout_set(saved);
+	player_sheet_open(false);
+	printf("UI_HOME_GESTURE_PASS %s: tap/short/horizontal/cancel/held/Home, three layouts\n", theme_is_dark() ? "dark" : "light");
+}
+
 static void run(lv_timer_t *timer) {
+	if (getenv("SONIX_UI_TEST_PLAYER_HOME_ONLY")) {
+		static int step;
+		int height = lv_display_get_vertical_resolution(lv_display_get_default());
+		if (step == 0) {
+			gui_init_rest();
+			pointer = lv_indev_create();
+			lv_indev_set_type(pointer, LV_INDEV_TYPE_POINTER);
+			lv_indev_set_read_cb(pointer, read_pointer);
+			theme_set_dark(false);
+			player_play_file(getenv("SONIX_UI_TEST_TRACK"));
+			switch_screen_no_history(music_screen);
+			player_sheet_open(false);
+		} else if (step == 1 || step == 3) {
+			player_home_gestures();
+			input(240, height - 8, true);
+			input(240, height - 35, true);
+			input(240, height - 120, true);
+			input(240, height - 120, false);
+			assert(!player_sheet_is_open());
+		} else {
+			assert(lv_obj_is_hidden(player_screen) && lv_screen_active() == main_menu_screen && sx_mini_visible());
+			capture(step == 2 ? "home-ready-light" : "home-ready-dark");
+			if (step == 4) {
+				puts("UI_TEST_PASS player Home gesture and completed animation, both themes and three layouts");
+				fflush(stdout);
+				exit(0);
+			}
+			theme_set_dark(true);
+			switch_screen_no_history(music_screen);
+			player_sheet_open(false);
+		}
+		step++;
+		return;
+	}
 	if (getenv("SONIX_UI_TEST_UPSTREAM")) {
 		upstream_run();
 		return;
@@ -1221,6 +1315,7 @@ static void run(lv_timer_t *timer) {
 		player_sheet_open(false);
 		break;
 	case 11: {
+		player_home_gestures();
 		capture("player-light");
 		lv_obj_t *label = find_label(player_screen, "Echoes");
 		assert(label);
@@ -1233,6 +1328,7 @@ static void run(lv_timer_t *timer) {
 		break;
 	}
 	case 12:
+		player_home_gestures();
 		capture("player-dark");
 		btline_set_enabled(false);
 		player_chain_open();

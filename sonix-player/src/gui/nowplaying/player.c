@@ -23,6 +23,7 @@
 #include "src/gui/shell/confirm.h"
 #include "src/gui/shell/gui.h"
 #include "src/gui/shell/icons.h"
+#include "src/gui/shell/main_menu.h"
 #include "src/gui/shell/popover.h"
 #include "src/gui/shell/quickpanel.h"
 #include "src/gui/shell/scrolltext.h"
@@ -5428,6 +5429,61 @@ static void panel_edge_drag_cb(lv_event_t *e) {
 	}
 }
 
+#define NP_HOME_EDGE_H 24
+
+// Only the free bottom edge owns Home; artwork and controls keep their gestures.
+static void home_edge_drag_cb(lv_event_t *e) {
+	static lv_point_t start;
+	static bool tracking, engaged;
+	lv_event_code_t code = lv_event_get_code(e);
+	if (code == LV_EVENT_PRESS_LOST) {
+		tracking = false;
+		if (engaged)
+			lv_async_call(drag_committed_clear_cb, NULL);
+		return;
+	}
+	lv_indev_t *indev = lv_event_get_param(e);
+	if (!indev)
+		indev = lv_indev_active();
+	if (!indev)
+		return;
+	if (code == LV_EVENT_PRESSED) {
+		lv_indev_get_point(indev, &start);
+		tracking = sheet_open && !chain_is_open() && !quickpanel_is_open() && !sx_sheet_is_open();
+		engaged = false;
+		drag_committed = false;
+		return;
+	}
+	if (!tracking)
+		return;
+	lv_point_t point;
+	lv_indev_get_point(indev, &point);
+	int dx = point.x - start.x, up = start.y - point.y;
+	if (code == LV_EVENT_PRESSING) {
+		if (!engaged) {
+			if (LV_ABS(dx) >= SX_DRAG_LOCK_PX && LV_ABS(dx) >= up) {
+				tracking = false;
+				return;
+			}
+			if (up >= SX_DRAG_LOCK_PX && up > LV_ABS(dx)) {
+				engaged = true;
+				drag_committed = true;
+			}
+		}
+		return;
+	}
+	if (code == LV_EVENT_RELEASED) {
+		tracking = false;
+		if (engaged && up >= SX_EDGE_BACK_PX && up > LV_ABS(dx) && sheet_open && !chain_is_open() && !quickpanel_is_open() && !sx_sheet_is_open()) {
+			sheet_under = main_menu_screen;
+			switch_screen(main_menu_screen);
+			player_sheet_close(true);
+		}
+		if (engaged)
+			lv_async_call(drag_committed_clear_cb, NULL);
+	}
+}
+
 static void artist_label_clicked_cb(lv_event_t *e) {
 	(void)e;
 	if (drag_committed) {
@@ -7361,6 +7417,18 @@ void player_init(gui_config_t *cfg) {
 	lv_obj_add_event_cb(panel_edge, panel_edge_drag_cb, LV_EVENT_RELEASED, NULL);
 	lv_obj_add_event_cb(panel_edge, panel_edge_drag_cb, LV_EVENT_PRESS_LOST, NULL);
 	lv_obj_move_foreground(panel_edge);
+
+	lv_obj_t *home_edge = lv_obj_create(player_screen);
+	lv_obj_remove_style_all(home_edge);
+	lv_obj_set_size(home_edge, cfg->screen_width, NP_HOME_EDGE_H);
+	lv_obj_align(home_edge, LV_ALIGN_BOTTOM_MID, 0, 0);
+	lv_obj_set_scrollable(home_edge, false);
+	lv_obj_set_clickable(home_edge, true);
+	lv_obj_set_press_lock(home_edge, true);
+	lv_obj_add_event_cb(home_edge, home_edge_drag_cb, LV_EVENT_PRESSED, NULL);
+	lv_obj_add_event_cb(home_edge, home_edge_drag_cb, LV_EVENT_PRESSING, NULL);
+	lv_obj_add_event_cb(home_edge, home_edge_drag_cb, LV_EVENT_RELEASED, NULL);
+	lv_obj_add_event_cb(home_edge, home_edge_drag_cb, LV_EVENT_PRESS_LOST, NULL);
 
 	// The backdrop over a loaded cover is always the dark treatment -- same
 	// look in both themes; only the no-cover panel follows the theme.
