@@ -27,6 +27,7 @@
 | Плагины Compás | [Оценка совместимости и решение отложить](COMPAS_PLUGIN_COMPATIBILITY.md); [статическая инвентаризация и хелпер](tools/compas-audit/) |
 | Звук, Space One Pro | [Пресеты и результаты прослушивания](AUDIO_PRESETS.md); [исторические заметки и численные результаты](research/audio/2026-10-18/); [DSP-хелперы](tools/audio-audit/) |
 | Управление R1 через MCP | [Назначение, установка и границы проверки](R1_HELPER.md); [исходники и тесты](tools/r1-helper/) |
+| Реальные экраны и жесты R1 | [Галерея в README](README.md#как-это-выглядит), [готовый скринкаст](screenshots/demos/), [исходные записи и восстановление состояния](research/ui/2026-10-18/screencast/) |
 | Оптимизация сборки | [Исследование LTO](LTO_EXPERIMENT_2026-10-17.md) |
 | Изменения upstream Sonix | [Сравнение и оценка переносов](UPSTREAM_REVIEW_2026-10-16.md) |
 | Полнота Graphite UI | [Покрытие](UI3_COVERAGE.md), [проверки](UI3_VALIDATION.md) |

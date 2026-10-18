@@ -1,0 +1,11 @@
+[spoiler="Скринкаст: Графит 2 и жесты на настоящем HiBy R1"]
+Около 35 секунд: главная, меню удержания, настройка ярлыков, свайп «Назад», шторка, полный плеер и действия по строке трека.
+
+Запись с реального R1 на alpha19, без симулятора и моковых данных. Подписи добавлены под экраном. Вправо показан предпросмотр «Играть следующим», влево — работа избранного. Исходные настройки, очередь и лайки после съёмки восстановлены.
+
+[url=https://github.com/Rekkod-Tree/sonix-player-rekkod-mod/raw/refs/heads/main/screenshots/demos/r1-graphite2-gestures-alpha19.mp4]Смотреть / скачать MP4[/url]
+[url=https://github.com/Rekkod-Tree/sonix-player-rekkod-mod/raw/refs/heads/main/screenshots/demos/r1-graphite2-gestures-alpha19.gif]GIF-анимация[/url]
+[url=https://github.com/Rekkod-Tree/sonix-player-rekkod-mod/raw/refs/heads/main/screenshots/demos/r1-graphite2-gestures-alpha19.webp]Анимированный WebP[/url]
+
+Полный список жестов — в README проекта. Ролик показывает установленную alpha19; доработки alpha20 в него не включены.
+[/spoiler]

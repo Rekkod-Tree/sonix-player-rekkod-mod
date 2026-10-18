@@ -1,0 +1,45 @@
+{
+  "hash_scope": "Binary native capture files only; JSON metadata is ordinary UTF-8 text and not covered by these byte hashes",
+  "hashes": [
+    {
+      "file": "00-main-idle.snx",
+      "sha256": "45367ecc0a6295e175016ec222aad9282125fe890b05ae74cebda1be420f242e"
+    },
+    {
+      "file": "03-hold-native.snx",
+      "sha256": "46a32dbb131dfdc3c4e823ee12070fc70cfcf7132e961796a79cdf123061fc29"
+    },
+    {
+      "file": "04-open-editor.snx",
+      "sha256": "69be3412ddbf7bb4250bc32e9adb8d9c7a95c0003e18386ecd6beff8f51b06dd"
+    },
+    {
+      "file": "05-edge-back.snx",
+      "sha256": "47cfe407db1493bee0362f8ba0d8e1853d181b35d318dcb6fd620590aa4a0bb0"
+    },
+    {
+      "file": "06-shade-down.snx",
+      "sha256": "6b948491bb20bf351294920c87d2c917c0ef3c725462dd56f89bc550342d2a7e"
+    },
+    {
+      "file": "07-player-open.snx",
+      "sha256": "32dcdb4ac5fb0c03bc5ff19a35ceceda6e99324173b44ecd4349aff8a9e74f88"
+    },
+    {
+      "file": "08-player-up-home.snx",
+      "sha256": "7bcbd0f446823944013e630e4300b9ff260bb203497d967a743170b94e5c08af"
+    },
+    {
+      "file": "09-player-down.snx",
+      "sha256": "1e5eabbfe1606c4db77491f48e61a6fd87229a79d8987d353214320a241653d9"
+    },
+    {
+      "file": "10-row-next-preview.snx",
+      "sha256": "6401946421c908dffb47386ced0b92f4a47d3cd741ac8177b6db61d8ec1354e9"
+    },
+    {
+      "file": "11-row-favourite.snx",
+      "sha256": "5d328cd8406c40eab95b5e8f25e02f2a45c431ef11bd5e65143cbdaa53a96379"
+    }
+  ]
+}

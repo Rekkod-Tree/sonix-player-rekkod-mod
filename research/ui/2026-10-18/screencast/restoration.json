@@ -1,0 +1,16 @@
+{
+  "settings_changed_keys": [
+    "clock.last_seen"
+  ],
+  "tables_restored": {
+    "FAVOURITES": true,
+    "PLAYBACK_QUEUE": true,
+    "PLAYBACK_STATE": true,
+    "PLAYBACK_QUEUE_STATE": true,
+    "PLAYBACK_QUEUE_QUERY": true,
+    "PLAYBACK_QUEUE_ALBUM": true
+  },
+  "playback_note": "Outro / Haski remained paused at 0:00, queue position 16/16; sound settings and volume not intentionally changed",
+  "row_next_demo": "Sub-threshold preview, queue not modified",
+  "favourite_demo": "Local Overture/Affinage added, then removed to restore initial false state"
+}

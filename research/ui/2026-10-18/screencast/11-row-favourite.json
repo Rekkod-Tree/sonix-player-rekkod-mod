@@ -1,0 +1,11 @@
+{
+  "source": "real HiBy R1 framebuffer",
+  "frames": 40,
+  "first_ms": 10,
+  "last_ms": 3910,
+  "fps_requested": 10,
+  "seconds_requested": 4,
+  "native_sha256": "c4f0ab0a3236df2ab9f8503e9cb1e1760899792bdbbffe02f92c5774234ae0d2",
+  "audio": false,
+  "device_file_cap": 3145728
+}

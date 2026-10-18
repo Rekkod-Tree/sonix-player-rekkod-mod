@@ -1,0 +1,87 @@
+{
+  "note": "All images are unedited captures from a physical HiBy R1; no simulator frames. Original paths are relative to the supporting Mediateka workspace, not the source repository.",
+  "images": [
+    {
+      "synthetic_data": false,
+      "sha256": "241923a35e9b59c8e5f836de2c0e2fd4d766e5bdd0d05524286529f7721d9b7a",
+      "source": "output/readme-gallery-20261018/device/screenshot-20261018-002052.png",
+      "origin": "User screenshot saved on R1",
+      "caption": "Настраиваемая главная",
+      "file": "r1-home.png",
+      "device": "HiBy R1"
+    },
+    {
+      "synthetic_data": false,
+      "sha256": "becc0ac8a11580bea590b7246cace5e6779e331c6088422e9708f1d8d5cfc282",
+      "source": "output/readme-gallery-20261018/device/screenshot-20261018-002231.png",
+      "origin": "User screenshot saved on R1",
+      "caption": "Шторка",
+      "file": "r1-quick-panel.png",
+      "device": "HiBy R1"
+    },
+    {
+      "synthetic_data": false,
+      "sha256": "9b6a1f7c3fe2a0226b9cc8e702849447bce0705a055d00b9a54fa99105456d24",
+      "source": "output/readme-gallery-20261018/device/screenshot-20261018-002301.png",
+      "origin": "User screenshot saved on R1",
+      "caption": "Выбор поиска",
+      "file": "r1-search-scope.png",
+      "device": "HiBy R1"
+    },
+    {
+      "synthetic_data": false,
+      "sha256": "401f719a45790e5f4948112caba27ea58a2ac59c108aec3bb5961f0eac6f5159",
+      "source": "output/alpha19-device/editor-native-active.png",
+      "origin": "alpha19 native R1 device run",
+      "caption": "Редактор главной",
+      "file": "r1-home-editor.png",
+      "device": "HiBy R1"
+    },
+    {
+      "synthetic_data": false,
+      "sha256": "7bf2e37186d8b9e0a7e9f3b889946d534c8f0cd213f967499589d87da7099b11",
+      "source": "output/alpha19-device/book-player-paused-native-active.png",
+      "origin": "alpha19 native R1 device run",
+      "caption": "Книга и сохранённая позиция",
+      "file": "r1-audiobook.png",
+      "device": "HiBy R1"
+    },
+    {
+      "synthetic_data": false,
+      "sha256": "38b82b888be99910e939ead584c950132ed9c8164d9afc851448d952b5a521cb",
+      "source": "output/alpha19-device/search-local-history-result-active.png",
+      "origin": "alpha19 native R1 device run",
+      "caption": "Поиск по реальной библиотеке",
+      "file": "r1-local-search.png",
+      "device": "HiBy R1"
+    },
+    {
+      "synthetic_data": false,
+      "sha256": "f1bda10508ed03a73e56e9dcd39376dcf114ef15ba16cc4babb041022fd30edc",
+      "source": "output/readme-gallery-20261018/device/screenshot-20261018-002331.png",
+      "origin": "User screenshot saved on R1",
+      "caption": "Метроном",
+      "file": "r1-metronome.png",
+      "device": "HiBy R1"
+    },
+    {
+      "source": "output/r1-screencast-20261018/07-player-open/frame-0039.png",
+      "file": "r1-player.png",
+      "origin": "Fresh native R1 alpha19 screencast during exclusive user-authorized device window",
+      "caption": "Полный плеер",
+      "sha256": "532fe407501b69e4cf20ec59fb134481b45a0fe9c7e64eb3768b95ae43fb2a18",
+      "device": "HiBy R1",
+      "synthetic_data": false
+    },
+    {
+      "source": "output/r1-screencast-20261018/10-row-next-preview/frame-0000.png",
+      "file": "r1-album.png",
+      "origin": "Fresh native R1 alpha19 screencast during exclusive user-authorized device window",
+      "caption": "Страница альбома",
+      "sha256": "c52cf9649480584f409af2a3c99f44f3640140c2eecb2ea0006a2831723987a6",
+      "device": "HiBy R1",
+      "synthetic_data": false
+    }
+  ],
+  "date": "2026-10-18"
+}

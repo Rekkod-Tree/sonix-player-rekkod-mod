@@ -1,0 +1,75 @@
+{
+  "device": "HiBy R1",
+  "firmware": "alpha19",
+  "source": "native framebuffer captures only",
+  "audio": false,
+  "edited": "Individual real clips concatenated; explanatory captions outside the 480x800 screen. Original recordings preserved.",
+  "scenes": [
+    {
+      "name": "00-main-idle",
+      "caption": "Sonix Player rekkod-mod · Graphite 2\nРеальный HiBy R1 · alpha19",
+      "duration": 2.0,
+      "frames": 16
+    },
+    {
+      "name": "03-hold-native",
+      "caption": "Удержание плитки — меню\nБыстрый доступ к настройке главной",
+      "duration": 4.5,
+      "frames": 40
+    },
+    {
+      "name": "04-open-editor",
+      "caption": "Главная под себя\nСвои ярлыки и их порядок",
+      "duration": 3.5,
+      "frames": 32
+    },
+    {
+      "name": "05-edge-back",
+      "caption": "Свайп от левого края — назад",
+      "duration": 3.5,
+      "frames": 40
+    },
+    {
+      "name": "06-shade-down",
+      "caption": "Потянуть сверху — шторка\nБыстрые настройки в общей палитре",
+      "duration": 3.5,
+      "frames": 40
+    },
+    {
+      "name": "07-player-open",
+      "caption": "Тап по мини-плееру\nПолный экран воспроизведения",
+      "duration": 3.5,
+      "frames": 40
+    },
+    {
+      "name": "09-player-down",
+      "caption": "Потянуть плеер вниз\nВернуться к открытой странице",
+      "duration": 3.5,
+      "frames": 40
+    },
+    {
+      "name": "08-player-up-home",
+      "caption": "Свайп снизу вверх\nИз полного плеера — на главную",
+      "duration": 3.5,
+      "frames": 40
+    },
+    {
+      "name": "10-row-next-preview",
+      "caption": "Вправо по строке — следующим\nПредпросмотр без изменения очереди",
+      "duration": 3.5,
+      "frames": 40
+    },
+    {
+      "name": "11-row-favourite",
+      "caption": "Влево по строке — избранное\nПоставить или снять лайк",
+      "duration": 2.2,
+      "frames": 40
+    },
+    {
+      "name": "00-main-idle",
+      "caption": "Графит 2\nМузыка, книги и управление жестами",
+      "duration": 1.4,
+      "frames": 16
+    }
+  ]
+}

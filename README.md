@@ -1,554 +1,215 @@
-﻿# Sonix Player
+# Sonix Player rekkod-mod
+
+**Прошивка для HiBy R1: музыка с карты и из сервисов, аудиокниги в дороге и интерфейс «Графит 2».**
+
+rekkod-mod развивает [Sonix Player](https://github.com/Jepl4r/sonix-player): сохраняет его возможности, добавляет Яндекс Музыку, Звук и собственные доработки управления, звука и работы с картой. Основная модель для разработки и проверки — **HiBy R1**.
+
+[Возможности](#что-умеет-плеер) · [Жесты](#жесты) · [Новые доработки](#что-сейчас-дорабатывается) · [Обновление](#сборки-и-обновление) · [Документация](#документация)
+
+## Как это выглядит
+
+Реальные снимки **HiBy R1**: настраиваемая главная, обновлённая шторка и выбор области поиска. Цвет акцента можно выбрать самому или брать из обложки.
+
+<table>
+<tr><th>Главная под себя</th><th>Быстрые настройки</th><th>Где искать</th></tr>
+<tr>
+<td><img src="screenshots/readme/r1-home.png" width="230" alt="Главная HiBy R1 с ярлыками альбомов, книги, файлов, поиска и Яндекс Музыки"></td>
+<td><img src="screenshots/readme/r1-quick-panel.png" width="230" alt="Шторка реального R1 в общей палитре с мини-плеером"></td>
+<td><img src="screenshots/readme/r1-search-scope.png" width="230" alt="Выбор поиска по карте, Яндекс Музыке или Звуку на R1"></td>
+</tr>
+</table>
+
+**Состояние на 18 октября 2026:** основа — Sonix 1.3.0, интерфейс UI 3.0. Настраиваемая главная появилась в alpha19. Следующие изменения для alpha20 перечислены отдельно ниже: это ещё не обещание готовой опубликованной сборки. Набор возможностей конкретного образа смотрите в его описании.
+
+## Что умеет плеер
+
+### Главная и управление
+
+| Функция | Что это даёт |
+| --- | --- |
+| Пять своих ярлыков | Вынесите альбомы, исполнителей, избранное, файлы, поиск или нужный сервис. Порядок меняется в настройках главной. |
+| Постоянная плитка «Ещё» | Убранные с главной разделы остаются доступны. Снятие ярлыка не удаляет музыку, аккаунты и настройки. |
+| «Продолжить книгу» | Возвращает к последней прослушиваемой книге и её сохранённому месту, в том числе после музыки. |
+| Меню по удержанию | Настройка плитки и действия с треком доступны рядом с выбранным элементом. |
+| Мини-плеер | Трек, исполнитель и управление воспроизведением остаются под рукой при переходах между страницами. |
+| Светлое и тёмное оформление | Единые карточки, строки, иконки и настройки. Есть цветные акценты, нейтральный серый и окраска от обложки. |
+| Быстрая шторка | Громкость, яркость, подключения, обработка звука и переход в настройки без долгого поиска по меню. |
+
+### Музыка на карте
+
+- **Библиотека:** треки, альбомы, исполнители, исполнители альбомов, жанры, годы и папки. Есть сортировки, избранное, недавно добавленная и недавно прослушанная музыка.
+- **Поиск:** по трекам, альбомам и исполнителям; категории результатов и история последних запросов.
+- **Плейлисты:** создание, переименование, выбор нескольких треков, импорт и экспорт M3U.
+- **Очередь:** «Играть следующим» и «В конец очереди», удаление с отменой, перестановка предстоящих треков и история прослушивания.
+- **Воспроизведение:** повтор трека или списка, перемешивание и непрерывное перемешивание; переход к следующему альбому или папке.
+- **Обложки и теги:** названия, исполнители, длительность и качество записи. Для отсутствующих обложек — узнаваемые цветные заглушки.
+- **Форматы:** FLAC, MP3, WAV, AAC/M4A, ALAC, Ogg Vorbis, Opus, WavPack, APE, AIFF, CAF, DSD и другие; поддерживаются CUE и главы в совместимых файлах.
+
+### Стриминг и интернет-радио
+
+| Источник | Возможности |
+| --- | --- |
+| **Яндекс Музыка** | Поиск, альбомы, исполнители, плейлисты, «Мне нравится», «Моя волна», выбор качества, сохранение треков и альбомов на карту. |
+| **Звук** | Поиск, музыкальная коллекция, альбомы, плейлисты, сохранение музыки, аудиокниг и выпусков подкастов. Вход сейчас использует импорт токена аккаунта. |
+| **Subsonic / OpenSubsonic** | Подключение своей музыкальной библиотеки, например Navidrome, и прослушивание с сервера. |
+| **Tidal и Qobuz** | Каталоги сервисов, поиск, альбомы, плейлисты, избранное и настройки качества. |
+| **Подкасты** | Поиск передач, подписки, загрузка выпусков, собственные RSS-ленты и импорт OPML. |
+| **Интернет-радио** | Каталог станций, поиск, избранное, недавние станции и свой список в `radio.txt`. |
+
+Для сервисов нужны соответствующие аккаунты и, где требуется, подписка. Доступность контента и способов входа зависит от сервиса и состава сборки.
+
+В Яндекс Музыке и Звуке **сохранение текущего трека доступно прямо из меню полного плеера**. Сохранённую музыку можно слушать без сети. Названия в очереди подгружаются отдельно от аудиофайла, чтобы вместо песни не показывалось техническое имя загрузки.
+
+### Аудиокниги и подкасты в дороге
+
+- **Своя книжная полка:** книги, авторы, серии и продолжение начатого. Папку аудиокниг можно выбрать.
+- **Прогресс и закладки:** позиция сохраняется отдельно для книги и переживает повторное сканирование библиотеки.
+- **Главы:** поддерживаются встроенные главы и книги из нескольких файлов в папке.
+- **Управление:** переходы на заданное число секунд и скорость 0,5–2× с сохранением высоты голоса.
+- **Сон:** таймер и остановка на границе главы, где она доступна.
+- **Офлайн-книги из Яндекса и Звука:** книга скачивается в раздел аудиокниг с правильным порядком частей. Незавершённая загрузка не выдаётся за готовую книгу.
+- **Выпуски подкастов:** можно сохранять отдельно. Прогресс локального выпуска сохраняется; синхронизация позиции между стримингом и локальной копией пока не реализована.
+
+### Звук под свои наушники
+
+| Настройка | Возможности |
+| --- | --- |
+| **Обычный эквалайзер** | Десять полос, готовые и собственные пресеты. |
+| **Параметрический EQ** | Десять полос с настройкой частоты, усиления, добротности и типа фильтра; график отклика и числовой ввод Gain/Q. |
+| **Пресеты AutoEQ / Equalizer APO** | Поиск профиля наушников и импорт совместимых файлов из папки `PEQ`. Скачивание профиля само по себе не меняет активный звук. |
+| **MSEB** | Настройка характера звучания: температура, бас, плотность, вокал, верхние частоты и другие параметры. |
+| **Сцена и каналы** | Ширина стереобазы, баланс и crossfeed. |
+| **Уровень и переходы** | ReplayGain, плавные переходы, gapless и раздельное запоминание громкости выходов и Bluetooth-наушников. |
+| **ЦАП и DSD** | Доступные для модели фильтры ЦАП, настройки выхода и воспроизведение DSD через DoP или преобразование в PCM. |
+
+Готовый профиль — отправная точка, а не универсальная гарантия хорошего звучания: модель наушников, посадка и ANC имеют значение. [Наши экспериментальные пресеты и результаты сравнений](AUDIO_PRESETS.md).
+
+### Подключения
+
+- **Bluetooth-наушники:** выбор доступного кодека, настройки LDAC и частоты соединения, сохранение параметров пары.
+- **Bluetooth-приёмник:** слушайте на плеере звук с телефона или компьютера.
+- **AirPlay и DLNA:** передавайте музыку на плеер по сети.
+- **USB-ЦАП:** используйте плеер как звуковую карту или подключайте внешний USB-ЦАП и USB-наушники.
+- **Wi-Fi-передача:** загружайте музыку и папки через браузер в одной сети, без вынимания карты.
+- **USB-накопитель:** управляйте картой с компьютера; перед передачей плеер закрывает свои файлы.
+- **SonixLink:** удалённое управление воспроизведением с совместимого клиента.
+
+### Ещё полезное
+
+- **Файловый менеджер:** прослушивание из папок, выбор нескольких файлов, копирование, перенос, удаление и выбор папки назначения.
+- **Тексты песен:** просмотр LRC, поиск через LRCLIB и сохранение текста рядом с музыкой.
+- **Читалка EPUB:** оглавление, изображения, закладки, размер текста и темы чтения.
+- **Метроном:** настройка темпа, размера и отбивание темпа касанием.
+- **Картинки и игры:** просмотр JPEG/PNG/GIF и Game Boy / Game Boy Color для собственных файлов игр.
+- **Кнопки:** переназначение доступных действий и управление с совместимого проводного пульта.
+- **Питание:** сон, автоматическое выключение, ограничение заряда и экран с процентом батареи при зарядке выключенного плеера — тоже в стиле Graphite 2.
+- **Скриншоты:** сохранение изображения экрана на карту после включения функции в настройках.
+- **Часы:** синхронизация времени по сети, настройка часового пояса и отображения часов.
+
+<details>
+<summary><b>Ещё реальные кадры: настройка главной, книги, поиск и метроном</b></summary>
+
+Кадры аппаратного прогона и снимок пользователя. Здесь настоящая библиотека R1, без симулятора и подставных данных.
 
-A replacement player for the **HiBy R3 Pro II** and the **HiBy R1**, written on
-LVGL.
+<table>
+<tr><th>Порядок ярлыков</th><th>Продолжение книги</th></tr>
+<tr>
+<td><img src="screenshots/readme/r1-home-editor.png" width="250" alt="Редактор ярлыков главного экрана на настоящем HiBy R1"></td>
+<td><img src="screenshots/readme/r1-audiobook.png" width="250" alt="Аудиокнига с сохранённой позицией и переходами по десять секунд на R1"></td>
+</tr>
+<tr><th>Поиск по библиотеке</th><th>Метроном</th></tr>
+<tr>
+<td><img src="screenshots/readme/r1-local-search.png" width="250" alt="Реальные результаты поиска Короля и Шута в библиотеке R1"></td>
+<td><img src="screenshots/readme/r1-metronome.png" width="250" alt="Экран метронома на настоящем плеере"></td>
+</tr>
+<tr><th>Полный плеер</th><th>Страница альбома</th></tr>
+<tr>
+<td><img src="screenshots/readme/r1-player.png" width="250" alt="Настоящий R1: полный плеер с обложкой и форматом записи"></td>
+<td><img src="screenshots/readme/r1-album.png" width="250" alt="Альбом Аффинажа из реальной библиотеки R1"></td>
+</tr>
+</table>
 
-## Supported players
+</details>
 
-One binary runs on both. It reads which player it is on from
-`system-info.json` at startup, and the firmware packer writes a different one
-into each image.
+## Жесты
 
-| | HiBy R3 Pro II | HiBy R1 |
-|---|---|---|
-| panel | 480x720 | 480x800 |
-| DAC | two Cirrus Logic CS43198 | one Cirrus Logic CS43131 |
-| headphone outputs | 3.5 mm, 4.4 mm balanced | 3.5 mm |
-| DAC controls | digital filters, DRE, NOS | digital filters, NOS |
-| touch | Goodix gt9xx, open-source driver, five fingers | Hynitron CST8xx, open-source driver, two fingers |
-| kernel | custom 4.4.94, see [hiby-custom-kernel](https://github.com/Jepl4r/hiby-custom-kernel) | the same |
-| double tap to wake | yes | no |
-| buttons | volume on the left flank, playback on the right | all on the right flank, one skip key |
-| firmware image | `r3proii.upt` | `r1.upt` |
+| Где | Действие | Результат |
+| --- | --- | --- |
+| Страница интерфейса | Свайп вправо от левого края | Назад на предыдущую страницу. |
+| Список треков | Свайп по строке вправо | Играть выбранный трек следующим. |
+| Список треков с поддержкой избранного | Свайп по строке влево | Добавить в избранное или убрать из него. |
+| Предстоящие треки в очереди | Свайп влево | Удалить из очереди; действие можно отменить. |
+| Трек, альбом, папка | Удержание | Меню доступных действий. |
+| Плитка главной | Удержание | Меню ярлыка и настройка главного экрана. |
+| Мини-плеер | Тап или свайп вверх | Открыть полный плеер. |
+| Мини-плеер | Свайп влево / вправо | Следующий / предыдущий трек. Это другие действия, чем свайпы строки списка. |
+| Верхний край | Потянуть вниз | Открыть шторку быстрых настроек. |
+| Полный плеер | Потянуть вниз | Свернуть плеер и вернуться к открытой странице. |
+| Нижняя область полного плеера | Свайп вверх | Перейти на главную, не прерывая музыку. |
+| Редактор главной / предстоящая очередь | Перетаскивание за ручку | Изменить порядок элементов. |
+| «Музыка», если включена карусель альбомов | Свайп вверх от нижней области | Открыть карусель; закрыть её можно, потянув верхнюю ручку вниз. |
 
-Each player only looks for its own image, and never offers the other's: the
-recovery system does not check what it is given.
+Жест по строке начинается внутри строки, а «Назад» — от самого левого края. Набор действий зависит от содержимого: у папки, трека и очереди разные задачи. Кнопки и меню остаются доступны наряду с жестами.
 
-There are two builds from one tree:
+В читалке EPUB двойное касание верхней части страницы добавляет закладку.
 
-| | binary | runs on |
-|---|---|---|
-| **host** | `sonix_player_host` | your PC, in an SDL window |
-| **target** | `sonix_player` | the device |
+**[Посмотреть скринкаст с реального R1 — MP4](screenshots/demos/r1-graphite2-gestures-alpha19.mp4)** · [GIF](screenshots/demos/r1-graphite2-gestures-alpha19.gif) · [анимированный WebP](screenshots/demos/r1-graphite2-gestures-alpha19.webp).
 
----
+Около 35 секунд: главная, удержание плитки, редактор, «Назад», шторка, полный плеер и действия по строке. Ролик смонтирован из настоящих кадров alpha19; подписи находятся под экраном. Свайп «следующим» показан как предпросмотр, без изменения очереди. Снимки и ролик не содержат симулятора или моковых данных.
 
-## Building for the host
+## Что изменено относительно Sonix
 
-The simulator draws the real interface in an SDL window, using the same source
-as the device. Most work happens here.
+| Откуда | Что входит |
+| --- | --- |
+| **Сохранено из Sonix** | Локальное воспроизведение, библиотека и плейлисты, аудиокниги, обработка звука, Bluetooth/USB, Tidal/Qobuz, радио, EPUB и другие базовые возможности. |
+| **Собственные доработки rekkod-mod** | Graphite 2, настройка главной, Яндекс Музыка и Звук, OpenSubsonic, офлайн-сохранение, расширенные действия очереди, доработки Bluetooth, карты и поиска. |
+| **Перенесено из Sonix 1.3 с адаптацией** | История прослушивания, действия очереди с отменой и перестановкой, RSS/OPML, FLAC-радио, LRCLIB, просмотр картинок, числовой ввод PEQ, метроном и улучшения чтения тегов и перемотки. |
+| **Адаптировано под R1 и новый UI** | Шторка и громкость в общей палитре, альбомная страница, жесты, запуск и экран зарядки, согласованные настройки и сообщения об ошибках. |
 
-### What you need
+Это не обещание побайтового совпадения с оригиналом: изменения переносятся с учётом нашего интерфейса, функций и ограничений R1. [Подробный перечень возможностей](FEATURES.md).
 
-Compiler, make, git, and four libraries.
+## Что сейчас дорабатывается
 
-**Fedora**
+**Готовится alpha20.** Эти изменения уже проверяются, но ещё требуют завершения сборки и аппаратной приёмки:
 
-```bash
-sudo dnf install gcc gcc-c++ make git pkgconf-pkg-config \
-                 SDL2-devel freetype-devel opusfile-devel \
-                 wavpack-devel alsa-lib-devel
-```
+- Прямые ярлыки **«Моя волна»** и **«Мне нравится»** на главной и в меню удержания Яндекса. Повторный вход в действующую волну сохраняет очередь; замена другой музыки требует подтверждения.
+- **Общий таймер сна** для музыки, сервисов, книг, подкастов и радио. Смена источника не сбрасывает отсчёт; шторка показывает оставшееся время.
+- **Скрытие служебных файлов и папок** в проводнике с возможностью показать их через меню.
 
-**Debian / Ubuntu**
+Для этой доработки пока нет опубликованных здесь аппаратных кадров: снимками симулятора её не подменяем.
 
-```bash
-sudo apt install build-essential git pkg-config \
-                 libsdl2-dev libfreetype-dev libopusfile-dev \
-                 libwavpack-dev libasound2-dev
-```
+## Ориентиры проекта
 
-**Arch**
+- **Удобство на настоящем R1:** читаемые подписи, удобные зоны касания, последовательные жесты и единые компоненты.
+- **Функции сохраняются:** обновление оформления не должно ломать очередь, прогресс книг, поиск и сервисы.
+- **Нужное — нативно:** систему плагинов пока отложили; полезные возможности развиваем внутри прошивки.
+- **Бережная работа с картой и батареей:** меньше ненужных записей, фоновых опросов и загрузок; исправления проверяются по сценариям, а цифры ускорения и автономности публикуются только по замерам.
+- **Прозрачный статус:** готовые функции, текущие доработки и непроверенные случаи разделяются. Исследования и результаты хранятся в репозитории.
 
-```bash
-sudo pacman -S base-devel git sdl2 freetype2 opusfile wavpack alsa-lib
-```
+## Сборки и обновление
 
-`opusfile` pulls in `opus` and `libogg` by itself.
+1. Выберите образ **именно для своей модели** и прочитайте описание конкретной сборки. Основной образ R1 называется `r1.upt`.
+2. Скопируйте его в корень microSD и безопасно отключите карту или USB-накопитель от компьютера.
+3. Запустите обновление с карты в системных настройках и дождитесь завершения.
 
-### Build
+[Раздел сборок GitHub](https://github.com/Rekkod-Tree/sonix-player-rekkod-mod/releases), если образы там опубликованы. Содержимое ветки `main` может опережать готовый образ; ориентируйтесь на описание полученной от автора сборки.
 
-```bash
-make host -j$(nproc)
-```
+**Исправление recovery добровольное.** Начиная с alpha17, обычное обновление не требует его предварительной замены. Отдельный мастер нужен для исправления известного поведения старого recovery при обращении с картой; он не запускается автоматически. [Подробности и ограничения](RECOVERY_R1.md).
 
-### Resources
+Разработка и аппаратные проверки этой модификации сосредоточены на **HiBy R1**. Наличие поддержки R3 Pro II в исходном Sonix не означает, что каждый образ этого мода проверен на R3 Pro II.
 
-The player reads its language files, its streaming keys and some of its gui assets
-from a resource tree:
+## Документация
 
-```
-sonix_player_host
-usr/
-└── resource/
-    └── sonix/
-        ├── language/                    the 7 .ini files
-        ├── components/
-        │   ├── streaming-keys.bin       Tidal / Qobuz / Podcast Index / Last.fm keys, sealed - see "Streaming keys" below.
-        │   └── system-info.json         its device-name picks the player the simulator plays
-        └── gui/                         some of the .png assets the UI loads at runtime - the rest are inside the binary.
-```
+- [Полный справочник возможностей](FEATURES.md).
+- [Настраиваемая главная: изменения alpha19](ALPHA19_RELEASE.md).
+- [Проверки и ограничения alpha18](ALPHA18_RELEASE.md).
+- [Ранние изменения rekkod-mod](CHANGELOG-rekkod.md).
+- [Исследования, замеры и решения](RESEARCH.md).
+- [Пресеты звука](AUDIO_PRESETS.md).
+- [Сборка и разработка](DEVELOPMENT.md) — технические инструкции вынесены отдельно.
 
-The easiest way to get one is to copy `usr/resource/` out of
-`sonix-packer/assets/R3PII/` or `sonix-packer/assets/R1/` into `usr/resource/`
-next to `sonix_player_host`: the language files, the fonts, the images and the
-`system-info.json` of that player come with it.
+## Авторство
 
-Without the language files the interface draws raw tags instead of words, and says so on the first line of the log. Without `streaming-keys.bin` everything works except Tidal, Qobuz, podcasts and Last.fm. The simulator also reads a plain `streaming-keys.ini` in the same folder.
+Модификация — **Rekkod**, основа — **[Sonix Player](https://github.com/Jepl4r/sonix-player)** и работа сообщества HiBy. Лицензия исходного кода — [GPLv3](LICENSE).
 
-Fonts are looked for in `usr/resource/sonix/fonts` first and fall back to
-`assets/fonts` in the repo, so a tree without a resource folder still has text.
-
-### Run
-
-```bash
-./sonix_player_host
-```
-
-The window is the panel of the player named in `system-info.json`: 480x720 for
-the R3 Pro II, 480x800 for the R1, and 480x720 when the file is missing. The
-mouse is the finger, and dragging scrolls.
-
-`SONIX_PANEL=480x800` opens the window at a given size whatever the file says.
-The rest of the model (buttons, DAC, update file) still follows the file.
-
-The folder that stands in for the memory card is the **documents folder**,
-found from the desktop's own XDG setting. Point it elsewhere with:
-
-```bash
-SONIX_SD_ROOT=/path/to/a/card ./sonix_player_host
-```
-
-Music goes in there, and so does everything the player writes: the index, the
-cover cache, the playlists.
-
-### Keyboard
-
-The device's buttons are on the keyboard:
-
-| key | R3 Pro II | R1 |
-|---|---|---|
-| `p` | power — a tap toggles the screen, held opens the power menu | same |
-| `u` | volume up | same |
-| `i` | volume down | same |
-| `b` | previous track | the skip key: next track |
-| `n` | play / pause | same |
-| `m` | next track | previous track (no such key on the R1) |
-
-
-### Other environment variables
-
-| variable | what it does |
-|---|---|
-| `SONIX_SD_ROOT` | the folder standing in for the card |
-| `SONIX_PANEL` | the window size, e.g. `480x800` |
-| `SONIX_CONFIG` | where the settings file lives |
-| `SONIX_EBOOK_CONFIG` | the ebook reader's own settings file |
-| `SONIX_LANG_DIR` | the language directory, instead of the resource tree |
-| `SONIX_LOG` | write the log to a file |
-| `SONIX_BATTERY_CAPACITY`, `SONIX_BATTERY_STATUS` | two files to fake a battery |
-| `SONIX_NO_MOUNT`, `SONIX_NO_SYSSERVER` | leave the host's own system alone |
-
-
-## Building for the device
-
-### What you need
-
-The host requirements above, plus `wget`, `texinfo`, `bison`, `flex` and about
-2 GB of disk: the first target build compiles a MIPS cross toolchain from
-source.
-
-### Build
-
-```bash
-make target -j$(nproc)
-```
-
-The first run takes a while and does four things by itself:
-
-1. builds the Rockbox MIPS toolchain into `rockbox-toolchain/`
-2. downloads and cross-builds FreeType, static, into `freetype-target/`
-3. downloads and cross-builds libogg, libopus, opusfile and libwavpack, static,
-   into `audio-target/`
-4. compiles and links `sonix_player`, and builds `sonix_launch` (see below)
-
-Steps 1 to 3 happen once. Later builds go straight to step 4.
-
-Everything the device does not already carry is linked statically, so the
-result is one file to copy across with nothing to install beside it. The same
-file goes into both images.
-
-### Target LTO (default)
-
-`make target -j4` uses link-time optimization for the player and LVGL by
-default, with an explicit `-O2` final link. Although compilation uses `-flto=4`,
-final code generation uses one LTO partition: the assembler-local math symbol
-bindings must stay with all generated calls to support the device's glibc 2.22.
-This limits link parallelism and can increase link time. Ordinary object
-compilation retains the existing O2/O3 split. Host builds, the launcher
-and dependency archives keep their usual flags; no fast-math options are added.
-All delivered firmware uses `TARGET_LTO=1`, including alpha15. An explicit
-`TARGET_LTO=0` remains available for requested diagnostic comparisons. Switching
-either way rebuilds target objects automatically. Releases must still pass the
-ABI and audio checks. A faster build or smaller file alone is not evidence of
-better battery life or unchanged playback.
-
-See [the R1 experiment](LTO_EXPERIMENT_2026-10-17.md) for measured results and
-limits. From `sonix-player/`, run `python3 tests/dependency_cache_test.py` to
-check rebuild/rollback policy. Run
-`ROCKBOX_TOOLCHAIN_DIR=/path/to/toolchain python3 tests/lto_abi_test.py`
-to cross-link the math-symbol regression.
-
-### The ABI check
-
-The link is followed by a `readelf` pass that fails the build if the binary
-asks for a glibc symbol newer than 2.22, the version both players carry.
-
-This is not decoration. A binary that asks for a newer symbol links without a
-word and then refuses to start, and the device reboots as soon as the player
-exits - so the only symptom on the device is a boot loop.
-
-### sonix_launch
-
-A 2 KB static binary with no libc (`launcher/sonix_launch.c`). The launcher
-script execs it, and it runs the player as its child and does `sleep 1; reboot`
-when the player exits - what the rest of the script would do, without a shell
-sitting in memory for the whole session.
-
-
-## Creating the firmware image
-
-The packer looks only next to itself:
-
-```
-sonix-packer/
-├── sonix_firmware_packer.sh
-├── r3proii_original.upt     the stock firmware of the R3 Pro II, from HiBy
-├── r1_original.upt          the stock firmware of the R1, from HiBy
-├── sonix_player             the binary from `make target`
-├── sonix_launch             also from `make target`; optional
-├── kernel/                  xImage-R3PII and xImage-R1; optional
-└── assets/
-    ├── R3PII/               the overlay for the R3 Pro II
-    └── R1/                  the overlay for the R1
-```
-
-It builds one image for each stock firmware it finds. With only one of the two
-`.upt` files next to it, it builds that player's image and says it skipped the
-other.
-
-Each model has a complete overlay of its own and nothing is shared.
-
-An overlay mirrors the rootfs from its root, so a file goes to the path it has
-inside the folder. That is how the resource tree gets installed:
-
-```
-assets/R3PII/                           (and assets/R1/, the same shape)
-├── etc/                             boot logos at the panel's size, D-Bus policy, certificates, S80_bt_init
-├── usr/
-│   ├── bin/                         bluealsa, ntfs-3g, thttpd
-│   ├── lib/                         the bluealsa ALSA plugin, and OpenSSL, libupnp, libsndfile and fdk-aac (see "System libraries" below)
-│   ├── resource/
-│   │   └── sonix/
-│   │       ├── language/            the 8 .ini files
-│   │       ├── components/
-│   │       │   ├── streaming-keys.bin   Tidal / Qobuz / Podcast Index / Last.fm keys, sealed - see "Streaming keys" below.
-│   │       │   ├── system-info.json     required: names the player, and the packer writes to it
-│   │       │   └── GB*-Database.dat     the Game Boy ROM databases
-│   │       ├── fonts/               default.otf, bold.otf, then korean, thai and arabic .otf, each with a -bold
-│   │       └── gui/                 some of the .png assets the UI loads at runtime - the rest are inside the binary.
-│   └── share/web/                   icons and images for the Wi-Fi transfer page                        
-└── module_driver/                   the open-source modules and the changed load scripts
-```
-
-`system-info.json` has to be there, and its `device-name` has to be the model
-the folder is for: `HiBy R3 Pro II` in `R3PII/`, `HiBy R1` in `R1/`. The packer
-checks it, writes the build stamp into the `build_version` key, and stops if
-either is wrong. An image carrying the other player's name would offer that
-player's update to a device that cannot survive it.
-
-### Streaming keys
-
-Tidal, Qobuz, Podcast Index and Last.fm need application keys, and they are
-not in this repository: provide your own (for Last.fm, an API account from
-last.fm/api). They go into the image sealed, so that unpacking
-it does not hand them out as a text file.
-
-1. Copy `sonix-player/streaming-keys.ini.example` to
-   `sonix-player/streaming-keys.ini` and fill it in.
-2. Seal it into both assets trees:
-   ```bash
-   cd sonix-player
-   python3 tools/seal_streamkeys.py seal
-   ```
-   The first run creates `streaming-keys.key`, the key that seals them. Keep
-   it: every later `seal` reuses it.
-3. Build the player (`make target`). The Makefile compiles the key into it, so
-   only this build opens the `streaming-keys.bin` sealed with it. A new key
-   means a new build.
-
-`streaming-keys.ini`, `streaming-keys.key` and `streaming-keys.bin` are all
-ignored by git. The packer leaves out a `streaming-keys.ini` found in the
-assets and says so. `python3 tools/seal_streamkeys.py open <file>` prints what
-a `.bin` holds.
-
-This keeps the keys out of plain sight, not out of reach: the key is inside
-`sonix_player`, and whoever takes the binary apart can get them back.
-
-### What it needs installed
-
-```bash
-# Debian / Ubuntu
-sudo apt install p7zip-full squashfs-tools genisoimage
-
-# Fedora
-sudo dnf install p7zip squashfs-tools genisoimage
-```
-
-perl as well, which macOS and most Linux systems already have: it reads the
-stock `sa_sound_hbc3000.ko` (see step 5).
-
-### Build
-
-```bash
-./sonix_firmware_packer.sh
-```
-
-It runs through without asking anything, once for each model:
-
-1. unpacks the `.upt`, joins the rootfs chunks and extracts the squashfs
-2. deletes `usr/bin/hiby_player` and installs `usr/bin/sonix_player`
-3. renames `hiby_player.sh` to `sonix_player.sh` and rewrites the name inside it
-4. points `etc/init.d/S92_03_start_music_player` at the new launcher script
-5. for the R3 Pro II, copies the HBC3000's FPGA configuration out of the stock
-   `sa_sound_hbc3000.ko` into `lib/firmware/hbc3000.fw`, where the open module
-   loads it from (it is HiBy's, so it is not in the assets); then copies
-   `assets/<model>/` over the rootfs and installs
-   `usr/bin/sonix_launch` and has the launcher script exec it (skipped with a warning
-   if it is not there). Before the copy, a library in `assets/<model>/usr/lib`
-   takes the place of the stock one: the stock versioned file it replaces goes
-   (`libupnp.so.6.3.4` for `libupnp.so.6`, and so on), the symlinks to it are
-   pointed at the new file, and the stock `libntfs-3g` goes, which the new
-   `ntfs-3g` has linked in
-6. deletes the stock interface's own resources - `litegui`, `layout`, `str`,
-   `fonts`.
-7. checks the `device-name` in `system-info.json` and writes the build stamp
-   into it
-8. repacks the squashfs, splits it into 512 KB chunks and rebuilds the md5
-   chain the recovery kernel checks
-9. writes `r3proii.upt` or `r1.upt`
-
-With `kernel/xImage-R3PII` or `kernel/xImage-R1` present, that kernel replaces
-the stock one: it may not be bigger than the stock kernel, and its size and md5
-go into `ota_update.in`. Without it the stock kernel is carried across
-untouched, size and md5 copied from the original rather than recomputed. The
-kernels in `kernel/` are built from
-[hiby-custom-kernel](https://github.com/Jepl4r/hiby-custom-kernel), and the
-modules in `assets/<model>/module_driver/` are built against them.
-
-Most of those modules are open-source replacements for HiBy's closed ones,
-from the same kit: same file names and parameters, so the stock `.sh` that
-loads each one stays. A module that is not in `module_driver/` is HiBy's own,
-carried across from the stock firmware.
-
-| | R3 Pro II | R1 |
-|---|---|---|
-| sound card | `x1600_hiby_r3proii_sound_card.ko` | `x1600_hiby_r1_sound_card.ko` |
-| DAC | `codec_cs43198_dual.ko` | `codec_cs43131.ko` |
-| panel, touch | `lcd_st7701_sbtc033001.ko`, `gt9xx_touch.ko` (five fingers) | `lcd_lg35583.ko`, `cst8xx_touch.ko` (two fingers) |
-| keys | `keyboard_adc.ko` | `keyboard_adc_multifunc.ko` |
-| LEDs | `leds_sgm31324_add.ko` | `leds_pwm_add.ko` |
-| Type-C | `fusb302b_add.ko` | `tcs1421_add.ko` |
-| charger | `mp2731.ko`, which also wakes the player from standby when the cable goes in or out, and keeps the charge limit itself | |
-| board | `gpio_aw95016_add.ko`, `sau.ko`, `sa_sound_hbc3000.ko` (the HBC3000 FPGA; its configuration comes from the stock firmware, see step 5 above) | |
-| on both | `cw2015.ko` (fuel gauge), `soc_efuse.ko`, `soc_adc.ko`, `rmem_manager.ko`, `i2c_gpio_add.ko` (the DAC's I2C bus), `keyboard_gpio_add.ko` (power and track keys), `sa_sound_switch.ko`, `sa_earpods_adc.ko`, `pwm_backlight.ko`, `soc_utils.ko`, `sa_config_module.ko`, `utils.ko` (the helpers the other modules link against), `soc_gpio.ko` (`/dev/gpio`), `sa_hgl_dma.ko` (`/dev/sa_hgl_dma`), `soc_aic.ko` (the I2S controller), `soc_pwm.ko` (the PWM controller), `soc_i2c.ko` (the I2C controllers), `soc_fb.ko` (the LCD controller, `/dev/fb0`), `soc_msc.ko` (the MMC/SD controllers: the microSD slot and the Wi-Fi chip's SDIO), `axp2101.ko` (the PMIC: regulators and power off) | the same |
-| Wi-Fi | `brcmfmac.ko`, `brcmutil.ko` and `bcm_wlbt_power.ko` in place of `cywdhd.ko` | the same |
-
-### System libraries
-
-`assets/<model>/usr/lib` and `usr/bin` carry newer builds of libraries and
-programs the stock firmware has, the same files in both models:
-
-| | stock | assets |
-|---|---|---|
-| `libssl.so.1.1`, `libcrypto.so.1.1` | OpenSSL 1.1.1f | 1.1.1w |
-| `libupnp.so.6`, `libixml.so.2`, `libthreadutil.so.6` | pupnp 1.6.21 | 1.6.25 |
-| `libsndfile.so.1` | 1.0.28 | 1.2.2 |
-| `libfdk-aac.so.2` | 2.0.1 | 2.0.3 |
-| `ntfs-3g` | 2015.3.14 | 2022.10.3, with libntfs-3g linked in |
-| `thttpd` | 2.27 | 2.29 |
-
-The sonames, paths and build options are the stock ones, so the stock
-programs that use them (`wpa_supplicant`, `ntpd`, `curl`, `adbd`, `dmrd`,
-`shairport`, `bluealsa`) load them unchanged. They are built by
-`tools/system-libs/build.sh` from the upstream sources, against the device's
-own glibc 2.22 taken from a stock rootfs, and checked with
-`tools/system-libs/abicheck.py`:
-
-```bash
-# Ubuntu 24.04, or docker run -it -v "$PWD":/w ubuntu:24.04
-apt install gcc-9-mipsel-linux-gnu binutils-mipsel-linux-gnu libc6-dev-mipsel-cross \
-    autoconf automake libtool pkg-config make git perl python3-pyelftools zlib1g-dev
-tools/system-libs/build.sh <extracted stock rootfs> out
-```
-
-`out/usr/lib` and `out/usr/bin` then go into `assets/R3PII/` and `assets/R1/`.
-
-### Patches
-
-They go in **before** the repack, and the easiest way is through
-the overlay - any other file need to be in the respective folder mirroring the rootfs structure.
-
-### Flashing
-
-**HiBy R1 rekkod-mod:** read [public update preparation](RECOVERY_R1.md#public-update-preparation)
-before the first transition. Supported recovery can be prepared once through
-Settings > System > Safe R1 updates, with verified backups and a separate
-confirmation. Already prepared devices need no repeat repair. Unknown recovery
-stays blocked; the first update from an older firmware still uses its old
-recovery and cannot be retroactively protected by the new wizard.
-
-1. Copy the image for your player to the **root of the microSD card**:
-   `r3proii.upt` for the R3 Pro II, `r1.upt` for the R1. Never the other one.
-2. Insert the SD card into the player.
-3. Start the update:
-   - **from the stock firmware** - use its firmware update from the microSD
-     card.
-   - **from Sonix Player** - Settings > System > Update firmware > From SD
-     card. *Via internet* downloads the right image from the latest release by
-     itself.
-4. Let it flash - it will say "Upgrading..." then "Succeeded" and reboot by itself.
-
-> It is recommended to **charge above 30%** first. 
-**Recovery from a failed flash:** Reinstalling the matching stock image through
-recovery may help while recovery itself remains intact. It is not a guaranteed
-repair for a damaged recovery partition. If the R1 preparation wizard reports
-uncertain verification, keep the normal OS running, preserve RecoveryBackup,
-and follow the recovery assistance procedure instead of rebooting or retrying.
-
-
-## Generated files
-
-Three files in the tree are produced by a script and committed, so an ordinary
-build needs no Python at all. Re-run the script only when its input changes.
-
-| generated | from | script |
-|---|---|---|
-| `src/gui/shell/icons.c`, `icons.h` | `assets/icons/*.svg`, `*.png` | `tools/svg_to_lvgl.py` |
-| `src/system/net/webpage.h` | `web/index.html`, `web/icons`, `web/img` | `tools/web_to_c.py` |
-
-```bash
-pip install cairosvg pillow
-python3 tools/svg_to_lvgl.py
-
-python3 tools/web_to_c.py
-```
-
-
-## Source code tree
-
-```
-sonix-player/
-│
-├── sonix-packer/
-│   ├── assets/
-│   │   ├── R3PII/                   the R3 Pro II overlay
-│   │   │   ├── etc/                 boot logos (480x720), sonix-player.conf, cert.pem, modified S80_bt_init
-│   │   │   ├── module_driver/       the open-source modules, gt9xx_touch.ko among them; gt9xx_touch.sh for five fingers and leds_sgm31324_add.sh with 3 added LED registers
-│   │   │   └── usr/                 bluealsa 4.3.1, resources required by Sonix Player
-│   │   └── R1/                      the R1 overlay
-│   │       ├── etc/                 boot logos (480x800), sonix-player.conf, cert.pem, modified S80_bt_init
-│   │       ├── module_driver/       the open-source modules, cst8xx_touch.ko among them; cst8xx_touch.sh for two fingers
-│   │       └── usr/                 bluealsa 4.3.1, resources required by Sonix Player
-│   │                                
-│   ├── kernel/                      xImage-R3PII and xImage-R1, from hiby-custom-kernel
-│   └── sonix_firmware_packer.sh     
-│
-│
-├── sonix-player/                    
-│   ├── assets/                      
-│   │   ├── gui/                     some of the .png assets the UI loads at runtime - the rest are inside the binary.
-│   │   ├── fonts/ 					 the faces: default, bold, Korean (Hangul from Pretendard, OFL), Thai, Arabic
-│   │   └── icons/                   196 SVGs and PNGs, baked into src/gui/shell/icons.c
-│   │   
-│   │
-│   ├── launcher/                    sonix_launch.c: runs the player, reboots when it exits
-│   │
-│   ├── rockboxdev/                  builds the MIPS cross toolchain, first `make target` only
-│   │   ├── toolchain-patches/       three patches gcc and binutils needed on a modern host
-│   │   └── rockboxdev.sh
-│   │
-│   ├── src/
-│   │   ├── gb/                      Gearboy, upstream and untouched
-│   │   │   ├── core/                78 files: the emulator itself
-│   │   │   └── miniz/               reads a ROM straight out of a .zip
-│   │   │
-│   │   ├── gui/                     
-│   │   │   ├── audio/               EQ, PEQ, MSEB and the DAC page
-│   │   │   ├── bluetooth/           pairing, codec, AirPods, receiver mode
-│   │   │   ├── ebook/               EPUB reader: pages, shelf, bar, bookmarks, themes
-│   │   │   ├── fonts/               the lv_font_t objects FreeType fills in at startup
-│   │   │   ├── gearboy/             game list, screen and button pad
-│   │   │   ├── library/             file browser, media lists, playlists, search
-│   │   │   ├── nowplaying/          player screen, cover art, cover flow, waveform, queue
-│   │   │   ├── settings/            26 files, one page each
-│   │   │   ├── shell/               40 files: theme, screen switcher, status bar, control
-│   │   │   │                        centre, keyboard, popups, toasts, settings rows, icons.c
-│   │   │   ├── streaming/           Tidal, Qobuz, podcast and radio pages
-│   │   │   └── wireless/            Wi-Fi, file transfer, AirPlay, DLNA, SonixLink
-│   │   │
-│   │   ├── system/                  
-│   │   │   ├── audio/               ALSA, volume, filter chain, USB audio, headset
-│   │   │   ├── bluetooth/           the whole stack, run by the player and not by the firmware
-│   │   │   ├── core/                config, language, logging, paths, utils
-│   │   │   ├── db/                  SQLite
-│   │   │   ├── decode/              one file per format, plus the dispatcher and CUE handling
-│   │   │   ├── device/              power, screen, buttons, USB, storage, ADB, firmware, LED
-│   │   │   ├── ebook/               EPUB parsing: zip, XML, XHTML, CSS, OPF, arenas
-│   │   │   ├── gearboy/             the emulator's glue: input, ROM database, save states
-│   │   │   ├── image/               JPEG and PNG decoder
-│   │   │   ├── input/               key mapping
-│   │   │   ├── library/             index, tag reading, cover art, playlists, audiobooks
-│   │   │   ├── net/                 HTTP, TLS, HLS, mDNS, transfer page
-│   │   │   ├── playback/            queue, device state, audiobooks, sleep timers
-│   │   │   ├── remote/              AirPlay, DLNA, SonixLink
-│   │   │   └── streaming/           service clients and their caches
-│   │   │
-│   │   └── main.c                   entry point: display, input, and the startup order
-│   │
-│   ├── tools/                       generators, the multitouch patches for the stock touch drivers,
-│   │                                and system-libs/, the build of the system libraries in the assets
-│   │
-│   ├── web/                         Wi-Fi transfer page, source of src/system/net/webpage.h
-│   │   ├── icons/                   26 Lucide glyphs, inlined as <symbol>
-│   │   ├── img/                     favicon-web.png, logo-web.png
-│   │   └── index.html               the template
-│   │
-│   ├── generate_compile_commands.py 
-│   ├── lv_conf.h                    
-│   └── Makefile                     
-│
-├── FEATURES.md                      
-├── LICENSE                          
-├── PATCHES.md                       
-└── README.md
-```
-
-
-
-## Research and development records
-
-Keep research, measurements, reviews, decisions, helper scripts, and presets in
-this repository. See [RESEARCH.md](RESEARCH.md) for the archive index, storage
-conventions, evidence status, and exclusions for credentials and private data.
-
-## Special thanks to:
-[@Tartarus6](https://github.com/Tartarus6)
-
-[@noisetta](https://github.com/noisetta)
-
-[@endgame47](https://github.com/endgame47)
-
-[@hkhrithik007](https://github.com/hkhrithik007)
-
-and all the members of this fantastic community!!
+Спасибо авторам Sonix, [Tartarus6](https://github.com/Tartarus6), [noisetta](https://github.com/noisetta), [endgame47](https://github.com/endgame47), [hkhrithik007](https://github.com/hkhrithik007) и участникам сообщества, которые помогают с разработкой и проверками.
