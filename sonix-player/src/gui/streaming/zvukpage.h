@@ -40,4 +40,6 @@ bool zvukpage_open_link(const char *url);
 // getStream on the worker, the result in a sheet. An lv_event_cb_t.
 void zvukpage_check_connection_cb(lv_event_t *e);
 
+void zvukpage_search_open(void);
+
 #endif /* ZVUKPAGE_H */

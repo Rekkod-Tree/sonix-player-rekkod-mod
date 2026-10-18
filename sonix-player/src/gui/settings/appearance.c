@@ -7,6 +7,7 @@
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/nowplaying/player.h"
 #include "src/gui/shell/corners.h"
+#include "src/gui/shell/main_menu.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
@@ -182,8 +183,11 @@ static void pick_cb(lv_event_t *e) {
 // The 2.0 page (the handoff's "Appearance"): one card per setting, choices on
 // pills, the accent as a row of swatches, and every switch with what it does
 // written inside its card instead of in a note under it.
+static void home_settings_cb(lv_event_t *e) { (void)e; main_menu_open_settings(); }
+
 void appearance_init(gui_config_t *cfg) {
 	lv_obj_t *container = settingsrow_page(appearance_screen, cfg, "appearance");
+	settingsrow_add(container, "home_settings", NULL, home_settings_cb, NULL);
 
 	lv_obj_t *pills = NULL;
 	settingsrow_pills(container, "appearance_theme", &pills);

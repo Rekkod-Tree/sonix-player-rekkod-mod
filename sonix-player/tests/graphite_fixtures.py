@@ -33,6 +33,17 @@ for filename, title, album, year in [
         f"--tag=DATE={year}", "--tag=GENRE=Rock", f"--output-name={output}", str(wave_path),
     ], check=True)
 
+audio_books = root / "card" / "Audiobooks" / ("\u041a\u043d\u0438\u0433\u0438 - " + "Long library folder " * 6)
+audio_books.mkdir(parents=True, exist_ok=True)
+book_wave = root / "book.wav"
+with wave.open(str(book_wave), "wb") as audio:
+    audio.setnchannels(2)
+    audio.setsampwidth(2)
+    audio.setframerate(44100)
+    audio.writeframes(bytes(44100 * 4 * 120))
+subprocess.run(["flac", "--silent", "--force", "--tag=TITLE=Home resume", "--tag=ALBUM=Home resume",
+                f"--output-name={audio_books / 'Home resume.flac'}", str(book_wave)], check=True)
+
 books = root / "card" / "Ebook"
 books.mkdir(parents=True, exist_ok=True)
 with zipfile.ZipFile(books / "Graphite.epub", "w") as book:

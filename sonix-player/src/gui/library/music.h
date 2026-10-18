@@ -4,6 +4,7 @@
 #include "src/gui/shell/gui.h"
 
 #include "lvgl/lvgl.h"
+#include "src/gui/shell/gridpage.h"
 
 // The Music page: the library's index tiles (all tracks, albums, artists,
 // album artists, genres, years), the favourites, the most played, the records
@@ -50,5 +51,6 @@ const lv_image_dsc_t *music_tile_icon(music_tile_t tile);
 
 // The page's tiles made again from the saved order.
 void music_rebuild_tiles(void);
+bool music_home_entry(music_tile_t tile, grid_entry_t *entry);
 
 #endif /* MUSIC_H */

@@ -746,6 +746,10 @@ static void play_book(const char *book) {
 	player_refresh_now_playing();
 }
 
+void audiobooks_resume_book(const char *book) {
+	if (book && book[0] && gui_card_available()) play_book(book);
+}
+
 void audiobooks_play_at(const char *book, const char *file, double seconds) {
 	if (!book || !book[0] || !file || !file[0]) {
 		return;
@@ -1058,6 +1062,11 @@ static void open_continue(void *user) {
 	(void)user;
 	books_open(LIST_CONTINUE, NULL, tr("audiobook_continue"));
 }
+void audiobooks_open_continue(void) {
+	gui_init_rest();
+	open_continue(NULL);
+}
+
 static void open_finished(void *user) {
 	(void)user;
 	books_open(LIST_FINISHED, NULL, tr("audiobook_menu_finished"));

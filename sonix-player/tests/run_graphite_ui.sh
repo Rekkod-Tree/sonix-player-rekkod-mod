@@ -8,10 +8,12 @@ output=$(realpath -m "${1:?Supply a disposable output directory}")
 test_root=$(mktemp -d /tmp/sonix-graphite-test.XXXXXX)
 mkdir -p "$output" /tmp/.local /tmp/sonix /mnt/sd_0
 python3 "$player_root/tests/graphite_fixtures.py" "$test_root"
+mock_port=${SONIX_UI_TEST_PORT:-18766}
+[[ "$mock_port" =~ ^[0-9]+$ ]] && (( mock_port >= 1024 && mock_port <= 65535 ))
 export ZVUK_MOCK_MODE="$test_root/mock-mode"
 export SONIX_UI_TEST_MOCK_MODE="$ZVUK_MOCK_MODE"
 printf 'ok\n' > "$ZVUK_MOCK_MODE"
-python3 "$player_root/tools/zvuk_mock.py" "$test_root" 18766 > "$output/zvuk-mock.log" 2>&1 &
+python3 "$player_root/tools/zvuk_mock.py" "$test_root" "$mock_port" > "$output/zvuk-mock.log" 2>&1 &
 mock_pid=$!
 trap 'kill "$mock_pid" 2>/dev/null || true' EXIT
 sleep 1
@@ -43,6 +45,10 @@ screen_off_seconds = 0
 [zvuk]
 base_url = http://127.0.0.1:18766
 EOF
+    sed -i "s/127.0.0.1:18766/127.0.0.1:$mock_port/" "$run_root/config.ini"
+    if [ "${SONIX_UI_TEST_HOME_LAYOUT:-}" = 1 ]; then
+        printf '\n[home]\ntiles = zvuk,search,music_albums,music_browse,continue_book\n' >> "$run_root/config.ini"
+    fi
     if [ "${SONIX_UI_TEST_LIST_ART:-}" = 1 ]; then
         printf '\n[streaming]\nlist_art = 1\n' >> "$run_root/config.ini"
     fi
@@ -67,6 +73,7 @@ export SONIX_PANEL="480x$SONIX_TEST_HEIGHT" SONIX_NO_MOUNT=1 SONIX_NO_SYSSERVER=
 export SONIX_SD_ROOT="$SONIX_TEST_ROOT/card" SONIX_CONFIG="$SONIX_TEST_ROOT/config.ini"
 export SONIX_UI_TEST_DIR="$SONIX_TEST_OUTPUT" SONIX_UI_TEST_ZVUK=1
 export SONIX_UI_TEST_TRACK="$SONIX_TEST_ROOT/card/Graphite/Time.flac"
+export SONIX_UI_TEST_BOOK=$(find "$SONIX_TEST_ROOT/card/Audiobooks" -name "Home resume.flac" -print -quit)
 export SONIX_UI_TEST_NEXT="$SONIX_TEST_ROOT/card/Graphite/Echoes.flac"
 timeout -k 5s 240s ./sonix_ui_test > "$SONIX_TEST_OUTPUT/run.log" 2>&1
 SH

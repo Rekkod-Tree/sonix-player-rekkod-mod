@@ -1,4 +1,5 @@
 #include "player.h"
+#include "src/gui/shell/bookresume.h"
 
 #include <pthread.h>
 #include <stdint.h>
@@ -6453,6 +6454,7 @@ static void np_outside_watch(const device_state_t *state) {
 // seconds paused): each of these compares before it draws, so a poll where
 // nothing moved draws nothing.
 static void np_poll(const device_state_t *state) {
+	bookresume_note(state);
 	static unsigned shown_metadata_revision;
 	unsigned metadata_revision = device_state_metadata_revision();
 	if (metadata_revision != shown_metadata_revision) {

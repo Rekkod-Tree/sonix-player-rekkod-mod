@@ -7,6 +7,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "src/gui/bluetooth/btaudio.h"
 #include "src/gui/bluetooth/btsettings.h"
@@ -27,6 +29,9 @@
 #include "src/gui/nowplaying/coverflow.h"
 #include "src/gui/nowplaying/player.h"
 #include "src/gui/settings/appearance.h"
+#include "src/gui/settings/hometiles.h"
+#include "src/gui/shell/bookresume.h"
+#include "src/system/playback/audiobook.h"
 #include "src/gui/settings/ccsettings.h"
 #include "src/gui/settings/devoptions.h"
 #include "src/gui/settings/language.h"
@@ -1149,7 +1154,288 @@ static void player_home_gestures(void) {
 	printf("UI_HOME_GESTURE_PASS %s: taps/short/horizontal/cancel/held/Home/quick/diagonal/wide-start, three layouts\n", theme_is_dark() ? "dark" : "light");
 }
 
+static lv_obj_t *find_visible_image(lv_obj_t *root, const lv_image_dsc_t *glyph) {
+	if (lv_obj_is_hidden(root)) return NULL;
+	if (lv_obj_check_type(root, &lv_image_class) && lv_image_get_src(root) == glyph) return root;
+	for (uint32_t i = 0; i < lv_obj_get_child_count(root); i++) {
+		lv_obj_t *found = find_visible_image(lv_obj_get_child(root, i), glyph);
+		if (found) return found;
+	}
+	return NULL;
+}
+
+static void home_layout_states(void) {
+	static bool startup_clicked;
+	if (!startup_clicked) {
+		lv_obj_t *service = find_label(main_menu_screen, tr("zvuk"));
+		assert(service);
+		lv_obj_send_event(lv_obj_get_parent(service), LV_EVENT_CLICKED, NULL);
+		startup_clicked = true;
+		return;
+	}
+	static int step;
+	static char book[512];
+	grid_entry_t entry;
+	switch (step++) {
+	case 0:
+		assert(lv_screen_active() == zvuk_screen);
+		gui_init_rest();
+		pointer = lv_indev_create();
+		lv_indev_set_type(pointer, LV_INDEV_TYPE_POINTER);
+		lv_indev_set_read_cb(pointer, read_pointer);
+		theme_set_accent(THEME_ACCENT_GRAPHITE);
+		theme_set_dynamic_tint(false);
+		theme_set_dark(false);
+		main_menu_reset();
+		assert(main_menu_count() == 5 && main_menu_at(4) == HOME_SETTINGS);
+		config_set("home", "tiles", "unknown,music,music,music_albums,search,files,continue_book,settings");
+		main_menu_reload();
+		assert(main_menu_count() == 5 && main_menu_at(1) == HOME_MUSIC_ALBUMS);
+		assert(main_menu_at(4) == HOME_CONTINUE_BOOK && !main_menu_contains(HOME_SETTINGS));
+		assert(!main_menu_move(HOME_SETTINGS, 0));
+		config_set("home", "tiles", "");
+		main_menu_reload();
+		assert(main_menu_count() == 0);
+		switch_screen_no_history(main_menu_screen);
+		break;
+	case 1: {
+		lv_obj_t *more = find_label(main_menu_screen, tr("more"));
+		assert(more);
+		lv_obj_t *tile = lv_obj_get_parent(more), *grid = lv_obj_get_parent(tile);
+		assert(lv_obj_get_child_count(grid) == 6 && lv_obj_get_child(grid, 5) == tile);
+		assert(lv_obj_get_child_count(lv_obj_get_child(grid, 0)) == 0);
+		switch_screen_no_history(morepage_screen);
+		lv_obj_update_layout(morepage_screen);
+        assert(find_label(morepage_screen, tr("settings")) && find_label(morepage_screen, tr("music")));
+		assert(find_label(morepage_screen, tr("dac")) && find_label(morepage_screen, tr("file_explorer")));
+		switch_screen_no_history(main_menu_screen);
+		capture("home-empty-fixed-more");
+		assert(main_menu_move(HOME_MUSIC_ALBUMS, 0));
+		assert(main_menu_move(HOME_MUSIC_BROWSE, 1));
+		assert(main_menu_move(HOME_SEARCH, 2));
+		assert(main_menu_move(HOME_CONTINUE_BOOK, 3));
+		assert(main_menu_move(HOME_STREAMING, 4));
+		assert(main_menu_move(HOME_SEARCH, 0));
+		main_menu_reload();
+		assert(main_menu_at(0) == HOME_SEARCH && main_menu_at(1) == HOME_MUSIC_ALBUMS);
+		sx_mini_set_track("Time", "/fixture/Time.flac", "Pink Floyd", false);
+		sx_mini_set_playing(false);
+		break;
+	}
+	case 2:
+		capture("home-shortcuts-light");
+		main_menu_open_settings();
+		break;
+	case 3:
+		assert(lv_screen_active() == hometiles_screen);
+		assert(find_label(hometiles_screen, tr("hometiles_add")));
+		capture("home-editor-light");
+		{
+			lv_obj_t *name = find_label(hometiles_screen, tr("home_search"));
+			assert(name);
+			lv_obj_t *grip = lv_obj_get_child(lv_obj_get_parent(name), -1);
+			lv_area_t box;
+			lv_obj_get_coords(grip, &box);
+			int x = (box.x1 + box.x2) / 2, y = (box.y1 + box.y2) / 2;
+			input(x, y, true); input(x, y + 24, true); input(x, y + 100, true); input(x, y + 100, false);
+			assert(main_menu_at(1) == HOME_SEARCH);
+		}
+		theme_set_dark(true);
+		break;
+	case 4:
+		capture("home-editor-dark");
+		switch_screen(main_menu_screen);
+		break;
+	case 5:
+		capture("home-shortcuts-dark");
+		assert(main_menu_get_entry(HOME_MUSIC_ALBUMS, &entry) && entry.action);
+		entry.action();
+		break;
+	case 6:
+		assert(lv_screen_active() != main_menu_screen);
+		back_btn_cb(NULL);
+		break;
+	case 7:
+		assert(lv_screen_active() == main_menu_screen);
+		quickpanel_open();
+		break;
+	case 8:
+		capture("home-settings-in-panel");
+		quickpanel_close();
+		assert(getenv("SONIX_UI_TEST_BOOK"));
+		snprintf(book, sizeof(book), "%s", getenv("SONIX_UI_TEST_BOOK"));
+		assert(strlen(book) > 127);
+		char books_root[512];
+		snprintf(books_root, sizeof(books_root), "%s/Audiobooks", getenv("SONIX_SD_ROOT"));
+		assert(audiobookdb_scan_start(books_root));
+		break;
+	case 9:
+		if (audiobookdb_scan_running()) { step--; break; }
+		assert(audiobookdb_count() > 0);
+		audiobooks_play_at(book, book, 17);
+		break;
+	case 10: {
+		device_state_t state;
+		device_state_get(&state);
+		assert(state.status == AUDIO_STATUS_PLAYING);
+		bookresume_note(&state);
+		assert(config_get("home", "resume_book", "")[0]);
+		assert(config_get("home", "resume_book_1", "")[0]);
+		struct stat first, last;
+		assert(!stat(config_path(), &first));
+		for (int i = 0; i < 100; i++) bookresume_note(&state);
+		assert(!stat(config_path(), &last));
+		assert(first.st_mtim.tv_sec == last.st_mtim.tv_sec && first.st_mtim.tv_nsec == last.st_mtim.tv_nsec);
+		device_state_toggle_play_pause();
+		break;
+	}
+	case 11:
+		bookresume_play();
+		break;
+	case 12: {
+		device_state_t before, after;
+		device_state_get(&before);
+		assert(before.status == AUDIO_STATUS_PLAYING && before.progress_current_secs >= 16);
+		bookresume_play();
+		device_state_get(&after);
+		assert(after.progress_current_secs >= before.progress_current_secs - .2);
+		assert(lv_screen_active() == main_menu_screen);
+		capture("home-book-resumed");
+		player_play_file(getenv("SONIX_UI_TEST_TRACK"));
+		break;
+	}
+	case 13: {
+		device_state_t state;
+		device_state_get(&state);
+		bookresume_note(&state);
+		assert(!strcmp(config_get("home", "resume_title", ""), "Home resume"));
+		main_menu_hide(HOME_CONTINUE_BOOK);
+		assert(config_get("home", "resume_book", "")[0]);
+		bookresume_play();
+		break;
+	}
+	case 14: {
+		device_state_t state;
+		device_state_get(&state);
+		assert(!strcmp(state.current_file, book) && state.progress_current_secs >= 16);
+		player_play_file(getenv("SONIX_UI_TEST_TRACK"));
+		break;
+	}
+	case 15: {
+		char moved[600];
+		snprintf(moved, sizeof(moved), "%s.moved", book);
+		assert(!rename(book, moved));
+		bookresume_play();
+		device_state_t state;
+		device_state_get(&state);
+		assert(!strcmp(state.current_file, getenv("SONIX_UI_TEST_TRACK")));
+		assert(!rename(moved, book));
+		audiobookdb_mark_finished(book);
+		bookresume_play();
+		device_state_get(&state);
+		assert(!strcmp(state.current_file, getenv("SONIX_UI_TEST_TRACK")));
+		main_menu_reset();
+		assert(config_get("home", "resume_book", "")[0]);
+		main_menu_open_search();
+		break;
+	}
+	case 16: {
+		assert(sx_sheet_is_open());
+		lv_obj_t *scope = find_label(lv_layer_top(), tr("home_search_card"));
+		assert(scope);
+		capture("home-search-scope");
+		lv_obj_send_event(lv_obj_get_parent(scope), LV_EVENT_CLICKED, NULL);
+		break;
+	}
+	case 17:
+		assert(lv_screen_active() == search_screen);
+		capture("home-local-search");
+		main_menu_open_settings();
+		break;
+	case 18: {
+		lv_obj_t *name = find_label(hometiles_screen, tr("settings"));
+		assert(name);
+		lv_obj_send_event(lv_obj_get_parent(name), LV_EVENT_CLICKED, NULL);
+		break;
+	}
+	case 19: {
+		lv_obj_t *remove = find_label(lv_layer_top(), tr("hometiles_to_more"));
+		assert(remove);
+		lv_obj_send_event(lv_obj_get_parent(remove), LV_EVENT_CLICKED, NULL);
+		break;
+	}
+	case 20: {
+		assert(!main_menu_contains(HOME_SETTINGS) && main_menu_count() == 4);
+		lv_obj_t *add = find_label(hometiles_screen, tr("hometiles_add"));
+		assert(add);
+		lv_obj_send_event(lv_obj_get_parent(add), LV_EVENT_CLICKED, NULL);
+		break;
+	}
+	case 21: {
+		lv_obj_t *category = find_label(lv_layer_top(), tr("streaming"));
+		assert(category);
+		lv_obj_send_event(lv_obj_get_parent(category), LV_EVENT_CLICKED, NULL);
+		break;
+	}
+	case 22: {
+		lv_obj_t *service = find_label(lv_layer_top(), tr("zvuk"));
+		assert(service);
+		lv_obj_send_event(lv_obj_get_parent(service), LV_EVENT_CLICKED, NULL);
+		break;
+	}
+	case 23:
+		assert(main_menu_count() == 5 && main_menu_contains(HOME_ZVUK));
+		capture("home-editor-added-service");
+		switch_screen_no_history(main_menu_screen);
+		break;
+	case 24:
+		capture("home-service-pinned");
+		quickpanel_open();
+		break;
+	case 25: {
+		lv_obj_t *gear = find_visible_image(lv_layer_top(), &icon_music_settings);
+		assert(gear);
+		lv_obj_send_event(lv_obj_get_parent(gear), LV_EVENT_CLICKED, NULL);
+		break;
+	}
+	case 26:
+		assert(lv_screen_active() == settings_screen && !quickpanel_is_open());
+		capture("home-gear-settings");
+		{
+			lv_obj_t *appearance = find_label(settings_screen, tr("appearance"));
+			assert(appearance);
+			lv_obj_send_event(lv_obj_get_parent(appearance), LV_EVENT_CLICKED, NULL);
+		}
+		break;
+	case 27: {
+		assert(lv_screen_active() == appearance_screen);
+		lv_obj_t *home = find_label(appearance_screen, tr("home_settings"));
+		assert(home);
+		lv_obj_send_event(lv_obj_get_parent(home), LV_EVENT_CLICKED, NULL);
+		break;
+	}
+	case 28:
+		assert(lv_screen_active() == hometiles_screen);
+		back_btn_cb(NULL);
+		break;
+	case 29:
+		assert(lv_screen_active() == appearance_screen);
+		back_btn_cb(NULL);
+		break;
+	case 30:
+		assert(lv_screen_active() == settings_screen);
+		back_btn_cb(NULL);
+		break;
+	case 31:
+		assert(lv_screen_active() == main_menu_screen);
+		puts("UI_TEST_PASS Home: malformed/duplicate/empty/full/persisted layout, fixed More, editor, direct album/back, book resume and finished guard");
+		fflush(stdout);
+		exit(0);
+	}
+}
+
 static void run(lv_timer_t *timer) {
+	if (getenv("SONIX_UI_TEST_HOME_LAYOUT")) { home_layout_states(); return; }
 	if (getenv("SONIX_UI_TEST_PLAYER_HOME_ONLY")) {
 		static int step;
 		int height = lv_display_get_vertical_resolution(lv_display_get_default());

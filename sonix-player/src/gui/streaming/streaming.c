@@ -200,6 +200,23 @@ static void tiles_load(void) {
 	tiles_save();
 }
 
+bool streaming_home_entry(const char *id, grid_entry_t *entry) {
+	for (int i = 0; i < SVC_COUNT; i++) {
+		if (!strcmp(id, SERVICES[i].id) && service_usable((service_t)i)) {
+			if (entry) *entry = SERVICES[i].entry;
+			return true;
+		}
+	}
+	return false;
+}
+
+void streaming_description(char *text, size_t size) {
+	// Before the lazy screen exists there is no loaded service selection yet.
+	// Do not trigger service initialisation or a config write for a caption.
+	if (streaming_screen && lv_obj_get_child_count(streaming_screen) > 0)
+		snprintf(text, size, tr("home_sources_n"), added_n);
+}
+
 // ---------------------------------------------------------------------------
 // The page
 // ---------------------------------------------------------------------------

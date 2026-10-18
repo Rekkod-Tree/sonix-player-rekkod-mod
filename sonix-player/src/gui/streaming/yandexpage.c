@@ -2117,6 +2117,11 @@ static void open_new_releases_cb(lv_event_t *e) {
 	(void)e;
 	open_list(tr("yandex_new_releases"), JOB_NEW_RELEASES, NULL, NULL);
 }
+void yandexpage_search_open(void) {
+	gui_init_rest();
+	switch_screen(yandex_logged_in() ? search_screen : yandex_screen);
+}
+
 static void open_search_cb(lv_event_t *e) {
 	(void)e;
 	switch_screen(search_screen);

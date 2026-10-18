@@ -11,6 +11,7 @@
 #include "src/gui/library/audiobooks.h"
 #include "src/gui/nowplaying/player.h"
 #include "src/gui/settings/musicsettings.h"
+#include "src/gui/settings/settings.h"
 #include "src/gui/shell/confirm.h"
 #include "src/gui/shell/gui.h"
 #include "src/gui/shell/icons.h"
@@ -91,6 +92,7 @@
 static lv_obj_t *veil;	// the full screen behind the card: a tap target, never drawn
 static lv_obj_t *panel; // the card, parked above the top edge
 static lv_obj_t *brightness_slider;
+static lv_obj_t *settings_icon;
 static lv_obj_t *mseb_btn, *eq_btn;
 static lv_obj_t *wifi_btn, *bt_btn;
 static lv_obj_t *fade_btn, *gain_btn;
@@ -1215,6 +1217,7 @@ static bool sleep_timer_armed(sleeptimer_kind_t kind);
 // the truth even when the setting was changed somewhere else.
 static void refresh_audio_buttons(void) {
 	const sx_palette_t *p = sx_pal();
+	if (settings_icon) sx_set_recolor(settings_icon, p->mini_ink);
 	if (bright_row && lv_obj_get_child_count(bright_row))
 		sx_set_recolor(lv_obj_get_child(bright_row, 0), p->mini_ink);
 	if (expand_handle && lv_obj_get_child_count(expand_handle))
@@ -1642,6 +1645,13 @@ static void open_page(lv_obj_t *screen) {
 
 static void open_page_cb(lv_event_t *e) { open_page(lv_event_get_user_data(e)); }
 
+static void settings_clicked_cb(lv_event_t *e) {
+	(void)e;
+	gui_init_rest();
+	open_page(settings_screen);
+	long_press_consumed = false;
+}
+
 // The volume limit: a tap switches the ceilings on or off, a hold opens their
 // page. The level may come down under a ceiling at once, and the status bar's
 // figure is the one place that says so.
@@ -1886,6 +1896,21 @@ void quickpanel_init(gui_config_t *cfg) {
 	lv_obj_set_ext_click_area(brightness_slider, (BRIGHT_ROW_H - 6) / 2);
 	lv_obj_add_event_cb(brightness_slider, brightness_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
 	lv_obj_add_event_cb(brightness_slider, brightness_released_cb, LV_EVENT_RELEASED, NULL);
+
+	// A permanent Settings entry, independent of the configurable toggles.
+	lv_obj_t *settings_button = lv_button_create(bright_row);
+	lv_obj_remove_style_all(settings_button);
+	lv_obj_set_size(settings_button, 48, BRIGHT_ROW_H);
+	lv_obj_set_style_radius(settings_button, SX_CARD_R, 0);
+	lv_obj_add_style(settings_button, &sx_style_press, LV_STATE_PRESSED);
+	lv_obj_set_scrollable(settings_button, false);
+	lv_obj_add_event_cb(settings_button, settings_clicked_cb, LV_EVENT_CLICKED, NULL);
+	settings_icon = lv_image_create(settings_button);
+	lv_image_set_src(settings_icon, &icon_music_settings);
+	lv_image_set_scale(settings_icon, 256 * 28 / icon_music_settings.header.w);
+	lv_obj_set_style_image_recolor_opa(settings_icon, LV_OPA_COVER, 0);
+	lv_obj_center(settings_icon);
+	lv_obj_set_clickable(settings_icon, false);
 
 	// The buttons past the eighth. A window outside the flex, starting where the
 	// first two lines end, opens as tall as the stretch while the slider moves

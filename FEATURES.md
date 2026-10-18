@@ -1,5 +1,25 @@
 ﻿# Features
 
+## Graphite 2 personalized Home
+
+- Five configurable shortcuts and a permanent More tile in the last grid cell.
+  Rearrange through Appearance > Home screen or hold a Home tile. Choose whole
+  sections, music-library views, Files, search, or an available streaming service.
+- Removed top-level sections stay in More. Removing a nested shortcut leaves its
+  original library/service entry intact. Accounts, downloads and queues are retained.
+- The categorized shortcut picker uses the existing Graphite sheets; no extra
+  Home widgets, cover downloads, polling timers or network fan-out are added.
+- Home captions use cached library counts and connection state. A stable subtitle
+  slot is retained on every tile.
+- Continue Book remembers the last book actually played and resumes the existing
+  saved position. Playing/paused books retain their live position; finished or
+  unavailable books never silently restart or switch identity. Hiding the tile
+  does not forget the book.
+- A permanent Settings button sits beside brightness in the quick panel. Search
+  is available through More or an optional Home shortcut; choose local music,
+  Yandex Music or Zvuk before opening that source's existing search. No query is
+  sent until submitted. Local audiobook search is not added by this change.
+
 ## R1 USB storage handoff
 
 - Kernel USB events wake the existing watcher so brief enumeration windows are

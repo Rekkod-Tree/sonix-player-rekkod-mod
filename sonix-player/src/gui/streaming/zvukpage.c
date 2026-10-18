@@ -1866,6 +1866,11 @@ static void open_cb(lv_event_t *e) {
 	open_list(tr(TITLES[kind]), kind, NULL, NULL, 0);
 }
 
+void zvukpage_search_open(void) {
+	gui_init_rest();
+	switch_screen(zvuk_logged_in() ? search_screen : zvuk_screen);
+}
+
 static void open_search_cb(lv_event_t *e) {
 	(void)e;
 	switch_screen(search_screen);

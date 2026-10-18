@@ -45,6 +45,17 @@ static void action_cb(lv_event_t *e) {
 	action();
 }
 
+static void target_cb(lv_event_t *e) {
+	if (player_sheet_drag_active() || switcher_back_drag_active() || coverflow_drag_active())
+		return;
+	// Provider pages are created lazily, after Home has already been drawn.
+	// Resolve the screen after construction rather than capturing a null root.
+	gui_init_rest();
+	lv_obj_t **target = lv_event_get_user_data(e);
+	if (target && *target)
+		switch_screen(*target);
+}
+
 // The two children add_tile() puts on every tile, in the order it makes them.
 #define TILE_ICON_CHILD 0
 #define TILE_LABEL_CHILD 1
@@ -52,12 +63,15 @@ static void action_cb(lv_event_t *e) {
 
 static void refresh_subtitles(lv_obj_t *grid) {
 	for (uint32_t i = 0; i < lv_obj_get_child_count(grid); i++) {
-		lv_obj_t *sub = lv_obj_get_child(lv_obj_get_child(grid, i), TILE_SUBTITLE_CHILD);
+		lv_obj_t *tile = lv_obj_get_child(grid, i);
+		if (lv_obj_get_child_count(tile) <= TILE_SUBTITLE_CHILD)
+			continue;
+		lv_obj_t *sub = lv_obj_get_child(tile, TILE_SUBTITLE_CHILD);
 		void (*fill)(char *, size_t) = (void (*)(char *, size_t))lv_obj_get_user_data(sub);
 		char text[96] = "";
-		if (fill && gui_card_available())
+		if (fill)
 			fill(text, sizeof(text));
-		lv_label_set_text(sub, text);
+		sx_set_text(sub, text);
 	}
 }
 
@@ -80,6 +94,15 @@ void gridpage_set_tile(lv_obj_t *grid, int index, const lv_image_dsc_t *icon, co
 }
 
 static void add_tile(lv_obj_t *grid, const grid_entry_t *entry, int width, int height) {
+	if (!entry->label) {
+		lv_obj_t *spacer = lv_obj_create(grid);
+		lv_obj_remove_style_all(spacer);
+		lv_obj_set_size(spacer, width, height);
+		lv_obj_set_clickable(spacer, false);
+		lv_obj_set_scrollable(spacer, false);
+		lv_obj_set_event_bubble(spacer, true);
+		return;
+	}
 	lv_obj_t *tile = lv_btn_create(grid);
 	lv_obj_set_size(tile, width, height);
 	lv_obj_add_style(tile, &theme_style_card, 0);
@@ -108,25 +131,25 @@ static void add_tile(lv_obj_t *grid, const grid_entry_t *entry, int width, int h
 	lv_obj_align(icon, LV_ALIGN_TOP_LEFT, 0, 1);
 
 	lv_obj_t *label = lv_label_create(tile);
-	lv_label_set_text(label, tr(entry->label));
 	lv_obj_add_style(label, &theme_style_text, 0);
 	lv_obj_set_style_text_font(label, &font_ui_24_bold, 0);
-	lv_obj_set_width(label, lv_pct(100));
+	lv_obj_set_width(label, width - 2 * SX_TILE_PAD);
 	lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_LEFT, 0);
 	lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
 	lv_obj_set_ignore_layout(label, true);
 	lv_obj_set_style_max_height(label, 2 * lv_font_get_line_height(&font_ui_24_bold), 0);
 	lv_obj_align(label, LV_ALIGN_BOTTOM_LEFT, 0, -SX_TILE_SUB_H - 4);
+	lv_label_set_text(label, tr(entry->label));
 	// Keep the approved subtitle slot, even on tiles without metadata.
 	lv_obj_t *subtitle = sx_label(tile, &font_ui_20, &sx_style_text2);
-	lv_obj_set_size(subtitle, lv_pct(100), SX_TILE_SUB_H);
+	lv_obj_set_size(subtitle, width - 2 * SX_TILE_PAD, SX_TILE_SUB_H);
 	lv_obj_set_ignore_layout(subtitle, true);
 	lv_obj_align(subtitle, LV_ALIGN_BOTTOM_LEFT, 0, 0);
 	lv_label_set_long_mode(subtitle, LV_LABEL_LONG_DOT);
 	lv_obj_set_user_data(subtitle, (void *)entry->subtitle);
 
 	if (entry->target) {
-		lv_obj_add_event_cb(tile, switch_screen_cb, LV_EVENT_CLICKED, *entry->target);
+		lv_obj_add_event_cb(tile, target_cb, LV_EVENT_CLICKED, entry->target);
 	} else if (entry->action) {
 		lv_obj_add_event_cb(tile, action_cb, LV_EVENT_CLICKED, (void *)entry->action);
 	} else {

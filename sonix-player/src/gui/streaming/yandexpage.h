@@ -30,4 +30,6 @@ extern lv_obj_t *yandex_screen;
 // (not signed in, no id).
 bool yandexpage_open_album(const char *album_id, const char *title);
 
+void yandexpage_search_open(void);
+
 #endif /* YANDEXPAGE_H */

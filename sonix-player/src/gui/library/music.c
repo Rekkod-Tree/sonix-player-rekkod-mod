@@ -59,6 +59,8 @@ static void open_browse(void) { switch_screen(browser_screen); }
 static void open_playlists(void) { playlistpage_open(); }
 
 static void playlists_description(char *text, size_t size) {
+	if (!gui_card_available() || !library_is_open())
+		return;
 	char **names = NULL;
 	int count = library_playlist_names(&names);
 	library_playlist_names_free(names, count);
@@ -99,6 +101,12 @@ static const struct {
 	[MUSIC_TILE_PLAYLISTS] = {"playlists", {"playlists", &icon_menu_playlist, NULL, open_playlists, playlists_description}},
 	[MUSIC_TILE_BROWSE] = {"browse", {"music_browse", &icon_menu_explorer, NULL, open_browse}},
 };
+
+bool music_home_entry(music_tile_t tile, grid_entry_t *entry) {
+	if (tile < 0 || tile >= MUSIC_TILE_COUNT || !entry) return false;
+	*entry = TILES[tile].entry;
+	return true;
+}
 
 static music_tile_t in_use[MUSIC_TILE_COUNT];
 static int in_use_n;
