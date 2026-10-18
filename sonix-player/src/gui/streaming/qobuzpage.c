@@ -1,5 +1,8 @@
 #include "qobuzpage.h"
+#include "src/system/playback/sleeptimer.h"
 
+
+#include <stdatomic.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
@@ -98,6 +101,7 @@ typedef enum {
 
 typedef struct {
 	job_kind_t kind;
+	unsigned sleep_serial;
 	char text[256];	   // search terms, or user name
 	char text2[128];   // password
 	char id_text[40];  // album identifier
@@ -984,13 +988,15 @@ static void on_slow_start(int seconds) { gui_post(slow_start_async, (void *)(int
 // Set when playback stopped on a track that had not arrived yet: when the file
 // lands, it resumes from where it stopped.
 static bool waiting_for_track;
+static atomic_uint waiting_sleep_serial;
 
 static bool track_is_playable(const char *path);
 static void prefetch_urgent(const char *wanted_path);
 
 static void resume_if_waiting_async(void *user) {
 	(void)user;
-	if (!waiting_for_track) {
+	if (!waiting_for_track || atomic_load_explicit(&waiting_sleep_serial, memory_order_relaxed) != sleeptimer_expiration_serial()) {
+		waiting_for_track = false;
 		return;
 	}
 	// The Wi-Fi transfer is a file server running as root on the card this
@@ -1077,6 +1083,7 @@ static bool qobuz_prepare_track(const char *path) {
 	// hold before playback is even stopped, or the radio goes down in the gap
 	// (see qobuzcache_network_wanted()).
 	qobuzcache_set_network_wanted(true);
+	atomic_store_explicit(&waiting_sleep_serial, sleeptimer_expiration_serial(), memory_order_relaxed);
 	waiting_for_track = true;
 	device_state_stop();
 	prefetch_urgent(path);
@@ -1259,7 +1266,8 @@ static bool prepare_track(const qobuz_track_t *track, char *path, size_t size) {
 	return true;
 }
 
-static void do_play(int index) {
+static void do_play(int index, unsigned sleep_serial) {
+	if (sleep_serial != sleeptimer_expiration_serial()) return;
 	if (index < 0 || index >= result_count) {
 		return;
 	}
@@ -1352,6 +1360,7 @@ static void do_play(int index) {
 		qobuzcache_write_sidecars(t->id, expected, t->title, t->artist, t->album, t->album_id, t->track_number, NULL);
 	}
 
+	if (sleep_serial != sleeptimer_expiration_serial()) return;
 	device_state_play_list(path_ptr, queued_count, start);
 
 	// The cover last, with the music already playing: it is another download and
@@ -1679,7 +1688,7 @@ static void *worker_main(void *arg) {
 			break;
 
 		case JOB_PLAY:
-			do_play(job.index);
+			do_play(job.index, job.sleep_serial);
 			break;
 
 		case JOB_QUEUE_ALBUM:
@@ -1809,6 +1818,7 @@ static bool list_back_guard(void) {
 static void run(const job_t *job_in, const char *waiting_text) {
 	(void)waiting_text;
 	job_t copy = *job_in;
+	copy.sleep_serial = sleeptimer_expiration_serial();
 	job_t *job = &copy;
 	// A job that opens another list while a list is already open: the previous
 	// one must be remembered, otherwise the step back skips it.

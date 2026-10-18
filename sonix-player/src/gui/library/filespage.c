@@ -31,6 +31,8 @@
 #include "src/gui/shell/toast.h"
 #include "src/gui/shell/touch.h"
 #include "src/system/core/lang.h"
+#include "src/system/core/config.h"
+#include "src/gui/shell/sx_sheet.h"
 #include "src/system/core/utils.h"
 #include "src/system/device/system.h"
 #include "src/system/library/library.h"
@@ -294,6 +296,12 @@ static int entry_cmp(const void *a, const void *b) {
 	return strcasecmp(x->name, y->name);
 }
 
+// Visibility only: recursive copy/move/delete must still include hidden children.
+static bool service_hidden(const char *name) {
+	return !config_get_int("files", "show_service", 0) &&
+		(name[0] == '.' || playlist_is_junk_name(name));
+}
+
 static void read_folder(void) {
 	entries_free();
 
@@ -313,11 +321,7 @@ static void read_folder(void) {
 		if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0) {
 			continue;
 		}
-		// Unlike the music browser, a dot file is shown: a file manager that
-		// hides files is not one, and .local is exactly the kind of folder
-		// somebody opens this page to look inside. What stays out is the junk a
-		// desktop leaves behind, which is not the user's and never was.
-		if (playlist_is_junk_name(de->d_name)) {
+		if (service_hidden(de->d_name)) {
 			continue;
 		}
 
@@ -731,7 +735,7 @@ static void pick_rebuild(void) {
 	if (names) {
 		struct dirent *de;
 		while ((de = readdir(dir)) != NULL && count < MAX_ENTRIES) {
-			if (de->d_name[0] == '.' || playlist_is_junk_name(de->d_name)) {
+			if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, "..") || service_hidden(de->d_name)) {
 				continue;
 			}
 			char full[PATH_MAX_LEN + NAME_MAX + 2];
@@ -1179,6 +1183,20 @@ static bool back_guard_peek(void) {
 		   (pick_layer && !lv_obj_is_hidden(pick_layer)) || strcmp(path, root_path) != 0;
 }
 
+static void service_toggle(void *unused) {
+	(void)unused;
+	config_set_int("files", "show_service", !config_get_int("files", "show_service", 0));
+	config_save();
+	rebuild();
+}
+static void view_menu_cb(lv_event_t *e) {
+	if (gesture_not_tap()) return;
+	(void)e;
+	sx_sheet_item_t item = {.label = tr("files_show_service"), .icon = &icon_menu_settings,
+		.checked = config_get_int("files", "show_service", 0) != 0, .action = service_toggle};
+	sx_sheet_menu(tr("file_explorer"), NULL, &item, 1);
+}
+
 static void loaded_cb(lv_event_t *e) {
 	(void)e;
 	rebuild();
@@ -1195,7 +1213,7 @@ void filespage_init(gui_config_t *cfg) {
 
 	lv_obj_add_style(filespage_screen, &theme_style_screen, 0);
 	title_label = settingsrow_title(filespage_screen, cfg, "file_explorer");
-	settingsrow_title_corner_slots(title_label, cfg, 1);
+	settingsrow_title_corner_slots(title_label, cfg, 2);
 
 	// The one thing on this page that is about the folder rather than about an
 	// entry in it, so it is a corner button and not a row of the menu.
@@ -1213,6 +1231,19 @@ void filespage_init(gui_config_t *cfg) {
 	lv_obj_add_style(newdir_glyph, &theme_style_icon, 0);
 	lv_obj_set_style_image_recolor_opa(newdir_glyph, LV_OPA_COVER, 0);
 	lv_obj_center(newdir_glyph);
+
+	lv_obj_t *view_btn = lv_btn_create(filespage_screen);
+	lv_obj_set_size(view_btn, 56, 56);
+	lv_obj_align(view_btn, LV_ALIGN_TOP_RIGHT, -cfg->padding - 64, cfg->padding + cfg->top_bar_height);
+	lv_obj_set_style_bg_opa(view_btn, LV_OPA_TRANSP, 0);
+	lv_obj_set_style_border_width(view_btn, 0, 0);
+	lv_obj_set_style_shadow_width(view_btn, 0, 0);
+	lv_obj_set_style_pad_all(view_btn, 0, 0);
+	lv_obj_add_event_cb(view_btn, view_menu_cb, LV_EVENT_CLICKED, NULL);
+	lv_obj_t *view_glyph = lv_image_create(view_btn);
+	lv_image_set_src(view_glyph, &icon_ellipsis_vertical);
+	lv_obj_add_style(view_glyph, &theme_style_icon, 0);
+	lv_obj_center(view_glyph);
 
 	int content_top = settingsrow_content_top(cfg);
 

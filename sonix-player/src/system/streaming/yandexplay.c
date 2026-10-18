@@ -1,4 +1,5 @@
 #include "yandexplay.h"
+#include "src/system/playback/sleeptimer.h"
 
 #include <pthread.h>
 #include <stdint.h>
@@ -226,6 +227,7 @@ typedef struct {
 	job_kind_t kind;
 	char id[YANDEX_ID_MAX];
 	unsigned generation;
+	unsigned sleep_serial;
 	bool waiting; // playback stopped for this one (prepare), not ahead of it
 	char path[512];
 } job_t;
@@ -242,6 +244,7 @@ static bool worker_started;
 typedef struct {
 	job_kind_t kind;
 	unsigned generation;
+	unsigned sleep_serial;
 	bool ok;
 	bool waiting;
 	char id[YANDEX_ID_MAX];
@@ -335,6 +338,7 @@ static void *worker_main(void *arg) {
 		}
 		r->kind = job.kind;
 		r->generation = job.generation;
+		r->sleep_serial = job.sleep_serial;
 		r->waiting = job.waiting;
 		snprintf(r->id, sizeof(r->id), "%s", job.id);
 		pthread_mutex_lock(&queue_lock);
@@ -378,7 +382,7 @@ static void submit(job_kind_t kind, const char *id, bool waiting, const char *pa
 		worker_started = pthread_create(&th, &attr, worker_main, NULL) == 0;
 		pthread_attr_destroy(&attr);
 	}
-	job_t job = {.kind = kind, .waiting = waiting};
+	job_t job = {.kind = kind, .waiting = waiting, .sleep_serial = sleeptimer_expiration_serial()};
 	if (path) {
 		snprintf(job.path, sizeof(job.path), "%s", path);
 	}
@@ -440,6 +444,7 @@ static bool worker_fetching(void) {
 // The list waiting for its tapped track (GUI thread): it becomes the queue
 // when the track is here.
 static int start_index;
+static unsigned wave_sleep_serial;
 static yandexwave_batch_cb wave_cb;
 
 // Hands the whole list to the player, entry `start` playing from `start_path`.
@@ -510,6 +515,7 @@ static void play_queue_from(int start, const char *start_path) {
 				n++;
 			}
 		}
+		wave_sleep_serial = sleeptimer_expiration_serial();
 		yandexwave_begin(first, n, wave_cb, NULL);
 		free(first);
 	} else {
@@ -528,7 +534,7 @@ static void play_done_async(void *user) {
 	pthread_mutex_lock(&queue_lock);
 	bool current = r->generation == queue_generation;
 	pthread_mutex_unlock(&queue_lock);
-	if (current) {
+	if (current && r->sleep_serial == sleeptimer_expiration_serial()) {
 		if (r->ok) {
 			play_queue_from(start_index, r->path);
 			tell(YANDEXPLAY_STARTED, NULL);
@@ -606,7 +612,7 @@ static void fetch_done_async(void *user) {
 	}
 	char guess[512], now[YANDEX_ID_MAX];
 	current_id(now, sizeof(now));
-	bool waited_for = strcmp(now, r->id) == 0;
+	bool waited_for = strcmp(now, r->id) == 0 && r->sleep_serial == sleeptimer_expiration_serial();
 	device_state_t state;
 	device_state_get(&state);
 	if (r->ok) {
@@ -695,8 +701,10 @@ static void downloading_note_async(void *user) {
 // made (it plays from the card instead of being fetched). The entry gets its
 // name anew and playback restarts there; for a track that must be fetched,
 // starting it lands in the prepare callback again, which fetches it.
+typedef struct { unsigned sleep_serial; char path[512]; } requeue_note_t;
 static void requeue_async(void *user) {
-	char *path = user;
+	requeue_note_t *note = user;
+	char *path = note->path;
 	char id[YANDEX_ID_MAX], fresh[512];
 	path_track_id(path, id, sizeof(id));
 	if (!id[0]) {
@@ -711,9 +719,10 @@ static void requeue_async(void *user) {
 			note_own_change(was_ours);
 		}
 		claim_saved();
-		device_state_play_queue_index(playlist_current_index());
+		if (note->sleep_serial == sleeptimer_expiration_serial())
+			device_state_play_queue_index(playlist_current_index());
 	}
-	free(path);
+	free(note);
 }
 
 // Makes a track known to the queue by id, for one that playback reached
@@ -743,8 +752,10 @@ bool yandexplay_prepare_track(const char *path) {
 		}
 		// One of the queue's saved files, gone since: the track streams.
 		if (yandexsaved_claimed(path) && access(path, R_OK) != 0) {
-			char *copy = strdup(path);
+			requeue_note_t *copy = malloc(sizeof(*copy));
 			if (copy) {
+			copy->sleep_serial = sleeptimer_expiration_serial();
+			snprintf(copy->path, sizeof(copy->path), "%s", path);
 				yandexcache_set_network_wanted(true);
 				device_state_stop();
 				gui_post(requeue_async, copy);
@@ -766,8 +777,10 @@ bool yandexplay_prepare_track(const char *path) {
 	}
 	// Saved on the card since the queue was made: played from there.
 	if (yandexsaved_has(id) && yandexsaved_local(id, NULL, 0)) {
-		char *copy = strdup(path);
+		requeue_note_t *copy = malloc(sizeof(*copy));
 		if (copy) {
+			copy->sleep_serial = sleeptimer_expiration_serial();
+			snprintf(copy->path, sizeof(copy->path), "%s", path);
 			device_state_stop();
 			gui_post(requeue_async, copy);
 			return false;
@@ -816,7 +829,8 @@ static void wave_batch_async(void *user) {
 		// Run out: stopped on the last entry, which is a file that played --
 		// not one waiting for its download.
 		bool ran_out = state.status == AUDIO_STATUS_STOPPED && count_before > 0 && playlist_current_index() == count_before - 1;
-		ran_out = ran_out && access(state.current_file, F_OK) == 0 && !worker_fetching();
+		ran_out = ran_out && access(state.current_file, F_OK) == 0 && !worker_fetching() &&
+			wave_sleep_serial == sleeptimer_expiration_serial();
 		yandexlist_t *q = queue_get();
 		for (int i = 0; i < b->count; i++) {
 			char path[512];
@@ -964,6 +978,7 @@ static void wave_watch(bool ours_now) {
 }
 
 void yandexplay_watch(void) {
+	if (audio_get_status() == AUDIO_STATUS_PLAYING) wave_sleep_serial = sleeptimer_expiration_serial();
 	pthread_mutex_lock(&queue_lock);
 	bool any = queue != NULL;
 	pthread_mutex_unlock(&queue_lock);

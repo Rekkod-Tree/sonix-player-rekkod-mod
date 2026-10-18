@@ -31,5 +31,7 @@ extern lv_obj_t *yandex_screen;
 bool yandexpage_open_album(const char *album_id, const char *title);
 
 void yandexpage_search_open(void);
+void yandexpage_wave_open(void);
+void yandexpage_liked_open(void);
 
 #endif /* YANDEXPAGE_H */

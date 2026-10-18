@@ -1,5 +1,8 @@
 #include "tidalpage.h"
+#include "src/system/playback/sleeptimer.h"
 
+
+#include <stdatomic.h>
 #include <errno.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -103,6 +106,7 @@ typedef enum {
 
 typedef struct {
 	job_kind_t kind;
+	unsigned sleep_serial;
 	char text[256];	  // search terms, or the title the list will carry
 	char text2[64];	  // which showcase, for the featured lists
 	// Album and playlist share one field: both identifiers are text (Tidal
@@ -1091,13 +1095,15 @@ static void on_slow_start(int seconds) { gui_post(slow_start_async, (void *)(int
 // Playback stopped on a track that was not there yet: when the file arrives,
 // it resumes from where it stopped.
 static bool waiting_for_track;
+static atomic_uint waiting_sleep_serial;
 
 static bool track_is_playable(const char *path);
 static void prefetch_urgent(const char *wanted_path);
 
 static void resume_if_waiting_async(void *user) {
 	(void)user;
-	if (!waiting_for_track) {
+	if (!waiting_for_track || atomic_load_explicit(&waiting_sleep_serial, memory_order_relaxed) != sleeptimer_expiration_serial()) {
+		waiting_for_track = false;
 		return;
 	}
 	// The Wi-Fi transfer is a file server running as root on the card this
@@ -1178,6 +1184,7 @@ bool tidalpage_prepare_track(const char *path) {
 	// The network is needed right now: tell the Wi-Fi idle logic before even
 	// stopping playback.
 	tidalcache_set_network_wanted(true);
+	atomic_store_explicit(&waiting_sleep_serial, sleeptimer_expiration_serial(), memory_order_relaxed);
 	waiting_for_track = true;
 	// Stop what was playing first, and not out of politeness: the previous
 	// track is reading a file that is still downloading, and it is one of the
@@ -1375,7 +1382,8 @@ static bool prepare_track(const tidal_track_t *track, char *path, size_t size) {
 	return true;
 }
 
-static void do_play(int index) {
+static void do_play(int index, unsigned sleep_serial) {
+	if (sleep_serial != sleeptimer_expiration_serial()) return;
 	if (index < 0 || index >= result_count) {
 		return;
 	}
@@ -1482,6 +1490,7 @@ static void do_play(int index) {
 		tidalcache_write_sidecars(t->id, expected, t->title, t->artist, t->album, t->album_id, t->track_number, NULL);
 	}
 
+	if (sleep_serial != sleeptimer_expiration_serial()) return;
 	device_state_play_list(path_ptr, queued_count, start);
 
 	// The cover now, with the music already playing: it is a download and not
@@ -1873,7 +1882,7 @@ static void *worker_main(void *arg) {
 			break;
 
 		case JOB_PLAY:
-			do_play(job.index);
+			do_play(job.index, job.sleep_serial);
 			break;
 
 		case JOB_QUEUE_ALBUM:
@@ -2033,6 +2042,7 @@ static bool list_back_guard(void) {
 static void run(const job_t *job_in, const char *waiting_text) {
 	(void)waiting_text;
 	job_t copy = *job_in;
+	copy.sleep_serial = sleeptimer_expiration_serial();
 	job_t *job = &copy;
 	// A job opening another list while one is already open: the previous one
 	// has to be remembered -- but when the new one is visible, not now.

@@ -35,8 +35,8 @@ static lv_obj_t *tile_grid;
 static home_item_t order[HOME_CUSTOM_SLOTS];
 static int order_n;
 static bool loaded;
-static const char *ids[] = {"music", "streaming", "networks", "audiobooks", "settings", "continue_book", "tidal", "qobuz", "radio", "podcasts", "subsonic", "yandex", "zvuk", "music_all", "music_albums", "music_artists", "music_album_artists", "music_genres", "music_years", "music_favourites", "music_most_played", "music_recent_added", "music_recent_played", "music_playlists", "music_browse", "search", "files"};
-static const char *tags[] = {"music", "streaming", "wireless", "audiobooks", "settings", "home_resume_book", "tidal", "qobuz", "radio", "podcasts", "subsonic", "yandex", "zvuk", "music_all_tracks", "albums", "artists", "music_album_artists", "music_genres", "music_year", "favourites", "music_most_played", "music_recently_added", "music_recently_played", "playlists", "music_browse", "home_search", "file_explorer"};
+static const char *ids[] = {"music", "streaming", "networks", "audiobooks", "settings", "continue_book", "tidal", "qobuz", "radio", "podcasts", "subsonic", "yandex", "zvuk", "music_all", "music_albums", "music_artists", "music_album_artists", "music_genres", "music_years", "music_favourites", "music_most_played", "music_recent_added", "music_recent_played", "music_playlists", "music_browse", "search", "files", "yandex_wave", "yandex_liked"};
+static const char *tags[] = {"music", "streaming", "wireless", "audiobooks", "settings", "home_resume_book", "tidal", "qobuz", "radio", "podcasts", "subsonic", "yandex", "zvuk", "music_all_tracks", "albums", "artists", "music_album_artists", "music_genres", "music_year", "favourites", "music_most_played", "music_recently_added", "music_recently_played", "playlists", "music_browse", "home_search", "file_explorer", "yandex_my_wave", "yandex_liked"};
 static const lv_image_dsc_t *icons[] = {&icon_menu_music, &icon_menu_streaming, &icon_menu_wireless, &icon_menu_audiobooks, &icon_menu_settings, &icon_menu_audiobooks};
 
 _Static_assert(sizeof(ids) / sizeof(ids[0]) == HOME_ITEM_COUNT, "Home IDs must match items");
@@ -89,9 +89,17 @@ bool main_menu_contains(home_item_t item) {
 	load();
 	return contains(item);
 }
-bool main_menu_available(home_item_t item) { return valid(item) && (item <= HOME_CONTINUE_BOOK || item >= HOME_MUSIC_ALL || streaming_home_entry(ids[item], NULL)); }
+bool main_menu_available(home_item_t item) {
+	if (item == HOME_YANDEX_WAVE || item == HOME_YANDEX_LIKED)
+		return streaming_home_entry("yandex", NULL);
+	return valid(item) && (item <= HOME_CONTINUE_BOOK || item >= HOME_MUSIC_ALL || streaming_home_entry(ids[item], NULL));
+}
 const char *main_menu_tag(home_item_t item) { return valid(item) ? tags[item] : "more"; }
 const lv_image_dsc_t *main_menu_icon(home_item_t item) {
+	if (item == HOME_YANDEX_WAVE)
+		return &icon_menu_tidal;
+	if (item == HOME_YANDEX_LIKED)
+		return &icon_menu_favourites;
 	grid_entry_t entry;
 	if (item >= HOME_MUSIC_ALL && item <= HOME_MUSIC_BROWSE && music_home_entry((music_tile_t)(item - HOME_MUSIC_ALL), &entry))
 		return entry.icon;
@@ -123,6 +131,9 @@ static void network_description(char *text, size_t size) {
 	const char *tag = wifi.state == WIFI_STATE_CONNECTED ? "home_wifi_connected" : bluetooth_connected_device(&device) ? "home_bt_connected" : "home_no_connections";
 	snprintf(text, size, "%s", tr(tag));
 }
+static void yandex_description(char *text, size_t size) {
+	snprintf(text, size, "%s", tr("yandex"));
+}
 bool main_menu_get_entry(home_item_t item, grid_entry_t *out) {
 	if (!valid(item) || !out)
 		return false;
@@ -134,6 +145,11 @@ bool main_menu_get_entry(home_item_t item, grid_entry_t *out) {
 	}
 	if (item == HOME_FILES) {
 		*out = (grid_entry_t){"file_explorer", &icon_menu_file_explorer, NULL, filespage_open};
+		return true;
+	}
+	if (item == HOME_YANDEX_WAVE || item == HOME_YANDEX_LIKED) {
+		*out = (grid_entry_t){tags[item], main_menu_icon(item), NULL,
+			item == HOME_YANDEX_WAVE ? yandexpage_wave_open : yandexpage_liked_open, yandex_description};
 		return true;
 	}
 	if (item > HOME_CONTINUE_BOOK)
@@ -259,6 +275,14 @@ static void move_action(void *user) {
 	else if (!main_menu_move(item, main_menu_count()))
 		toast_error("home_full");
 }
+static void yandex_wave_action(void *unused) {
+	(void)unused;
+	yandexpage_wave_open();
+}
+static void yandex_liked_action(void *unused) {
+	(void)unused;
+	yandexpage_liked_open();
+}
 void main_menu_hold(lv_event_t *e) {
 	if (player_sheet_drag_active() || switcher_back_drag_active() || coverflow_drag_active())
 		return;
@@ -272,8 +296,12 @@ void main_menu_hold(lv_event_t *e) {
 		bookresume_menu();
 		return;
 	}
-	sx_sheet_item_t items[2];
+	sx_sheet_item_t items[4];
 	int n = 0;
+	if (item == HOME_YANDEX) {
+		items[n++] = (sx_sheet_item_t){.label = tr("yandex_my_wave"), .icon = &icon_menu_tidal, .action = yandex_wave_action};
+		items[n++] = (sx_sheet_item_t){.label = tr("yandex_liked"), .icon = &icon_menu_favourites, .action = yandex_liked_action};
+	}
 	if (valid(item))
 		items[n++] = (sx_sheet_item_t){.label = tr(main_menu_contains(item) ? (item <= HOME_CONTINUE_BOOK ? "home_to_more" : "hometiles_remove") : "home_to_main"), .icon = &icon_menu_more, .action = move_action, .user = (void *)(intptr_t)item};
 	items[n++] = (sx_sheet_item_t){.label = tr("home_settings"), .icon = &icon_menu_settings, .action = settings_action};

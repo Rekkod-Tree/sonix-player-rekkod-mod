@@ -32,10 +32,13 @@ def wait_server(port, process):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--quick-actions', action='store_true')
+    parser.add_argument('--sleep-wait', action='store_true')
     parser.add_argument('--project', type=Path, required=True)
     parser.add_argument('--fixtures', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
+    if args.sleep_wait: args.quick_actions = True
     source = Path(__file__).resolve().parents[1]
     binary = args.project.resolve() / 'sonix_player_host_ui_test'
     assert binary.is_file(), 'Build UI_TEST=1 in the separate host mirror first'
@@ -47,6 +50,12 @@ def main():
     for name in ('high.mp3', 'mid.mp3', 'cover.jpg'):
         shutil.copyfile(args.fixtures / name, files / name)
     shutil.copyfile(files / 'high.mp3', files / 't103.mp3')
+    if args.quick_actions:
+        subprocess.run(['ffmpeg', '-loglevel', 'error', '-y', '-i', str(files / 't103.mp3'),
+                        '-c:a', 'aac', '-movflags', 'frag_keyframe+empty_moov', str(files / 't105.m4a')], check=True)
+    if args.sleep_wait:
+        subprocess.run(['ffmpeg', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo',
+                        '-t', '20', '-c:a', 'libmp3lame', str(files / 't103.mp3')], check=True)
     # Only public example values, never a developer's local/sealed key file.
     example = configparser.ConfigParser(interpolation=None)
     example.read(source / 'streaming-keys.ini.example', encoding='utf-8')
@@ -57,8 +66,10 @@ def main():
         for service, port in (('zvuk', 18769), ('yandex', 18770)):
             log = (output / (service + '-mock.log')).open('w', encoding='utf-8')
             server_logs.append(log)
+            server_env = dict(os.environ)
+            if args.sleep_wait and service == 'yandex': server_env['YANDEX_MOCK_KBPS'] = '4'
             process = subprocess.Popen(['python3', str(source / 'tools' / (service + '_mock.py')),
-                                        str(files), str(port)], stdout=log, stderr=subprocess.STDOUT)
+                                        str(files), str(port)], stdout=log, stderr=subprocess.STDOUT, env=server_env)
             servers.append(process)
             wait_server(port, process)
         for height in (800, 720):
@@ -96,6 +107,10 @@ expires_at=4102444800
 uid=12345
 user=Test User
 ''', encoding='utf-8')
+            if args.quick_actions:
+                shutil.copyfile(args.fixtures / 'high.mp3' if args.sleep_wait else files / 't103.mp3', run / 'card/local-music.mp3')
+                with (run / 'config.ini').open('a', encoding='utf-8') as config:
+                    config.write('[quickpanel]\nlayout=4\norder=wifi,sleep_audiobook,sleep_music,sleep_podcast,bluetooth\n')
             (run / 'alsa.conf').write_text('pcm.!default { type null }\n', encoding='ascii')
             result = output / str(height)
             result.mkdir(exist_ok=True)
@@ -104,6 +119,12 @@ user=Test User
                        ALSA_CONFIG_PATH=str(run / 'alsa.conf'), SONIX_PANEL=f'480x{height}',
                        SONIX_NO_MOUNT='1', SONIX_NO_SYSSERVER='1', SONIX_SD_ROOT=str(run / 'card'),
                        SONIX_CONFIG=str(run / 'config.ini'), SONIX_UI_TEST_DIR=str(result), SONIX_UI_TEST_SPOKEN='1')
+            if args.quick_actions:
+                env['SONIX_UI_TEST_QUICK_ACTIONS'] = '1'
+                if args.sleep_wait:
+                    env['SONIX_UI_TEST_SLEEP_WAIT'] = '1'
+                    env['SONIX_UI_TEST_WAIT_BYTES'] = str((files / 't103.mp3').stat().st_size)
+                env['SONIX_UI_TEST_TRACK'] = str(run / 'card/local-music.mp3')
             # The pre-existing native runner uses these mounts too. They are
             # private to this child and disappear when it exits.
             script = '''set -eu
@@ -115,10 +136,10 @@ cd "$TESTROOT/app"
 exec "$TEST_BINARY"
 '''
             with (result / 'run.log').open('w', encoding='utf-8') as log:
-                subprocess.run(['timeout', '-k', '5s', '180s', 'unshare', '-m', '--propagation', 'private',
+                subprocess.run(['timeout', '-k', '5s', '300s' if args.sleep_wait else '180s', 'unshare', '-m', '--propagation', 'private',
                                 'bash', '-c', script], env=env, stdout=log, stderr=subprocess.STDOUT, check=True)
             text = (result / 'run.log').read_text(encoding='utf-8', errors='replace')
-            assert 'UI_TEST_PASS spoken:' in text, text[-2000:]
+            assert ('UI_TEST_PASS sleep wait:' if args.sleep_wait else 'UI_TEST_PASS quick actions:' if args.quick_actions else 'UI_TEST_PASS spoken:') in text, text[-2000:]
             print(f'PASS: spoken UI 480x{height}', flush=True)
     finally:
         for process in servers:
@@ -131,6 +152,12 @@ exec "$TEST_BINARY"
                 process.wait()
         for log in server_logs:
             log.close()
+    if args.quick_actions:
+        text = (output / 'yandex-mock.log').read_text(encoding='utf-8')
+        assert text.count('mock: WAVE NEW ') == 2, 'Expected one station per panel; repeated opening must reuse it'
+        print('PASS: one wave session per panel, no session reset on reopen/resume')
+        print('Disposable state retained for inspection:', root)
+        return
     # Looking at the last page must not hydrate the whole 338-episode archive.
     batches = []
     for line in (output / 'zvuk-mock.log').read_text(encoding='utf-8').splitlines():

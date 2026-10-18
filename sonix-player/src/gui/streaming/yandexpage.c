@@ -34,6 +34,7 @@
 #include "src/system/net/http.h"
 #include "src/system/playback/device_state.h"
 #include "src/system/playback/playlist.h"
+#include "src/system/playback/sleeptimer.h"
 #include "src/system/streaming/podcaststate.h"
 #include "src/system/streaming/provider.h"
 #include "src/system/streaming/streamturn.h"
@@ -186,6 +187,7 @@ static int search_mode;
 // before the first list.
 static job_result_t *shown;
 static bool list_is_wave;
+static unsigned wave_sleep_serial;
 // Raised by each list asked for (GUI thread): an answer carrying an older
 // number belongs to a list the user has since left, and is dropped.
 static unsigned list_generation;
@@ -2080,18 +2082,57 @@ static void job_done_async(void *user) {
 	// asked for now if it is not here yet (once a session, see yandexsync).
 	yandexsync_likes_refresh(NULL);
 	// My Wave plays as soon as it has something: that is what the button means.
-	if (r->kind == JOB_WAVE && view_count() > 0) {
+	if (r->kind == JOB_WAVE && view_count() > 0 && wave_sleep_serial == sleeptimer_expiration_serial()) {
 		play_rows(0);
 	}
 }
 
+static void wave_start(void *unused) {
+	(void)unused;
+	wave_sleep_serial = sleeptimer_expiration_serial();
+	open_list(tr("yandex_my_wave"), JOB_WAVE, NULL, NULL);
+}
+void yandexpage_wave_open(void) {
+	gui_init_rest();
+	if (!yandex_logged_in()) {
+		switch_screen(yandex_screen);
+		return;
+	}
+	yandex_track_t current;
+	if (yandexplay_is_wave() && !playlist_is_library_backed() && yandexplay_current(&current)) {
+		if (audio_get_status() == AUDIO_STATUS_PAUSED)
+			player_key_play_pause();
+		switch_screen(player_screen);
+		return;
+	}
+	// Repeated taps during the first batch must not start another station.
+	if (list_has_current && list_current.kind == JOB_WAVE && !lv_obj_is_hidden(list_spin)) {
+		wave_sleep_serial = sleeptimer_expiration_serial();
+		switch_screen(list_screen);
+		return;
+	}
+	device_state_t state;
+	device_state_get(&state);
+	if (state.current_file[0] || state.live)
+		confirm_show("yandex_my_wave", "yandex_wave_replace", "medialist_play", wave_start, NULL);
+	else
+		wave_start(NULL);
+}
+void yandexpage_liked_open(void) {
+	gui_init_rest();
+	if (!yandex_logged_in()) {
+		switch_screen(yandex_screen);
+		return;
+	}
+	open_list(tr("yandex_liked"), JOB_LIKED, NULL, NULL);
+}
 static void open_wave_cb(lv_event_t *e) {
 	(void)e;
-	open_list(tr("yandex_my_wave"), JOB_WAVE, NULL, NULL);
+	yandexpage_wave_open();
 }
 static void open_liked_cb(lv_event_t *e) {
 	(void)e;
-	open_list(tr("yandex_liked"), JOB_LIKED, NULL, NULL);
+	yandexpage_liked_open();
 }
 static void open_playlists_cb(lv_event_t *e) {
 	(void)e;

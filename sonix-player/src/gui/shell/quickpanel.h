@@ -58,13 +58,7 @@ typedef enum {
 	QP_BTN_SONIXLINK,
 	QP_BTN_PEQ,
 	QP_BTN_DLNA,
-	// One per sleep timer, because there are three of them and switching off
-	// "the sleep timer" from here must not switch off somebody else's: a book
-	// counting down in the evening has nothing to do with the album that was
-	// playing at lunchtime.
-	QP_BTN_SLEEP_MUSIC,
-	QP_BTN_SLEEP_AUDIOBOOK,
-	QP_BTN_SLEEP_PODCAST,
+	QP_BTN_SLEEP,
 	QP_BTN_WIFI_TRANSFER,
 	QP_BTN_GAPLESS,
 	// 2.0: the volume limit (a switch), USB DAC mode (the way to its page) and

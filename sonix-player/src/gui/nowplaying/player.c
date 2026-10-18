@@ -687,6 +687,8 @@ static bool audiobook_auto_stop(const device_state_t *state) {
 	double end = current_chapter_end(state->progress_current_secs);
 	if (end > 0 && state->progress_current_secs >= end - 0.5) {
 		pause_book_at(end);
+		audiobook_set_stop_at_chapter_end(false);
+		config_save();
 		return true;
 	}
 	return false;
@@ -4982,13 +4984,10 @@ void player_output_unplugged(const char *what) {
 // of falling asleep to something is finding it where it was in the morning.
 static void sleep_timer_cb(lv_timer_t *timer) {
 	(void)timer;
-	bool expired = false;
-	for (int i = 0; i < SLEEPTIMER_COUNT; i++) {
-		expired = sleeptimer_expired((sleeptimer_kind_t)i) || expired;
-	}
+	bool expired = sleeptimer_expired(SLEEPTIMER_MUSIC);
 	// A station has no pause: its stop, as the button does it.
 	if (expired && radio_is_active()) {
-		if (radio_is_playing() && !radio_is_connecting()) {
+		if (radio_is_playing() || radio_is_connecting()) {
 			radio_stop();
 			apply_playback_status(AUDIO_STATUS_STOPPED);
 		}
@@ -6603,11 +6602,7 @@ void player_lyrics_toggle(void) {
 // this track" (device_state_set_stop_after), which the menu also has.
 // ---------------------------------------------------------------------------
 
-static sleeptimer_kind_t sleep_kind_for_menu(void) {
-	sleeptimer_kind_t kind = sleeptimer_kind_playing();
-	// A station counts with the music (see sleeptimer_kind_playing()).
-	return kind == SLEEPTIMER_COUNT ? SLEEPTIMER_MUSIC : kind;
-}
+static sleeptimer_kind_t sleep_kind_for_menu(void) { return SLEEPTIMER_MUSIC; }
 
 const char *player_sleep_label(void) {
 	static char label[96];
@@ -6622,6 +6617,8 @@ const char *player_sleep_label(void) {
 			snprintf(value, sizeof(value), tr("np_sleep_minutes"), minutes);
 		}
 		snprintf(label, sizeof(label), "%s \xC2\xB7 %s", tr("np_sleep"), value);
+	} else if (audiobook_stop_at_chapter_end()) {
+		snprintf(label, sizeof(label), "%s \xC2\xB7 %s", tr("np_sleep"), tr("np_sleep_chapter"));
 	} else if (device_state_stop_after() == DEVICE_STATE_STOP_AFTER_TRACK) {
 		snprintf(label, sizeof(label), "%s \xC2\xB7 %s", tr("np_sleep"), tr("np_sleep_end_short"));
 	} else if (device_state_stop_after() == DEVICE_STATE_STOP_AFTER_ALBUM) {
@@ -6638,6 +6635,7 @@ typedef struct {
 	bool enabled;
 	int minutes;
 	device_state_stop_after_t stop_after;
+	bool chapter_end;
 } sleep_was_t;
 static sleep_was_t sleep_was;
 
@@ -6646,6 +6644,8 @@ static void sleep_undo(void *user) {
 	sleeptimer_set_minutes(sleep_was.kind, sleep_was.minutes);
 	sleeptimer_set_enabled(sleep_was.kind, sleep_was.enabled);
 	device_state_set_stop_after(sleep_was.stop_after);
+	audiobook_set_stop_at_chapter_end(sleep_was.chapter_end);
+	config_save();
 	topbar_refresh_playback();
 	if (sleep_timer) {
 		apply_playback_status(audio_get_status());
@@ -6654,6 +6654,7 @@ static void sleep_undo(void *user) {
 
 #define SLEEP_PICK_TRACK -1
 #define SLEEP_PICK_ALBUM -2
+#define SLEEP_PICK_CHAPTER -3
 
 static void sleep_pick(void *user) {
 	int choice = (int)(intptr_t)user; // minutes; 0 off; SLEEP_PICK_TRACK / _ALBUM
@@ -6662,15 +6663,20 @@ static void sleep_pick(void *user) {
 	sleep_was.enabled = sleeptimer_enabled(kind);
 	sleep_was.minutes = sleeptimer_minutes(kind);
 	sleep_was.stop_after = device_state_stop_after();
+	sleep_was.chapter_end = audiobook_stop_at_chapter_end();
+	audiobook_set_stop_at_chapter_end(choice == SLEEP_PICK_CHAPTER);
 
 	static char text[128];
 	if (choice > 0) {
-		sleeptimer_set_minutes(kind, choice);
-		sleeptimer_set_enabled(kind, true);
+		sleeptimer_start(choice);
 		device_state_set_stop_after(DEVICE_STATE_STOP_AFTER_NONE); // one way to stop at a time
 		char value[32];
 		snprintf(value, sizeof(value), tr("np_sleep_minutes"), choice);
 		snprintf(text, sizeof(text), tr("np_sleep_set"), value);
+	} else if (choice == SLEEP_PICK_CHAPTER) {
+		sleeptimer_set_enabled(kind, false);
+		device_state_set_stop_after(DEVICE_STATE_STOP_AFTER_NONE);
+		snprintf(text, sizeof(text), "%s", tr("np_sleep_chapter"));
 	} else if (choice < 0) {
 		bool album = choice == SLEEP_PICK_ALBUM;
 		sleeptimer_set_enabled(kind, false);
@@ -6686,6 +6692,7 @@ static void sleep_pick(void *user) {
 	// the status bar either way.
 	apply_playback_status(audio_get_status());
 	topbar_refresh_playback();
+	config_save();
 	sx_toast_undo(text, sleep_undo, NULL);
 }
 
@@ -6698,7 +6705,7 @@ void player_sleep_sheet_open(void) {
 	snprintf(m30, sizeof(m30), tr("np_sleep_minutes"), 30);
 	snprintf(m60, sizeof(m60), tr("np_sleep_minutes"), 60);
 	sx_sheet_item_t items[7] = {
-		{tr("np_sleep_off"), NULL, now == 0 && stop == DEVICE_STATE_STOP_AFTER_NONE, false, sleep_pick,
+		{tr("np_sleep_off"), NULL, now == 0 && stop == DEVICE_STATE_STOP_AFTER_NONE && !audiobook_stop_at_chapter_end(), false, sleep_pick,
 		 (void *)(intptr_t)0},
 		{m15, NULL, now == 15, false, sleep_pick, (void *)(intptr_t)15},
 		{m30, NULL, now == 30, false, sleep_pick, (void *)(intptr_t)30},
@@ -6711,8 +6718,9 @@ void player_sleep_sheet_open(void) {
 	device_state_t state;
 	device_state_get(&state);
 	if (!state.live) {
-		items[n++] = (sx_sheet_item_t){tr("np_sleep_end"), NULL, stop == DEVICE_STATE_STOP_AFTER_TRACK, false,
-									   sleep_pick, (void *)(intptr_t)SLEEP_PICK_TRACK};
+		items[n++] = (sx_sheet_item_t){tr(audiobook_mode ? "np_sleep_chapter" : "np_sleep_end"), NULL,
+			audiobook_mode ? audiobook_stop_at_chapter_end() : stop == DEVICE_STATE_STOP_AFTER_TRACK, false,
+			sleep_pick, (void *)(intptr_t)(audiobook_mode ? SLEEP_PICK_CHAPTER : SLEEP_PICK_TRACK)};
 		if (!audiobook_mode && !podcast_mode) {
 			items[n++] = (sx_sheet_item_t){tr("np_sleep_end_album"), NULL, stop == DEVICE_STATE_STOP_AFTER_ALBUM,
 										   false, sleep_pick, (void *)(intptr_t)SLEEP_PICK_ALBUM};

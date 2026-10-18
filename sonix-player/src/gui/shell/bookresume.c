@@ -157,10 +157,10 @@ void bookresume_menu(void) {
 	sx_sheet_item_t items[5];
 	int n = 0;
 	if (menu_book[0])
-		items[n++] = (sx_sheet_item_t){.label = tr("home_resume_book"), .action = continue_action};
-	items[n++] = (sx_sheet_item_t){.label = tr("home_other_books"), .action = other_action};
+		items[n++] = (sx_sheet_item_t){.label = tr("home_resume_book"), .icon = &icon_menu_audiobook_continue, .action = continue_action};
+	items[n++] = (sx_sheet_item_t){.label = tr("home_other_books"), .icon = &icon_menu_audiobook_library, .action = other_action};
 	items[n++] = (sx_sheet_item_t){.label = tr("audiobooks"), .icon = &icon_menu_audiobooks, .action = library_action};
-	items[n++] = (sx_sheet_item_t){.label = tr(main_menu_contains(HOME_CONTINUE_BOOK) ? "home_to_more" : "home_to_main"), .action = move_action};
+	items[n++] = (sx_sheet_item_t){.label = tr(main_menu_contains(HOME_CONTINUE_BOOK) ? "home_to_more" : "home_to_main"), .icon = &icon_menu_more, .action = move_action};
 	items[n++] = (sx_sheet_item_t){.label = tr("home_settings"), .icon = &icon_menu_settings, .action = settings_action};
 	sx_sheet_menu(tr("home_resume_book"), menu_title, items, n);
 }

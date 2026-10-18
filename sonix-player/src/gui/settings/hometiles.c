@@ -273,10 +273,10 @@ static void row_menu_cb(lv_event_t *e) {
 	sx_sheet_item_t items[3];
 	int n = 0;
 	if (at > 0)
-		items[n++] = (sx_sheet_item_t){.label = tr("hometiles_earlier"), .action = move_action, .user = (void *)(intptr_t)(item * 4 + 1)};
+		items[n++] = (sx_sheet_item_t){.label = tr("hometiles_earlier"), .icon = &icon_chevron_up, .action = move_action, .user = (void *)(intptr_t)(item * 4 + 1)};
 	if (at >= 0 && at < main_menu_count() - 1)
-		items[n++] = (sx_sheet_item_t){.label = tr("hometiles_later"), .action = move_action, .user = (void *)(intptr_t)(item * 4 + 2)};
-	items[n++] = (sx_sheet_item_t){.label = tr(at >= 0 ? (item <= HOME_CONTINUE_BOOK ? "hometiles_to_more" : "hometiles_remove") : "hometiles_to_main"), .action = move_action, .user = (void *)(intptr_t)(item * 4 + (at >= 0 ? 0 : 3))};
+		items[n++] = (sx_sheet_item_t){.label = tr("hometiles_later"), .icon = &icon_chevron_down, .action = move_action, .user = (void *)(intptr_t)(item * 4 + 2)};
+	items[n++] = (sx_sheet_item_t){.label = tr(at >= 0 ? (item <= HOME_CONTINUE_BOOK ? "hometiles_to_more" : "hometiles_remove") : "hometiles_to_main"), .icon = &icon_menu_more, .action = move_action, .user = (void *)(intptr_t)(item * 4 + (at >= 0 ? 0 : 3))};
 	sx_sheet_menu(tr(main_menu_tag(item)), NULL, items, n);
 }
 
@@ -284,8 +284,8 @@ static bool in_category(home_item_t item, int category) {
 	if (category == 0)
 		return item <= HOME_CONTINUE_BOOK;
 	if (category == 1)
-		return item >= HOME_MUSIC_ALL;
-	return item >= HOME_TIDAL && item <= HOME_ZVUK;
+		return item >= HOME_MUSIC_ALL && item <= HOME_FILES;
+	return (item >= HOME_TIDAL && item <= HOME_ZVUK) || item == HOME_YANDEX_WAVE || item == HOME_YANDEX_LIKED;
 }
 
 static void add_item(void *user) {
@@ -322,7 +322,7 @@ static void add_cb(lv_event_t *e) {
 		return;
 	}
 	sx_sheet_item_t items[] = {
-		{.label = tr("hometiles_basic"), .action = category_action, .user = (void *)(intptr_t)0},
+		{.label = tr("hometiles_basic"), .icon = &icon_menu_more, .action = category_action, .user = (void *)(intptr_t)0},
 		{.label = tr("music"), .icon = &icon_menu_music, .action = category_action, .user = (void *)(intptr_t)1},
 		{.label = tr("streaming"), .icon = &icon_menu_streaming, .action = category_action, .user = (void *)(intptr_t)2},
 	};

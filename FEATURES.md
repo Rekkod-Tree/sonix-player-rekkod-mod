@@ -20,6 +20,26 @@
   Yandex Music or Zvuk before opening that source's existing search. No query is
   sent until submitted. Local audiobook search is not added by this change.
 
+## Quick actions and shared sleep
+
+- Optional My Wave and Liked tracks shortcuts open Yandex Music directly, with
+  the service named below the tile. Holding the Yandex tile offers these two
+  actions before layout controls. Existing Home layouts are not changed.
+- Reopening an active wave reuses its queue; a paused wave resumes. Replacing
+  other playback requires confirmation. Liked tracks open for browsing.
+- One sleep countdown follows playback across local music, services, books,
+  podcasts and radio. Pause and source changes retain the deadline; expiry is
+  one-shot. The quick panel opens the same picker as the full player and shows
+  remaining time. Track, chapter and album boundaries remain available where
+  supported; custom durations remain in the existing playback settings.
+- Legacy sleep controls collapse to one without duplicating panel buttons.
+  Existing duration profiles are read without boot-time writes; the first armed
+  profile in music/book/podcast order supplies the initial common setting.
+- Files hides dot entries and known desktop service entries by default. Its
+  header menu can show them, including in destination selection. Recursive
+  file operations still include hidden children; no files are deleted or moved
+  by this visibility preference.
+
 ## R1 USB storage handoff
 
 - Kernel USB events wake the existing watcher so brief enumeration windows are

@@ -1,5 +1,7 @@
 #include "podcastpage.h"
 
+
+#include <stdatomic.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1316,6 +1318,7 @@ static pthread_cond_t fetch_ready = PTHREAD_COND_INITIALIZER;
 static long long fetch_want_id;
 static bool fetch_started;
 static bool waiting_for_episode;
+static atomic_uint waiting_sleep_serial;
 
 // The episodes that are known: they are what the address of the one the queue
 // asks for is found from. Filled when a podcast's list arrives, and from the
@@ -1348,7 +1351,8 @@ static bool episode_is_playable(const char *path) {
 
 static void resume_if_waiting_async(void *user) {
 	(void)user;
-	if (!waiting_for_episode) {
+	if (!waiting_for_episode || atomic_load_explicit(&waiting_sleep_serial, memory_order_relaxed) != sleeptimer_expiration_serial()) {
+		waiting_for_episode = false;
 		return;
 	}
 	// The Wi-Fi transfer is a file server running as root on the card this
@@ -1389,6 +1393,7 @@ static bool podcastpage_prepare_track(const char *path) {
 	// under the audio thread makes it report "track finished", and the queue
 	// advances by itself onto another missing episode.
 	podcastcache_set_network_wanted(true);
+	atomic_store_explicit(&waiting_sleep_serial, sleeptimer_expiration_serial(), memory_order_relaxed);
 	waiting_for_episode = true;
 	device_state_stop();
 	prefetch_urgent(path);

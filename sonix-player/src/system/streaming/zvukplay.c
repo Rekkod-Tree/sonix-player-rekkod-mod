@@ -1,6 +1,7 @@
 #ifdef SONIX_ZVUK
 
 #include "zvukplay.h"
+#include "src/system/playback/sleeptimer.h"
 
 #include <pthread.h>
 #include <stdint.h>
@@ -205,6 +206,7 @@ typedef struct {
 	job_kind_t kind;
 	char id[ZVUK_ID_MAX];
 	unsigned generation;
+	unsigned sleep_serial;
 	char path[512];
 	bool waiting;
 } job_t;
@@ -220,6 +222,7 @@ static bool worker_started;
 typedef struct {
 	job_kind_t kind;
 	unsigned generation;
+	unsigned sleep_serial;
 	bool ok, waiting;
 	char id[ZVUK_ID_MAX];
 	char path[512];
@@ -298,6 +301,7 @@ static void *worker_main(void *arg) {
 		}
 		r->kind = job.kind;
 		r->generation = job.generation;
+		r->sleep_serial = job.sleep_serial;
 		r->waiting = job.waiting;
 		snprintf(r->id, sizeof(r->id), "%s", job.id);
 		pthread_mutex_lock(&queue_lock);
@@ -341,7 +345,7 @@ static void submit(job_kind_t kind, const char *id, bool waiting, const char *pa
 		worker_started = pthread_create(&th, &attr, worker_main, NULL) == 0;
 		pthread_attr_destroy(&attr);
 	}
-	job_t job = {.kind = kind, .waiting = waiting};
+	job_t job = {.kind = kind, .waiting = waiting, .sleep_serial = sleeptimer_expiration_serial()};
 	if (path) {
 		snprintf(job.path, sizeof(job.path), "%s", path);
 	}
@@ -479,7 +483,7 @@ static void play_done_async(void *user) {
 	pthread_mutex_lock(&queue_lock);
 	bool current = r->generation == queue_generation;
 	pthread_mutex_unlock(&queue_lock);
-	if (current) {
+	if (current && r->sleep_serial == sleeptimer_expiration_serial()) {
 		if (r->ok) {
 			play_queue_from(start_index, r->path);
 			tell(ZVUKPLAY_STARTED, NULL);
@@ -554,7 +558,7 @@ static void fetch_done_async(void *user) {
 	}
 	char guess[512], now[ZVUK_ID_MAX];
 	current_id(now, sizeof(now));
-	bool waited_for = strcmp(now, r->id) == 0;
+	bool waited_for = strcmp(now, r->id) == 0 && r->sleep_serial == sleeptimer_expiration_serial();
 	device_state_t state;
 	device_state_get(&state);
 	if (r->ok) {
@@ -630,8 +634,10 @@ static void signed_out_note_async(void *user) {
 	gui_notify_popup(tr(zvuk_session_expired() ? "zvuk_token_expired" : "zvuk_not_signed_in"));
 }
 
+typedef struct { unsigned sleep_serial; char path[512]; } requeue_note_t;
 static void requeue_async(void *user) {
-	char *path = user;
+	requeue_note_t *note = user;
+	char *path = note->path;
 	char id[ZVUK_ID_MAX], fresh[512];
 	path_track_id(path, id, sizeof(id));
 	if (id[0]) {
@@ -641,9 +647,10 @@ static void requeue_async(void *user) {
 			note_own_change(was_ours);
 		}
 		claim_saved();
-		device_state_play_queue_index(playlist_current_index());
+		if (note->sleep_serial == sleeptimer_expiration_serial())
+			device_state_play_queue_index(playlist_current_index());
 	}
-	free(path);
+	free(note);
 }
 
 static void adopt_id(const char *id) {
@@ -666,8 +673,10 @@ bool zvukplay_prepare_track(const char *path) {
 			return true;
 		}
 		if (zvukdl_claimed(path) && access(path, R_OK) != 0) {
-			char *copy = strdup(path);
+			requeue_note_t *copy = malloc(sizeof(*copy));
 			if (copy) {
+			copy->sleep_serial = sleeptimer_expiration_serial();
+			snprintf(copy->path, sizeof(copy->path), "%s", path);
 				zvukcache_set_network_wanted(true);
 				device_state_stop();
 				gui_post(requeue_async, copy);
@@ -686,8 +695,10 @@ bool zvukplay_prepare_track(const char *path) {
 		return true;
 	}
 	if (zvukdl_saved(id) && zvukdl_local(id, NULL, 0)) {
-		char *copy = strdup(path);
+		requeue_note_t *copy = malloc(sizeof(*copy));
 		if (copy) {
+			copy->sleep_serial = sleeptimer_expiration_serial();
+			snprintf(copy->path, sizeof(copy->path), "%s", path);
 			device_state_stop();
 			gui_post(requeue_async, copy);
 			return false;
