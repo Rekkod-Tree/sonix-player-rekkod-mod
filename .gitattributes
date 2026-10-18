@@ -4,4 +4,5 @@
 # These files run on Linux, including when the source is checked out on Windows.
 *.sh text eol=lf
 *.py text eol=lf
+*.snx -text
 sonix-packer/** text=auto eol=lf

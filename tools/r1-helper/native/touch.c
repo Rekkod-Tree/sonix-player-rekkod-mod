@@ -40,8 +40,12 @@ int main(int argc, char **argv) {
 	int fd = open("/dev/input/event1", O_WRONLY);
 	if (fd < 0) { perror("touch"); return 1; }
 	struct input_absinfo axis;
-	if (ioctl(fd, EVIOCGABS(ABS_MT_POSITION_X), &axis) < 0 || axis.minimum != 0 || axis.maximum != 479 ||
-		ioctl(fd, EVIOCGABS(ABS_MT_POSITION_Y), &axis) < 0 || axis.minimum != 0 || axis.maximum != 799) {
+	// Sonix explicitly calibrates evdev to panel pixels. Stock hyn_ts reports
+	// 720x1280 axes even on the 480x800 R1; do not rescale injected pixels.
+	if (ioctl(fd, EVIOCGABS(ABS_MT_POSITION_X), &axis) < 0 || axis.minimum != 0 ||
+		(axis.maximum != 479 && axis.maximum != 480 && axis.maximum != 720) ||
+		ioctl(fd, EVIOCGABS(ABS_MT_POSITION_Y), &axis) < 0 || axis.minimum != 0 ||
+		(axis.maximum != 799 && axis.maximum != 800 && axis.maximum != 1280)) {
 		fprintf(stderr, "Unsupported touch coordinates\n"); close(fd); return 2;
 	}
 	signal(SIGINT, stop);

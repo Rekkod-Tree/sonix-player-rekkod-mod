@@ -33,7 +33,7 @@ class FakeR1(R1):
 
     def adb_call(self, *args, **kwargs):
         self.inputs.append(args)
-        return b""
+        return b"SONIX_INPUT_STATUS=0\n"
 
     def observe(self, language="ru", settle=0):
         snap_id = "a" * 31 + str(len(list(self.runtime.glob("*.json"))) % 10)
@@ -81,6 +81,12 @@ class GuardsTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "lease"):
             self.device.tap(self.snap["snapshot_id"], "wrong", text="Музыка")
         self.assertEqual(self.device.inputs, [])
+
+    def test_remote_input_failure_not_reported_as_success(self):
+        for response in (b"Unsupported coordinates\nSONIX_INPUT_STATUS=2\n", b"No status returned"):
+            with patch.object(self.device, "adb_call", return_value=response):
+                with self.assertRaisesRegex(RuntimeError, "not confirmed"):
+                    self.device.inject_touch(100, 200, 80)
 
     def test_snapshot_single_use_and_after_observation(self):
         result = self.tap()
@@ -180,6 +186,8 @@ class DecodeTest(unittest.TestCase):
         self.assertEqual(meta["yoffset"], 800)
 
     def test_truncated_and_unknown_frames_rejected(self):
+        with self.assertRaisesRegex(ValueError, "header"):
+            decode_frame(b"")
         with self.assertRaises(ValueError):
             decode_frame(b'{"width":480,"height":800,"format":"rgb565le"}\nshort')
         with self.assertRaises(ValueError):

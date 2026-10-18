@@ -34,6 +34,8 @@ def changed_fraction(a: Image.Image, b: Image.Image) -> float:
 
 
 def decode_frame(data: bytes) -> tuple[dict, Image.Image]:
+    if b"\n" not in data:
+        raise ValueError("Native capture returned no frame header; prepare helpers and check framebuffer access")
     header, pixels = data.split(b"\n", 1)
     meta = json.loads(header)
     if (meta.get("width"), meta.get("height")) != SIZE or meta.get("format") != "rgb565le":
@@ -176,6 +178,14 @@ class R1:
         finally:
             local.unlink(missing_ok=True)
             self.adb_call("shell", "rm -f " + remote)
+
+    def inject_touch(self, *args: int) -> None:
+        command = self.remote_helper("touch") + " " + " ".join(str(int(arg)) for arg in args)
+        response = self.adb_call("shell", command + '; code=$?; printf "\\nSONIX_INPUT_STATUS=%s\\n" "$code"').decode(errors="replace")
+        # Old R1 adbd reports transport success even when the remote tool fails.
+        match = re.search(r"SONIX_INPUT_STATUS=(\d+)", response)
+        if not match or match[1] != "0":
+            raise RuntimeError("Touch injection failed or returned no status; input success is not confirmed")
 
     def observe(self, language: str = "ru", settle: float = 1.5) -> dict:
         time.sleep(settle)
@@ -320,7 +330,7 @@ class R1:
             raise ValueError("Use a target below the status bar")
         with self.input_lock():
             self.guard(snap_id, token, rect)
-            self.adb_call("shell", f"{self.remote_helper('touch')} {x} {y} {hold_ms}")
+            self.inject_touch(x, y, hold_ms)
             after = self.observe(snap["language"])
         return {"input_sent": True, "target": [x, y], "after": after,
                 "expected_after_found": bool(expected_after and any(normalize(expected_after) in normalize(line["text"]) for line in after["lines"])),
@@ -333,7 +343,7 @@ class R1:
             raise ValueError("Swipe duration must be 60..1500 ms")
         with self.input_lock():
             snap = self.guard(snap_id, token, (0, 35, 480, 800))
-            self.adb_call("shell", f"{self.remote_helper('touch')} {x} {y} {end_x} {end_y} {duration_ms}")
+            self.inject_touch(x, y, end_x, end_y, duration_ms)
             return {"input_sent": True, "after": self.observe(snap["language"])}
 
     def type_search(self, snap_id: str, token: str, text: str) -> dict:
