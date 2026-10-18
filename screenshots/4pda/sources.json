@@ -57,15 +57,15 @@
     {
       "file": "screenshots/4pda/r1-alpha20-sleep-picker.png",
       "upload_filename": "05-sleep-menu.png",
-      "caption": "Общий сон: время, конец трека или альбома.",
-      "source_workspace_relative": "output/alpha20-device/gen-sleep-picker.png",
-      "capture_version": "alpha20 target program on physical R1 during training",
+      "caption": "Общий таймер сна в установленной Alpha 20: выбранный срок и режимы остановки.",
+      "source_workspace_relative": "output/alpha20-installed-audit-20261018/screenshots/01-shared-sleep-installed.png",
+      "capture_version": "Installed alpha20 build 181020260707; executable SHA-256 5d2f8c9159a9c2b7dfc6270d111a89dca2d149baff87496eba6eb1a8015e08c3",
       "device": "HiBy R1",
       "width": 480,
       "height": 800,
       "synthetic_data": false,
       "edited": false,
-      "sha256": "46bb415d58f2634c244b7ad63bb1bf50afcb350f5d88fe2267e1c48503eed9ea"
+      "sha256": "e9f8da08bdf3baef9536b8883133c927267bf8fded1e2146938fa0d3822bcf12"
     },
     {
       "file": "screenshots/4pda/r1-home-resume-book-light.png",
@@ -144,6 +144,19 @@
       "synthetic_data": false,
       "edited": false,
       "sha256": "f1bda10508ed03a73e56e9dcd39376dcf114ef15ba16cc4babb041022fd30edc"
+    },
+    {
+      "file": "screenshots/4pda/r1-alpha20-yandex-actions.png",
+      "upload_filename": "12-yandex-actions.png",
+      "caption": "Быстрые действия Яндекса: «Моя волна» и «Мне нравится» по удержанию плитки.",
+      "source_workspace_relative": "output/alpha20-installed-audit-20261018/screenshots/02-yandex-actions-installed.png",
+      "capture_version": "Installed alpha20 build 181020260707; executable SHA-256 5d2f8c9159a9c2b7dfc6270d111a89dca2d149baff87496eba6eb1a8015e08c3",
+      "device": "HiBy R1",
+      "width": 480,
+      "height": 800,
+      "synthetic_data": false,
+      "edited": false,
+      "sha256": "8ca2c56d406daeb40eaa2b3dc6dcec77b5209bc7c0cd4b43df26a69e60bc3d91"
     }
   ]
 }
