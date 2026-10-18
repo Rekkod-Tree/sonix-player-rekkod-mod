@@ -1,0 +1,42 @@
+{
+  "date": "2026-10-18",
+  "firmware_context": "1.3.0-ui3-alpha18",
+  "status": "Historical stage snapshots; see RESEARCH.md and AUDIO_PRESETS.md for later decisions",
+  "files": [
+    {
+      "file": "initial-dsp-audit.txt",
+      "sha256": "fd1551caa664ac3444ed29f0e6b6604f1b81fd414ae00b6d9b2d273f666244b0",
+      "original_name": "Аудио — результаты проверки.txt"
+    },
+    {
+      "file": "naturalness-analysis.txt",
+      "sha256": "5a719e5a71e4c273affc9940e935d1a099a9e32ec35107addaa87db567bc57df",
+      "original_name": "Естественность — разбор.txt"
+    },
+    {
+      "file": "voice-comparison-instructions.txt",
+      "sha256": "2afe1c9709c556fef0645ee15524b3372274dd546985a9ff7e3ccd0dd4ed6b83",
+      "original_name": "Как сравнивать.txt"
+    },
+    {
+      "file": "three-preset-comparison.txt",
+      "sha256": "4817d64f0f4e5d2df712b82712999d616c2b7aa262a2116934f4708406213cb4",
+      "original_name": "Три варианта звучания.txt"
+    },
+    {
+      "file": "dsp-probe.log",
+      "sha256": "4702998ac5453af904a93db465f87c7c6a52ccdd138f81c6bf23a755d58779c7",
+      "original_name": "probe.log"
+    },
+    {
+      "file": "naturalness-probe.log",
+      "sha256": "cc187543d411fab730dfff689873364b261c937e7b9511f05c5a82f0772ac13a",
+      "original_name": "naturalness-probe.log"
+    },
+    {
+      "file": "preset-parser.log",
+      "sha256": "572f4e7cbd6a2bcd6c286d80b122943777e0a7856e711f0fe5138fc2636cd4df",
+      "original_name": "preset-parser.log"
+    }
+  ]
+}

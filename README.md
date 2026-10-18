@@ -536,6 +536,12 @@ sonix-player/
 
 
 
+## Research and development records
+
+Keep research, measurements, reviews, decisions, helper scripts, and presets in
+this repository. See [RESEARCH.md](RESEARCH.md) for the archive index, storage
+conventions, evidence status, and exclusions for credentials and private data.
+
 ## Special thanks to:
 [@Tartarus6](https://github.com/Tartarus6)
 
