@@ -1,0 +1,2940 @@
+{
+  "player_revision": "20d1446ea24de71a82277a0bf725515e8910d511",
+  "catalog_revision": "3ba0972284342bcaa4d60bd6760b16f521549932",
+  "player_api": 16,
+  "exported_functions": [
+    "api_version",
+    "cancel",
+    "cancel_file_operation",
+    "clear_ab_loop",
+    "clear_ab_switch",
+    "clear_interval",
+    "close_progress",
+    "define",
+    "download_file_async",
+    "eq_apply_profile",
+    "eq_apply_state",
+    "eq_get_crossfeed",
+    "eq_get_stereo_width",
+    "eq_load_profile",
+    "eq_reset",
+    "eq_save_profile",
+    "eq_set_band",
+    "eq_set_band_enabled",
+    "eq_set_band_type",
+    "eq_set_bypass",
+    "eq_set_crossfeed",
+    "eq_set_preamp",
+    "eq_set_stereo_width",
+    "file_copy",
+    "file_delete",
+    "file_move",
+    "file_operation_status",
+    "get_ab_loop",
+    "get_ab_switch",
+    "get_album_tracks",
+    "get_app_info",
+    "get_artist_albums",
+    "get_battery",
+    "get_crossfade",
+    "get_current_track_path",
+    "get_download_progress",
+    "get_duration",
+    "get_eq_state",
+    "get_gapless",
+    "get_mseb_state",
+    "get_next_album_tracks",
+    "get_now_playing",
+    "get_output_info",
+    "get_play_mode",
+    "get_playback_format",
+    "get_playback_progress",
+    "get_playback_speed",
+    "get_position",
+    "get_replaygain_mode",
+    "get_track_metadata",
+    "get_volume",
+    "has_capability",
+    "has_startup_image",
+    "html_to_blocks",
+    "http_get",
+    "http_post",
+    "http_request",
+    "image_startup_async",
+    "image_thumbnail_async",
+    "image_wallpaper_async",
+    "is_list_showing",
+    "is_paused",
+    "is_playing",
+    "json_decode",
+    "json_encode",
+    "led_available",
+    "led_blink",
+    "led_breathe",
+    "led_get",
+    "led_release",
+    "led_set",
+    "led_status",
+    "library_album_cover_async",
+    "library_get_albums",
+    "library_get_artists",
+    "library_get_song",
+    "library_get_songs",
+    "library_search",
+    "library_song_count",
+    "list_dir",
+    "md5",
+    "media_capabilities",
+    "mkdir",
+    "mseb_apply_state",
+    "next_track",
+    "on",
+    "open_file_manager",
+    "pick_file",
+    "play_file",
+    "play_list",
+    "play_remote",
+    "playlist_add",
+    "playlist_create",
+    "playlist_delete",
+    "playlist_list",
+    "playlist_read",
+    "playlist_remove",
+    "prepare_ab_switch",
+    "prev_track",
+    "queue_remote_list",
+    "refresh_library",
+    "refresh_theme",
+    "register_home_tile",
+    "register_list_item",
+    "register_quick_toggle",
+    "register_stream_media_tile",
+    "reload_ui",
+    "screenshot",
+    "sd_root",
+    "secrets.delete",
+    "secrets.exists",
+    "secrets.get",
+    "secrets.set",
+    "seek",
+    "select_ab_source",
+    "set_ab_loop",
+    "set_background_color",
+    "set_crossfade",
+    "set_gapless",
+    "set_home_layout",
+    "set_hw_volume_curve",
+    "set_icon",
+    "set_interval",
+    "set_launcher_layout",
+    "set_music_layout",
+    "set_play_mode",
+    "set_playback_speed",
+    "set_player_layout",
+    "set_quick_drawer_layout",
+    "set_quick_toggle",
+    "set_replaygain_mode",
+    "set_startup_image_async",
+    "set_text_color",
+    "set_transport_skip",
+    "set_volume",
+    "show_list",
+    "show_lock_screen",
+    "show_order_editor",
+    "show_progress",
+    "show_settings_list",
+    "show_text_input",
+    "show_text_view",
+    "show_toast",
+    "stop",
+    "storage.delete",
+    "storage.get",
+    "storage.list",
+    "storage.set",
+    "toggle_pause",
+    "update_progress",
+    "zip_image_async",
+    "zip_list",
+    "zip_read"
+  ],
+  "exported_function_count": 153,
+  "package_count": 66,
+  "published_package_count": 63,
+  "limitations": [
+    "Static references only; not execution or functional compatibility.",
+    "Optional/fallback branches are counted too; aliases and computed references need manual inspection.",
+    "Argument/return schemas, side effects, resource paths and native DSP/decoder features need separate checks.",
+    "Git HEAD is recorded; uncommitted upstream files would invalidate reproducibility."
+  ],
+  "packages": [
+    {
+      "api_min_literal": 16,
+      "references": [
+        "clear_ab_loop",
+        "clear_interval",
+        "define",
+        "get_ab_loop",
+        "get_crossfade",
+        "get_current_track_path",
+        "get_duration",
+        "get_playback_format",
+        "get_playback_speed",
+        "get_position",
+        "has_capability",
+        "is_playing",
+        "md5",
+        "on",
+        "register_list_item",
+        "set_ab_loop",
+        "set_interval",
+        "show_list",
+        "show_settings_list",
+        "show_text_input",
+        "show_toast",
+        "storage",
+        "storage.delete",
+        "storage.get",
+        "storage.set"
+      ],
+      "events": [
+        "paused",
+        "stopped",
+        "track_started"
+      ],
+      "capabilities_checked": [
+        "playback.ab_loop"
+      ],
+      "list_targets": [
+        "playback"
+      ],
+      "raw_io_os": [],
+      "dynamic_access": [
+        {
+          "line": 26,
+          "reason": "plugin.md5 referenced without a call; inspect alias use"
+        },
+        {
+          "line": 35,
+          "reason": "plugin.get_playback_format referenced without a call; inspect alias use"
+        },
+        {
+          "line": 37,
+          "reason": "plugin.storage table referenced indirectly"
+        },
+        {
+          "line": 59,
+          "reason": "plugin.storage table referenced indirectly"
+        },
+        {
+          "line": 82,
+          "reason": "plugin.storage table referenced indirectly"
+        },
+        {
+          "line": 114,
+          "reason": "plugin.get_ab_loop referenced without a call; inspect alias use"
+        },
+        {
+          "line": 198,
+          "reason": "plugin.get_current_track_path referenced without a call; inspect alias use"
+        },
+        {
+          "line": 211,
+          "reason": "plugin.get_duration referenced without a call; inspect alias use"
+        },
+        {
+          "line": 254,
+          "reason": "plugin.get_playback_format referenced without a call; inspect alias use"
+        },
+        {
+          "line": 265,
+          "reason": "plugin.get_position referenced without a call; inspect alias use"
+        },
+        {
+          "line": 300,
+          "reason": "plugin.get_ab_loop referenced without a call; inspect alias use"
+        },
+        {
+          "line": 317,
+          "reason": "plugin.get_playback_format referenced without a call; inspect alias use"
+        },
+        {
+          "line": 328,
+          "reason": "plugin.get_position referenced without a call; inspect alias use"
+        },
+        {
+          "line": 360,
+          "reason": "plugin.get_ab_loop referenced without a call; inspect alias use"
+        },
+        {
+          "line": 378,
+          "reason": "plugin.get_playback_format referenced without a call; inspect alias use"
+        },
+        {
+          "line": 403,
+          "reason": "plugin.get_playback_format referenced without a call; inspect alias use"
+        },
+        {
+          "line": 448,
+          "reason": "plugin.get_ab_loop referenced without a call; inspect alias use"
+        },
+        {
+          "line": 467,
+          "reason": "plugin.get_playback_format referenced without a call; inspect alias use"
+        },
+        {
+          "line": 492,
+          "reason": "plugin.get_playback_format referenced without a call; inspect alias use"
+        },
+        {
+          "line": 532,
+          "reason": "plugin.get_ab_loop referenced without a call; inspect alias use"
+        },
+        {
+          "line": 559,
+          "reason": "plugin.get_current_track_path referenced without a call; inspect alias use"
+        },
+        {
+          "line": 564,
+          "reason": "plugin.get_ab_loop referenced without a call; inspect alias use"
+        },
+        {
+          "line": 635,
+          "reason": "plugin.get_current_track_path referenced without a call; inspect alias use"
+        },
+        {
+          "line": 649,
+          "reason": "plugin.get_current_track_path referenced without a call; inspect alias use"
+        }
+      ],
+      "package": "ABRepeat",
+      "published": true,
+      "category": "Audio",
+      "description": "Practice looper with native gapless A-B repeat for local 16-bit lossless audio.",
+      "companion_destinations": [],
+      "script_bytes": 24961,
+      "script_sha256": "8430717a65c4c0530c4b1c36457c655dcc7601febeb0a9f7469e2ba5cdf86828",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 16,
+      "references": [
+        "clear_ab_switch",
+        "clear_interval",
+        "define",
+        "eq_apply_profile",
+        "eq_apply_state",
+        "get_ab_switch",
+        "get_crossfade",
+        "get_current_track_path",
+        "get_eq_state",
+        "get_playback_format",
+        "get_playback_speed",
+        "has_capability",
+        "is_playing",
+        "list_dir",
+        "on",
+        "prepare_ab_switch",
+        "register_list_item",
+        "sd_root",
+        "select_ab_source",
+        "set_interval",
+        "show_list",
+        "show_settings_list",
+        "show_text_input",
+        "show_toast"
+      ],
+      "events": [
+        "paused",
+        "stopped",
+        "track_started"
+      ],
+      "capabilities_checked": [
+        "audio.peq.state",
+        "playback.ab_switch"
+      ],
+      "list_targets": [
+        "playback"
+      ],
+      "raw_io_os": [],
+      "dynamic_access": [
+        {
+          "line": 149,
+          "reason": "plugin.get_eq_state referenced without a call; inspect alias use"
+        },
+        {
+          "line": 194,
+          "reason": "plugin.sd_root referenced without a call; inspect alias use"
+        },
+        {
+          "line": 206,
+          "reason": "plugin.get_ab_switch referenced without a call; inspect alias use"
+        },
+        {
+          "line": 210,
+          "reason": "plugin.get_playback_format referenced without a call; inspect alias use"
+        },
+        {
+          "line": 244,
+          "reason": "plugin.get_playback_format referenced without a call; inspect alias use"
+        },
+        {
+          "line": 316,
+          "reason": "plugin.get_ab_switch referenced without a call; inspect alias use"
+        },
+        {
+          "line": 363,
+          "reason": "plugin.get_playback_format referenced without a call; inspect alias use"
+        },
+        {
+          "line": 431,
+          "reason": "plugin.get_eq_state referenced without a call; inspect alias use"
+        },
+        {
+          "line": 440,
+          "reason": "plugin.get_eq_state referenced without a call; inspect alias use"
+        },
+        {
+          "line": 475,
+          "reason": "plugin.get_eq_state referenced without a call; inspect alias use"
+        },
+        {
+          "line": 545,
+          "reason": "plugin.get_eq_state referenced without a call; inspect alias use"
+        },
+        {
+          "line": 588,
+          "reason": "plugin.sd_root referenced without a call; inspect alias use"
+        },
+        {
+          "line": 739,
+          "reason": "plugin.get_current_track_path referenced without a call; inspect alias use"
+        },
+        {
+          "line": 840,
+          "reason": "plugin.get_ab_switch referenced without a call; inspect alias use"
+        },
+        {
+          "line": 963,
+          "reason": "plugin.get_playback_format referenced without a call; inspect alias use"
+        }
+      ],
+      "package": "ABXBlindTest",
+      "published": true,
+      "category": "Audio",
+      "description": "Blind ABX listening test with randomized X for matched audio files and parametric EQ profiles.",
+      "companion_destinations": [],
+      "script_bytes": 45187,
+      "script_sha256": "a750e0843055ad7594cb75879dabe3def4d3824eec774a107ee36255f490792e",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 16,
+      "references": [
+        "define",
+        "get_crossfade",
+        "get_current_track_path",
+        "get_gapless",
+        "get_now_playing",
+        "get_play_mode",
+        "get_replaygain_mode",
+        "get_track_metadata",
+        "has_capability",
+        "json_decode",
+        "json_encode",
+        "on",
+        "register_list_item",
+        "sd_root",
+        "set_crossfade",
+        "set_gapless",
+        "set_play_mode",
+        "set_replaygain_mode",
+        "show_settings_list",
+        "show_text_input",
+        "show_text_view",
+        "show_toast",
+        "storage",
+        "storage.get",
+        "storage.set"
+      ],
+      "events": [
+        "stopped",
+        "track_started"
+      ],
+      "capabilities_checked": [
+        "data.json",
+        "library.track_metadata",
+        "playback.settings",
+        "storage.namespaced"
+      ],
+      "list_targets": [
+        "playback"
+      ],
+      "raw_io_os": [
+        "io.open"
+      ],
+      "dynamic_access": [
+        {
+          "line": 60,
+          "reason": "plugin.storage table referenced indirectly"
+        },
+        {
+          "line": 127,
+          "reason": "plugin.storage table referenced indirectly"
+        },
+        {
+          "line": 145,
+          "reason": "plugin.get_current_track_path referenced without a call; inspect alias use"
+        },
+        {
+          "line": 197,
+          "reason": "plugin.has_capability referenced without a call; inspect alias use"
+        },
+        {
+          "line": 222,
+          "reason": "plugin.has_capability referenced without a call; inspect alias use"
+        },
+        {
+          "line": 365,
+          "reason": "plugin.has_capability referenced without a call; inspect alias use"
+        }
+      ],
+      "package": "AlbumPlaybackRules",
+      "published": true,
+      "category": "Listening",
+      "description": "Applies custom playback settings (gapless, crossfade, ReplayGain, play order) matched by playing track album tags.",
+      "companion_destinations": [],
+      "script_bytes": 29848,
+      "script_sha256": "921a4d5047e8541b7853d948a7b09e687b2294d1956ea24afa4ab3cd57e84228",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 15,
+      "references": [
+        "define",
+        "get_album_tracks",
+        "get_current_track_path",
+        "get_play_mode",
+        "is_paused",
+        "is_playing",
+        "library_get_albums",
+        "library_get_song",
+        "on",
+        "play_list",
+        "register_list_item",
+        "set_interval",
+        "show_list",
+        "show_settings_list",
+        "show_toast"
+      ],
+      "events": [
+        "queue_exhausted",
+        "stopped",
+        "track_started"
+      ],
+      "capabilities_checked": [],
+      "list_targets": [
+        "playback"
+      ],
+      "raw_io_os": [
+        "os.time"
+      ],
+      "dynamic_access": [],
+      "package": "AlbumShuffle",
+      "published": true,
+      "category": "Listening",
+      "description": "Play whole albums in random order while preserving their track order. Start in sequential mode; stops when you explicitly stop playback.",
+      "companion_destinations": [],
+      "script_bytes": 8647,
+      "script_sha256": "ef962a007accc1985ecc6b4fe4f284934bcf0b12b24a0152d274cd089bc62b38",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 16,
+      "references": [
+        "define",
+        "get_current_track_path",
+        "get_duration",
+        "get_play_mode",
+        "get_playback_progress",
+        "get_position",
+        "has_capability",
+        "image_thumbnail_async",
+        "is_paused",
+        "is_playing",
+        "list_dir",
+        "md5",
+        "mkdir",
+        "on",
+        "open_file_manager",
+        "play_list",
+        "register_list_item",
+        "sd_root",
+        "seek",
+        "set_interval",
+        "set_playback_speed",
+        "set_transport_skip",
+        "show_list",
+        "show_settings_list",
+        "show_text_input",
+        "show_toast",
+        "stop",
+        "toggle_pause"
+      ],
+      "events": [
+        "paused",
+        "stopped",
+        "track_started"
+      ],
+      "capabilities_checked": [
+        "playback.progress",
+        "playback.speed",
+        "playback.transport_skip",
+        "ui.file_manager",
+        "ui.list_wrap",
+        "ui.settings_list_wrap"
+      ],
+      "list_targets": [
+        "books"
+      ],
+      "raw_io_os": [
+        "io.open",
+        "os.remove",
+        "os.rename",
+        "os.time"
+      ],
+      "dynamic_access": [
+        {
+          "line": 110,
+          "reason": "plugin.has_capability referenced without a call; inspect alias use"
+        },
+        {
+          "line": 1583,
+          "reason": "plugin.has_capability referenced without a call; inspect alias use"
+        },
+        {
+          "line": 1841,
+          "reason": "plugin.has_capability referenced without a call; inspect alias use"
+        },
+        {
+          "line": 1881,
+          "reason": "plugin.has_capability referenced without a call; inspect alias use"
+        },
+        {
+          "line": 1917,
+          "reason": "plugin.has_capability referenced without a call; inspect alias use"
+        },
+        {
+          "line": 2256,
+          "reason": "plugin.has_capability referenced without a call; inspect alias use"
+        },
+        {
+          "line": 2477,
+          "reason": "plugin.has_capability referenced without a call; inspect alias use"
+        }
+      ],
+      "package": "Audiobooks",
+      "published": true,
+      "category": "Listening",
+      "description": "Listen to audiobooks with File Manager browsing, resume, bookmarks, chapters, optional 30 second transport skipping, and a sleep timer.",
+      "companion_destinations": [
+        ".plugin-assets/Audiobooks/audiobooks.png",
+        ".plugin-assets/Audiobooks/bookmark.png",
+        ".plugin-assets/Audiobooks/bookmarks.png",
+        ".plugin-assets/Audiobooks/chapters.png",
+        ".plugin-assets/Audiobooks/finished.png",
+        ".plugin-assets/Audiobooks/forward.png",
+        ".plugin-assets/Audiobooks/history.png",
+        ".plugin-assets/Audiobooks/in_progress.png",
+        ".plugin-assets/Audiobooks/library.png",
+        ".plugin-assets/Audiobooks/new.png",
+        ".plugin-assets/Audiobooks/play.png",
+        ".plugin-assets/Audiobooks/refresh.png",
+        ".plugin-assets/Audiobooks/rewind.png",
+        ".plugin-assets/Audiobooks/sleep.png",
+        ".plugin-assets/Audiobooks/settings.png"
+      ],
+      "script_bytes": 106689,
+      "script_sha256": "0393eb0a7adf8f7f5a2f7996b9885d23ee230b5b9ef4f9f4dc578ec3da172ff2",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 16,
+      "references": [
+        "cancel",
+        "close_progress",
+        "define",
+        "has_capability",
+        "http_request",
+        "is_list_showing",
+        "md5",
+        "mkdir",
+        "register_list_item",
+        "sd_root",
+        "show_list",
+        "show_progress",
+        "show_text_input",
+        "show_text_view",
+        "show_toast",
+        "update_progress"
+      ],
+      "events": [],
+      "capabilities_checked": [
+        "ui.progress"
+      ],
+      "list_targets": [
+        "music_audio"
+      ],
+      "raw_io_os": [
+        "io.open",
+        "os.remove",
+        "os.rename"
+      ],
+      "dynamic_access": [],
+      "package": "AutoEQ",
+      "published": true,
+      "category": "Audio",
+      "description": "Searches the AutoEQ recommended headphone catalog and saves compatible parametric EQ profiles to PEQ_Profiles.",
+      "companion_destinations": [
+        ".plugin-assets/AutoEQ/SOURCES.txt"
+      ],
+      "script_bytes": 22812,
+      "script_sha256": "3f2d2a8223212eb49fbec786fedb1cf07bf758c78490dd9c4d045ec02080e68c",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 16,
+      "references": [
+        "define",
+        "eq_apply_profile",
+        "eq_apply_state",
+        "get_current_track_path",
+        "get_eq_state",
+        "get_now_playing",
+        "get_track_metadata",
+        "has_capability",
+        "json_decode",
+        "json_encode",
+        "list_dir",
+        "on",
+        "register_list_item",
+        "sd_root",
+        "show_list",
+        "show_settings_list",
+        "show_text_input",
+        "show_text_view",
+        "show_toast",
+        "storage",
+        "storage.get",
+        "storage.set"
+      ],
+      "events": [
+        "track_started"
+      ],
+      "capabilities_checked": [
+        "audio.peq.state",
+        "audio.peq.transient",
+        "data.json",
+        "library.track_metadata",
+        "storage.namespaced"
+      ],
+      "list_targets": [
+        "music_audio"
+      ],
+      "raw_io_os": [
+        "io.open"
+      ],
+      "dynamic_access": [
+        {
+          "line": 143,
+          "reason": "plugin.storage table referenced indirectly"
+        },
+        {
+          "line": 207,
+          "reason": "plugin.storage table referenced indirectly"
+        },
+        {
+          "line": 315,
+          "reason": "plugin.get_current_track_path referenced without a call; inspect alias use"
+        }
+      ],
+      "package": "AutoEQContext",
+      "published": true,
+      "category": "Audio",
+      "description": "Applies parametric EQ profiles automatically based on folder, artist, or genre context.",
+      "companion_destinations": [],
+      "script_bytes": 29030,
+      "script_sha256": "f3e3f569822c4abb20a284e156b705cf256aae56b91e61d565551b5142670954",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 16,
+      "references": [
+        "close_progress",
+        "define",
+        "get_current_track_path",
+        "get_now_playing",
+        "has_capability",
+        "http_request",
+        "json_decode",
+        "library_get_songs",
+        "md5",
+        "on",
+        "refresh_library",
+        "register_list_item",
+        "sd_root",
+        "set_interval",
+        "show_list",
+        "show_progress",
+        "show_settings_list",
+        "show_toast",
+        "storage.delete",
+        "storage.get",
+        "storage.list",
+        "storage.set",
+        "update_progress"
+      ],
+      "events": [
+        "track_started"
+      ],
+      "capabilities_checked": [
+        "crypto.md5",
+        "data.json",
+        "network.http.async",
+        "storage.namespaced",
+        "ui.progress"
+      ],
+      "list_targets": [
+        "music_library"
+      ],
+      "raw_io_os": [
+        "io.open",
+        "os.date",
+        "os.remove",
+        "os.rename",
+        "os.time"
+      ],
+      "dynamic_access": [],
+      "package": "CoverArtFetcher",
+      "published": true,
+      "category": "Tools",
+      "description": "Fill missing album-title.jpg sidecars using MusicBrainz and the Cover Art Archive. Fetch the current album or enable automatic lookup, revert recorded downloads, and repair shared folder artwork with a confirmed, reversible rename.",
+      "companion_destinations": [],
+      "script_bytes": 78623,
+      "script_sha256": "b955e21ca49de0334d22f359b203f21fadb96e053a5b12e9533f05d4867978b2",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 15,
+      "references": [
+        "define",
+        "has_capability",
+        "set_player_layout"
+      ],
+      "events": [],
+      "capabilities_checked": [
+        "ui.player_layout_xml"
+      ],
+      "list_targets": [],
+      "raw_io_os": [],
+      "dynamic_access": [],
+      "package": "DefaultWaveformPlayer",
+      "published": true,
+      "category": "Customization",
+      "description": "The Default Now Playing screen as a downloadable layout, with frosted artwork, waveform-bar seeking, and tap-to-open lyrics.",
+      "companion_destinations": [
+        ".plugins/DefaultWaveformPlayer/player_layouts/default_waveform_player.xml",
+        ".plugins/DefaultWaveformPlayer/player_layouts/default_waveform_player_320x480.xml",
+        ".plugins/DefaultWaveformPlayer/player_layouts/default_waveform_player_480x720.xml",
+        ".plugins/DefaultWaveformPlayer/player_layouts/default_waveform_player.png"
+      ],
+      "script_bytes": 537,
+      "script_sha256": "c45045946bf3536824333b5b2b0c0b7769502ad9e2ef14bab3061da1f77c989f",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 14,
+      "references": [
+        "clear_interval",
+        "define",
+        "has_capability",
+        "http_request",
+        "json_decode",
+        "json_encode",
+        "library_get_albums",
+        "library_get_artists",
+        "library_get_songs",
+        "library_song_count",
+        "list_dir",
+        "mkdir",
+        "on",
+        "register_list_item",
+        "sd_root",
+        "set_icon",
+        "set_interval",
+        "show_list",
+        "show_settings_list",
+        "show_text_input",
+        "show_toast",
+        "storage.delete",
+        "storage.get",
+        "storage.set"
+      ],
+      "events": [
+        "screen_woke",
+        "system_resumed"
+      ],
+      "capabilities_checked": [],
+      "list_targets": [
+        "music_library"
+      ],
+      "raw_io_os": [
+        "io.open",
+        "os.clock",
+        "os.date",
+        "os.remove",
+        "os.rename",
+        "os.time"
+      ],
+      "dynamic_access": [],
+      "package": "Discover",
+      "published": true,
+      "category": "Tools",
+      "description": "Find new releases, similar artists, releases missing from your collection, and manage your wish list using data from MusicBrainz and ListenBrainz.",
+      "companion_destinations": [
+        ".plugins/Discover/discover.png",
+        ".plugins/Discover/blank.png",
+        ".plugins/Discover/owned.png",
+        ".plugins/Discover/wish.png",
+        ".plugins/Discover/owned_wish.png"
+      ],
+      "script_bytes": 78850,
+      "script_sha256": "e380e309e456ba602e5a7f39513559e3ded287b3910a9f34ff8de0e184035dae",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 14,
+      "references": [
+        "clear_interval",
+        "define",
+        "has_capability",
+        "html_to_blocks",
+        "is_list_showing",
+        "list_dir",
+        "md5",
+        "mkdir",
+        "register_list_item",
+        "sd_root",
+        "set_interval",
+        "show_list",
+        "show_text_view",
+        "show_toast",
+        "storage.get",
+        "storage.set",
+        "zip_image_async",
+        "zip_read"
+      ],
+      "events": [],
+      "capabilities_checked": [
+        "ui.list_wrap"
+      ],
+      "list_targets": [
+        "books"
+      ],
+      "raw_io_os": [
+        "io.open"
+      ],
+      "dynamic_access": [
+        {
+          "line": 1215,
+          "reason": "plugin.has_capability referenced without a call; inspect alias use"
+        },
+        {
+          "line": 1254,
+          "reason": "plugin.has_capability referenced without a call; inspect alias use"
+        },
+        {
+          "line": 1284,
+          "reason": "plugin.has_capability referenced without a call; inspect alias use"
+        }
+      ],
+      "package": "EpubReader",
+      "published": true,
+      "category": "Reading",
+      "description": "Reads EPUB books from the Books folder on the SD card, shown as covers, with pictures and your reading position saved.",
+      "companion_destinations": [
+        ".plugin-assets/EpubReader/epub.png"
+      ],
+      "script_bytes": 43223,
+      "script_sha256": "83f4451146374fd194ab6485fded024124cb045b659cb3e906f7853c2797ca58",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 16,
+      "references": [
+        "clear_interval",
+        "define",
+        "get_volume",
+        "has_capability",
+        "json_decode",
+        "json_encode",
+        "register_list_item",
+        "sd_root",
+        "set_interval",
+        "set_volume",
+        "show_list",
+        "show_settings_list",
+        "show_toast",
+        "stop",
+        "storage",
+        "storage.delete",
+        "storage.get",
+        "storage.set"
+      ],
+      "events": [],
+      "capabilities_checked": [
+        "playback.silent_volume",
+        "playback.transient_volume"
+      ],
+      "list_targets": [
+        "music_timers"
+      ],
+      "raw_io_os": [
+        "io.open",
+        "os.time"
+      ],
+      "dynamic_access": [
+        {
+          "line": 68,
+          "reason": "plugin.storage table referenced indirectly"
+        },
+        {
+          "line": 113,
+          "reason": "plugin.storage table referenced indirectly"
+        },
+        {
+          "line": 124,
+          "reason": "plugin.storage table referenced indirectly"
+        }
+      ],
+      "package": "ExtendedSleepTimer",
+      "published": true,
+      "category": "Listening",
+      "description": "A longer sleep timer that remembers its duration, supports an optional quiet bedtime fade-out, and stops playback when it ends.",
+      "companion_destinations": [],
+      "script_bytes": 15935,
+      "script_sha256": "a573b74db5f393989d73a5f79c47a3d7ac7bd1cb1d309ac65a9e67f123124d97",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 1,
+      "references": [
+        "define",
+        "has_capability",
+        "register_list_item",
+        "register_quick_toggle",
+        "sd_root",
+        "set_hw_volume_curve",
+        "set_quick_toggle",
+        "show_list",
+        "show_toast"
+      ],
+      "events": [],
+      "capabilities_checked": [
+        "audio.hw_volume_curve",
+        "ui.quick_toggle"
+      ],
+      "list_targets": [
+        "music_audio"
+      ],
+      "raw_io_os": [
+        "io.open"
+      ],
+      "dynamic_access": [],
+      "package": "GainMode",
+      "published": true,
+      "category": "Audio",
+      "description": "Switches between the stock Low and High Gain volume curves.",
+      "companion_destinations": [],
+      "script_bytes": 7138,
+      "script_sha256": "e630f004b7d4e9d61c4183d70820e8e65f336c77882ee501cd401793b73aff9e",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 15,
+      "references": [
+        "define",
+        "has_capability",
+        "sd_root",
+        "set_player_layout",
+        "storage.get",
+        "storage.set"
+      ],
+      "events": [],
+      "capabilities_checked": [
+        "ui.player_layout_xml"
+      ],
+      "list_targets": [],
+      "raw_io_os": [
+        "io.open",
+        "os.remove"
+      ],
+      "dynamic_access": [],
+      "package": "GalleryPlayer",
+      "published": true,
+      "category": "Customization",
+      "description": "A Gallery-style Now Playing screen with frosted artwork, tap-to-open lyrics, and the standard playback controls.",
+      "companion_destinations": [
+        ".plugins/GalleryPlayer/player_layouts/gallery_player.xml",
+        ".plugins/GalleryPlayer/player_layouts/gallery_player_320x480.xml",
+        ".plugins/GalleryPlayer/player_layouts/gallery_player_480x720.xml",
+        ".plugins/GalleryPlayer/player_layouts/gallery_player.png"
+      ],
+      "script_bytes": 1613,
+      "script_sha256": "425f36ac458a3d3401bff2a8315e21f1e8aadc60dead29d2e2b0f647b0b16843",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 15,
+      "references": [
+        "define",
+        "has_capability",
+        "set_player_layout"
+      ],
+      "events": [],
+      "capabilities_checked": [
+        "ui.player_layout_xml"
+      ],
+      "list_targets": [],
+      "raw_io_os": [],
+      "dynamic_access": [],
+      "package": "GalleryWaveformPlayer",
+      "published": true,
+      "category": "Customization",
+      "description": "A Gallery-style Now Playing screen with frosted artwork, filled-envelope waveform seeking, and tap-to-open lyrics.",
+      "companion_destinations": [
+        ".plugins/GalleryWaveformPlayer/player_layouts/gallery_waveform_player.xml",
+        ".plugins/GalleryWaveformPlayer/player_layouts/gallery_waveform_player_320x480.xml",
+        ".plugins/GalleryWaveformPlayer/player_layouts/gallery_waveform_player_480x720.xml",
+        ".plugins/GalleryWaveformPlayer/player_layouts/gallery_waveform_player.png"
+      ],
+      "script_bytes": 526,
+      "script_sha256": "6ef1130dbc3c85cfe9a466bfac48f38b32f0140ca6cc0650c96cf1ce8e14f7a6",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 15,
+      "references": [
+        "define",
+        "has_capability",
+        "set_player_layout"
+      ],
+      "events": [],
+      "capabilities_checked": [
+        "ui.player_layout_xml"
+      ],
+      "list_targets": [],
+      "raw_io_os": [],
+      "dynamic_access": [],
+      "package": "HibysGraphPlayer",
+      "published": true,
+      "category": "Customization",
+      "description": "A HiBy-style Now Playing screen with edge-to-edge artwork, a frosted glass footer, filled-envelope waveform seeking, and tap-to-open lyrics.",
+      "companion_destinations": [
+        ".plugins/HibysGraphPlayer/player_layouts/hibys_graph_player.xml",
+        ".plugins/HibysGraphPlayer/player_layouts/hibys_graph_player_320x480.xml",
+        ".plugins/HibysGraphPlayer/player_layouts/hibys_graph_player_480x720.xml",
+        ".plugins/HibysGraphPlayer/player_layouts/hibys_graph_player.png"
+      ],
+      "script_bytes": 505,
+      "script_sha256": "72f47aff8426a19e517c2fe1b25a586757b9d0b196197fca1c30be080c748611",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 15,
+      "references": [
+        "define",
+        "has_capability",
+        "set_player_layout"
+      ],
+      "events": [],
+      "capabilities_checked": [
+        "ui.player_layout_xml"
+      ],
+      "list_targets": [],
+      "raw_io_os": [],
+      "dynamic_access": [],
+      "package": "HibysPlayer",
+      "published": true,
+      "category": "Customization",
+      "description": "A HiBy-style Now Playing screen with edge-to-edge artwork, a frosted glass footer, and tap-to-open lyrics.",
+      "companion_destinations": [
+        ".plugins/HibysPlayer/player_layouts/hibys_player.xml",
+        ".plugins/HibysPlayer/player_layouts/hibys_player_320x480.xml",
+        ".plugins/HibysPlayer/player_layouts/hibys_player_480x720.xml",
+        ".plugins/HibysPlayer/player_layouts/hibys_player.png"
+      ],
+      "script_bytes": 437,
+      "script_sha256": "1335904e68862c83dde775f48765e4588cbd6c95555d2c3acda57305981aff96",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 16,
+      "references": [
+        "close_progress",
+        "define",
+        "has_capability",
+        "image_wallpaper_async",
+        "list_dir",
+        "mkdir",
+        "pick_file",
+        "register_list_item",
+        "reload_ui",
+        "sd_root",
+        "set_home_layout",
+        "show_list",
+        "show_progress",
+        "show_toast",
+        "storage.get",
+        "storage.set"
+      ],
+      "events": [],
+      "capabilities_checked": [
+        "data.wallpaper",
+        "ui.file_picker",
+        "ui.home_background",
+        "ui.list_wrap",
+        "ui.progress",
+        "ui.reload"
+      ],
+      "list_targets": [
+        "display"
+      ],
+      "raw_io_os": [
+        "io.open",
+        "os.remove"
+      ],
+      "dynamic_access": [],
+      "package": "HomeBackground",
+      "published": true,
+      "category": "Customization",
+      "description": "Choose a JPG, PNG, or BMP up to 3 MB as a centered, full-screen Home wallpaper.",
+      "companion_destinations": [],
+      "script_bytes": 8404,
+      "script_sha256": "6f84914ffa33d9907e8d6605bfe666fce4edcf51e7ef81c6bc7bee068b6f956f",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 16,
+      "references": [
+        "cancel",
+        "define",
+        "get_playback_format",
+        "has_capability",
+        "http_request",
+        "is_list_showing",
+        "json_decode",
+        "json_encode",
+        "md5",
+        "play_remote",
+        "queue_remote_list",
+        "register_list_item",
+        "register_stream_media_tile",
+        "secrets",
+        "secrets.delete",
+        "secrets.get",
+        "secrets.set",
+        "show_list",
+        "show_settings_list",
+        "show_text_input",
+        "show_toast",
+        "storage.delete",
+        "storage.get",
+        "storage.set"
+      ],
+      "events": [],
+      "capabilities_checked": [
+        "playback.format",
+        "playback.remote",
+        "ui.list_showing",
+        "ui.list_update"
+      ],
+      "list_targets": [
+        "settings"
+      ],
+      "raw_io_os": [
+        "os.time"
+      ],
+      "dynamic_access": [
+        {
+          "line": 233,
+          "reason": "plugin.secrets table referenced indirectly"
+        },
+        {
+          "line": 252,
+          "reason": "plugin.secrets table referenced indirectly"
+        },
+        {
+          "line": 377,
+          "reason": "plugin.secrets table referenced indirectly"
+        },
+        {
+          "line": 570,
+          "reason": "plugin.secrets table referenced indirectly"
+        },
+        {
+          "line": 849,
+          "reason": "plugin.secrets table referenced indirectly"
+        },
+        {
+          "line": 849,
+          "reason": "plugin.secrets referenced without a call; inspect alias use"
+        },
+        {
+          "line": 868,
+          "reason": "plugin.secrets table referenced indirectly"
+        },
+        {
+          "line": 868,
+          "reason": "plugin.secrets referenced without a call; inspect alias use"
+        }
+      ],
+      "package": "JellyfinEmby",
+      "published": true,
+      "category": "Listening",
+      "description": "Browse and stream music libraries, artists, albums, and tracks from Jellyfin and Emby media servers.",
+      "companion_destinations": [],
+      "script_bytes": 64706,
+      "script_sha256": "332ea3c8248e1c8c4d51b498bddb7333e4a56fc444ee8b646000c51c35bb3771",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 16,
+      "references": [
+        "define",
+        "has_capability",
+        "json_decode",
+        "json_encode",
+        "register_home_tile",
+        "register_list_item",
+        "reload_ui",
+        "secrets.get",
+        "secrets.set",
+        "set_home_layout",
+        "set_music_layout",
+        "set_quick_drawer_layout",
+        "show_list",
+        "show_order_editor",
+        "show_settings_list",
+        "show_text_input",
+        "show_toast",
+        "storage.delete",
+        "storage.get",
+        "storage.set"
+      ],
+      "events": [],
+      "capabilities_checked": [
+        "ui.home_layout",
+        "ui.music_layout",
+        "ui.order_editor",
+        "ui.quick_drawer_layout"
+      ],
+      "list_targets": [
+        "settings"
+      ],
+      "raw_io_os": [],
+      "dynamic_access": [],
+      "package": "KidsMode",
+      "published": true,
+      "category": "Customization",
+      "description": "Choose and reorder visible Home entries, Music menus, shortcuts and Quick Drawer controls, with parent PIN recovery. Hiding controls does not turn off device features. This is not a full device lock.",
+      "companion_destinations": [],
+      "script_bytes": 15836,
+      "script_sha256": "08ed21ef349d7d2c05ab08d2896cce7a38ba3caa1383728677a764dae0d1b712",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 2,
+      "references": [
+        "cancel",
+        "define",
+        "get_duration",
+        "http_request",
+        "is_playing",
+        "md5",
+        "on",
+        "register_list_item",
+        "sd_root",
+        "set_interval",
+        "show_settings_list",
+        "show_text_input",
+        "show_toast",
+        "storage.delete",
+        "storage.get",
+        "storage.set"
+      ],
+      "events": [
+        "paused",
+        "resumed",
+        "stopped",
+        "track_started"
+      ],
+      "capabilities_checked": [],
+      "list_targets": [
+        "playback"
+      ],
+      "raw_io_os": [
+        "io.open",
+        "os.remove",
+        "os.time"
+      ],
+      "dynamic_access": [],
+      "package": "LastFmScrobbler",
+      "published": true,
+      "category": "Listening",
+      "description": "Scrobbles the songs you play to your Last.fm account. Requires a free Last.fm API account and your own API credentials. Enable only one Last.fm scrobbler plugin at a time to avoid duplicate scrobbles.",
+      "companion_destinations": [],
+      "script_bytes": 23385,
+      "script_sha256": "00a1068e80eb0c6cc9e9e129151890eab1b8b27a682d706fb4ff367542f2b68e",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 2,
+      "references": [
+        "cancel",
+        "close_progress",
+        "define",
+        "get_duration",
+        "has_capability",
+        "http_request",
+        "is_list_showing",
+        "is_playing",
+        "md5",
+        "on",
+        "register_list_item",
+        "sd_root",
+        "secrets",
+        "secrets.delete",
+        "secrets.exists",
+        "secrets.get",
+        "secrets.set",
+        "set_interval",
+        "show_list",
+        "show_progress",
+        "show_settings_list",
+        "show_text_input",
+        "show_text_view",
+        "show_toast",
+        "storage.delete",
+        "storage.get",
+        "storage.set"
+      ],
+      "events": [
+        "paused",
+        "resumed",
+        "stopped",
+        "track_started"
+      ],
+      "capabilities_checked": [
+        "ui.list_showing",
+        "ui.list_update",
+        "ui.list_wrap",
+        "ui.progress",
+        "ui.text_view"
+      ],
+      "list_targets": [
+        "playback"
+      ],
+      "raw_io_os": [
+        "io.open",
+        "os.date",
+        "os.remove",
+        "os.time"
+      ],
+      "dynamic_access": [
+        {
+          "line": 31,
+          "reason": "plugin.secrets table referenced indirectly"
+        }
+      ],
+      "package": "LastFmScrobblerV2",
+      "published": true,
+      "category": "Listening",
+      "description": "Scrobbles your music to Last.fm with Compás sign-in, guided setup, and an offline queue. No Last.fm API app credentials are required. Enable only one Last.fm scrobbler plugin at a time to avoid duplicate scrobbles.",
+      "companion_destinations": [],
+      "script_bytes": 57126,
+      "script_sha256": "cdf745ae81febb6d2efb9b51b2c4b21482b29a2983628aa4e7979c1e5a43af8d",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 13,
+      "references": [
+        "define",
+        "get_volume",
+        "is_paused",
+        "is_playing",
+        "led_available",
+        "led_breathe",
+        "led_release",
+        "led_set",
+        "led_status",
+        "on"
+      ],
+      "events": [
+        "paused",
+        "resumed",
+        "stopped",
+        "track_started",
+        "volume_changed"
+      ],
+      "capabilities_checked": [],
+      "list_targets": [],
+      "raw_io_os": [],
+      "dynamic_access": [],
+      "package": "LedVolumeMeter",
+      "published": true,
+      "category": "Customization",
+      "description": "Shows the volume level on the charge LED, red above a high-volume threshold.",
+      "companion_destinations": [],
+      "script_bytes": 1211,
+      "script_sha256": "ba1ed73992563fdc949f2a3e545a348aa9436cdaa818943cb72dabaf8fdb4fb3",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 15,
+      "references": [
+        "cancel",
+        "define",
+        "get_duration",
+        "get_position",
+        "has_capability",
+        "http_request",
+        "is_paused",
+        "is_playing",
+        "json_decode",
+        "json_encode",
+        "md5",
+        "on",
+        "register_list_item",
+        "secrets.delete",
+        "secrets.get",
+        "secrets.set",
+        "set_interval",
+        "show_settings_list",
+        "show_text_input",
+        "show_toast",
+        "storage.delete",
+        "storage.get",
+        "storage.set"
+      ],
+      "events": [
+        "paused",
+        "resumed",
+        "stopped",
+        "suspending",
+        "system_resumed",
+        "track_started"
+      ],
+      "capabilities_checked": [
+        "data.json",
+        "network.http.async",
+        "storage.secrets",
+        "storage.secrets_get"
+      ],
+      "list_targets": [
+        "playback"
+      ],
+      "raw_io_os": [
+        "os.time"
+      ],
+      "dynamic_access": [],
+      "package": "ListenBrainzScrobbler",
+      "published": true,
+      "category": "Listening",
+      "description": "Scrobbles plays to ListenBrainz with a user token. Keeps an offline queue until each listen is accepted.",
+      "companion_destinations": [],
+      "script_bytes": 23596,
+      "script_sha256": "d61e18de24df808b2ab69316965af0cb6844756a45ed3ed1010dde768b54d904",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 15,
+      "references": [
+        "define",
+        "has_capability",
+        "list_dir",
+        "on",
+        "register_list_item",
+        "sd_root",
+        "show_list",
+        "show_lock_screen",
+        "show_settings_list",
+        "show_toast",
+        "storage.get",
+        "storage.set"
+      ],
+      "events": [
+        "screen_woke"
+      ],
+      "capabilities_checked": [
+        "ui.lock_screen"
+      ],
+      "list_targets": [
+        "display"
+      ],
+      "raw_io_os": [
+        "io.open"
+      ],
+      "dynamic_access": [],
+      "package": "LockScreen",
+      "published": true,
+      "category": "Customization",
+      "description": "A lock screen with album art, your own image or a clock when the screen wakes.",
+      "companion_destinations": [],
+      "script_bytes": 9185,
+      "script_sha256": "fc1fdfd34b8eab1962fd9b7f260f3e529c775c5653866ec900b406239812e3eb",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 16,
+      "references": [
+        "close_progress",
+        "define",
+        "get_current_track_path",
+        "get_now_playing",
+        "has_capability",
+        "http_request",
+        "json_decode",
+        "on",
+        "register_list_item",
+        "sd_root",
+        "set_interval",
+        "show_list",
+        "show_progress",
+        "show_settings_list",
+        "show_toast",
+        "update_progress"
+      ],
+      "events": [
+        "track_started"
+      ],
+      "capabilities_checked": [
+        "data.json",
+        "network.http.async",
+        "ui.progress"
+      ],
+      "list_targets": [
+        "music_library"
+      ],
+      "raw_io_os": [
+        "io.open",
+        "os.remove",
+        "os.rename",
+        "os.time"
+      ],
+      "dynamic_access": [],
+      "package": "LyricsFetcher",
+      "published": true,
+      "category": "Tools",
+      "description": "Fetch synced lyrics from LRCLIB and save missing .lrc sidecars. Manual lookup and optional automatic fetching for local tracks.",
+      "companion_destinations": [],
+      "script_bytes": 18226,
+      "script_sha256": "cb0271459b0af4b364683fc48d07b9510fa04cd346e537fb3011bd8cff57ddfe",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 16,
+      "references": [
+        "clear_ab_loop",
+        "clear_interval",
+        "define",
+        "get_ab_loop",
+        "get_crossfade",
+        "get_current_track_path",
+        "get_position",
+        "has_capability",
+        "is_paused",
+        "is_playing",
+        "mkdir",
+        "on",
+        "play_file",
+        "register_list_item",
+        "sd_root",
+        "seek",
+        "set_ab_loop",
+        "set_crossfade",
+        "set_interval",
+        "show_list",
+        "show_settings_list",
+        "show_toast",
+        "stop",
+        "storage",
+        "storage.delete",
+        "storage.get",
+        "storage.set"
+      ],
+      "events": [
+        "paused",
+        "resumed",
+        "stopped",
+        "track_started"
+      ],
+      "capabilities_checked": [
+        "playback.ab_loop",
+        "playback.stay_on_screen",
+        "ui.more_menu"
+      ],
+      "list_targets": [
+        "more",
+        "playback"
+      ],
+      "raw_io_os": [
+        "io.open",
+        "os.remove",
+        "os.rename",
+        "os.time"
+      ],
+      "dynamic_access": [
+        {
+          "line": 64,
+          "reason": "plugin.sd_root referenced without a call; inspect alias use"
+        },
+        {
+          "line": 84,
+          "reason": "plugin.storage table referenced indirectly"
+        },
+        {
+          "line": 91,
+          "reason": "plugin.storage table referenced indirectly"
+        },
+        {
+          "line": 96,
+          "reason": "plugin.storage table referenced indirectly"
+        },
+        {
+          "line": 316,
+          "reason": "plugin.get_current_track_path referenced without a call; inspect alias use"
+        },
+        {
+          "line": 434,
+          "reason": "plugin.get_current_track_path referenced without a call; inspect alias use"
+        },
+        {
+          "line": 690,
+          "reason": "plugin.get_current_track_path referenced without a call; inspect alias use"
+        },
+        {
+          "line": 693,
+          "reason": "plugin.get_ab_loop referenced without a call; inspect alias use"
+        }
+      ],
+      "package": "Metronome",
+      "published": true,
+      "category": "Audio",
+      "description": "Metronome with tempo, time signature, subdivision figures and three click sounds. It uses the player's own playback, so starting it replaces what is playing.",
+      "companion_destinations": [
+        ".plugins/Metronome.png"
+      ],
+      "script_bytes": 25748,
+      "script_sha256": "da1ac3e16ac7ec31b2becd25822ce8c83a43f3b2dcd6bef574fc61ab6ef17b8d",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 16,
+      "references": [
+        "define",
+        "eq_apply_profile",
+        "eq_apply_state",
+        "eq_load_profile",
+        "eq_save_profile",
+        "get_eq_state",
+        "get_mseb_state",
+        "has_capability",
+        "mseb_apply_state",
+        "register_list_item",
+        "register_quick_toggle",
+        "sd_root",
+        "set_quick_toggle",
+        "show_list",
+        "show_settings_list",
+        "show_text_input",
+        "show_toast"
+      ],
+      "events": [],
+      "capabilities_checked": [
+        "audio.crossfeed",
+        "audio.crossfeed.angle",
+        "audio.mseb.stock",
+        "audio.peq.state",
+        "audio.peq.transient",
+        "ui.quick_toggle",
+        "ui.settings_list_10_sliders"
+      ],
+      "list_targets": [
+        "music_audio"
+      ],
+      "raw_io_os": [
+        "io.open",
+        "os.remove",
+        "os.rename"
+      ],
+      "dynamic_access": [],
+      "package": "MSEB",
+      "published": true,
+      "category": "Audio",
+      "description": "Stock-style sound tuning with adjustment ranges and named presets. Uses native MSEB processing on compatible firmware.",
+      "companion_destinations": [],
+      "script_bytes": 49693,
+      "script_sha256": "968c020b54715398604c0b2bef714acabc896a3c3eea23ed77cfb34344e537e6",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 15,
+      "references": [
+        "define",
+        "http_request",
+        "json_decode",
+        "play_list",
+        "register_stream_media_tile",
+        "sd_root",
+        "show_list",
+        "show_text_input",
+        "show_toast"
+      ],
+      "events": [],
+      "capabilities_checked": [],
+      "list_targets": [],
+      "raw_io_os": [
+        "io.open"
+      ],
+      "dynamic_access": [],
+      "package": "NetRadio",
+      "published": true,
+      "category": "Listening",
+      "description": "Play saved internet radio stations from Radio.txt or search Radio Browser and save stations to the SD card.",
+      "companion_destinations": [
+        "Radio.txt"
+      ],
+      "script_bytes": 19996,
+      "script_sha256": "fa313e07454351bbc53668a7eb4528836c0dd5b8e88344ec48c9903865ca7eac",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 15,
+      "references": [
+        "define",
+        "has_capability",
+        "sd_root",
+        "set_player_layout",
+        "storage.get",
+        "storage.set"
+      ],
+      "events": [],
+      "capabilities_checked": [
+        "ui.player_layout_xml"
+      ],
+      "list_targets": [],
+      "raw_io_os": [
+        "io.open",
+        "os.remove"
+      ],
+      "dynamic_access": [],
+      "package": "OrbitPlayer",
+      "published": true,
+      "category": "Customization",
+      "description": "A dynamic Now Playing screen with circular artwork and a circular seek bar.",
+      "companion_destinations": [
+        ".plugins/OrbitPlayer/player_layouts/orbit_player.xml",
+        ".plugins/OrbitPlayer/player_layouts/orbit_player_320x480.xml",
+        ".plugins/OrbitPlayer/player_layouts/orbit_player_480x720.xml",
+        ".plugins/OrbitPlayer/player_layouts/orbit_player.png"
+      ],
+      "script_bytes": 1605,
+      "script_sha256": "201ef0622729105c3edc46618e7418a07e87646c31265a933bddc3163242e4db",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 16,
+      "references": [
+        "define",
+        "eq_apply_profile",
+        "eq_apply_state",
+        "get_eq_state",
+        "get_output_info",
+        "has_capability",
+        "json_decode",
+        "json_encode",
+        "list_dir",
+        "on",
+        "register_list_item",
+        "sd_root",
+        "show_list",
+        "show_settings_list",
+        "show_text_view",
+        "show_toast",
+        "storage",
+        "storage.get",
+        "storage.set"
+      ],
+      "events": [
+        "output_changed"
+      ],
+      "capabilities_checked": [
+        "audio.peq.state",
+        "audio.peq.transient",
+        "data.json",
+        "playback.output_info",
+        "storage.namespaced"
+      ],
+      "list_targets": [
+        "music_audio"
+      ],
+      "raw_io_os": [
+        "io.open"
+      ],
+      "dynamic_access": [
+        {
+          "line": 125,
+          "reason": "plugin.storage table referenced indirectly"
+        },
+        {
+          "line": 156,
+          "reason": "plugin.storage table referenced indirectly"
+        }
+      ],
+      "package": "OutputAwareSound",
+      "published": true,
+      "category": "Audio",
+      "description": "Applies parametric EQ profiles automatically based on output route and Bluetooth codec.",
+      "companion_destinations": [],
+      "script_bytes": 19231,
+      "script_sha256": "423235a2cf7ec724748c66cc6b7d46d6becfd96909e8a8d90b8ed9a47b075511",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 15,
+      "references": [
+        "define",
+        "has_capability",
+        "sd_root",
+        "set_player_layout",
+        "storage.get",
+        "storage.set"
+      ],
+      "events": [],
+      "capabilities_checked": [
+        "ui.player_layout_xml"
+      ],
+      "list_targets": [],
+      "raw_io_os": [
+        "io.open",
+        "os.remove"
+      ],
+      "dynamic_access": [],
+      "package": "PanoramaPlayer",
+      "published": true,
+      "category": "Customization",
+      "description": "A panoramic Now Playing screen with animated lyrics, waveform seeking, and a soft artwork fade.",
+      "companion_destinations": [
+        ".plugins/PanoramaPlayer/player_layouts/panorama_player.xml",
+        ".plugins/PanoramaPlayer/player_layouts/panorama_player_320x480.xml",
+        ".plugins/PanoramaPlayer/player_layouts/panorama_player_480x720.xml",
+        ".plugins/PanoramaPlayer/player_layouts/panorama_player.png"
+      ],
+      "script_bytes": 1645,
+      "script_sha256": "02b38461010143e464dd386e2b3ac127faf8442b754d04629f147a2ad33ea768",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 13,
+      "references": [
+        "define",
+        "eq_load_profile",
+        "eq_save_profile",
+        "get_mseb_state",
+        "has_capability",
+        "register_list_item",
+        "sd_root",
+        "show_settings_list",
+        "show_toast"
+      ],
+      "events": [],
+      "capabilities_checked": [
+        "audio.mseb.stock"
+      ],
+      "list_targets": [
+        "music_audio"
+      ],
+      "raw_io_os": [
+        "io.open",
+        "os.remove",
+        "os.rename"
+      ],
+      "dynamic_access": [],
+      "package": "PlaybackExtras",
+      "published": true,
+      "category": "Audio",
+      "description": "Loudness Boost: raises the volume with a preamp boost, and restores your EQ when it is turned off.",
+      "companion_destinations": [],
+      "script_bytes": 8325,
+      "script_sha256": "025ef98a6ba53836aae5268e71315af7a3d45b92cc54602506b2f826be9e7a5c",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 13,
+      "references": [
+        "define",
+        "get_album_tracks",
+        "get_current_track_path",
+        "get_next_album_tracks",
+        "get_now_playing",
+        "get_play_mode",
+        "is_paused",
+        "is_playing",
+        "list_dir",
+        "on",
+        "play_list",
+        "register_list_item",
+        "sd_root",
+        "set_interval",
+        "show_list",
+        "show_settings_list",
+        "show_toast"
+      ],
+      "events": [
+        "queue_exhausted",
+        "resumed",
+        "stopped",
+        "track_started"
+      ],
+      "capabilities_checked": [],
+      "list_targets": [
+        "playback"
+      ],
+      "raw_io_os": [
+        "io.open",
+        "os.rename"
+      ],
+      "dynamic_access": [],
+      "package": "PlayThrough",
+      "published": true,
+      "category": "Listening",
+      "description": "Keeps playing the next album or folder when the current one ends.",
+      "companion_destinations": [],
+      "script_bytes": 8846,
+      "script_sha256": "8ad8eef89ec46f4002ead60318335dadc8d42945865fe19cf56533ea1fe05a50",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 16,
+      "references": [
+        "cancel",
+        "close_progress",
+        "define",
+        "download_file_async",
+        "get_current_track_path",
+        "get_download_progress",
+        "get_duration",
+        "get_position",
+        "has_capability",
+        "http_request",
+        "is_paused",
+        "is_playing",
+        "json_decode",
+        "list_dir",
+        "md5",
+        "mkdir",
+        "on",
+        "open_file_manager",
+        "play_file",
+        "register_stream_media_tile",
+        "sd_root",
+        "seek",
+        "set_interval",
+        "set_playback_speed",
+        "show_list",
+        "show_progress",
+        "show_settings_list",
+        "show_text_input",
+        "show_toast",
+        "update_progress"
+      ],
+      "events": [
+        "paused",
+        "stopped",
+        "track_started"
+      ],
+      "capabilities_checked": [
+        "filesystem.mkdir",
+        "network.http.async",
+        "network.http.download",
+        "network.http.download_progress",
+        "playback.speed",
+        "ui.file_manager",
+        "ui.list_wrap",
+        "ui.progress"
+      ],
+      "list_targets": [],
+      "raw_io_os": [
+        "io.open",
+        "os.date",
+        "os.remove",
+        "os.rename",
+        "os.time"
+      ],
+      "dynamic_access": [],
+      "package": "Podcasts",
+      "published": true,
+      "category": "Listening",
+      "description": "Search and subscribe to podcasts, manage downloads with File Manager, and resume where you left off.",
+      "companion_destinations": [
+        ".plugin-assets/Podcasts/show.png",
+        ".plugin-assets/Podcasts/download.png",
+        ".plugin-assets/Podcasts/search.png",
+        ".plugin-assets/Podcasts/manage.png",
+        ".plugin-assets/Podcasts/play.png",
+        ".plugin-assets/Podcasts/refresh.png",
+        ".plugin-assets/Podcasts/remove.png",
+        ".plugin-assets/Podcasts/check.png",
+        ".plugin-assets/Podcasts/link.png"
+      ],
+      "script_bytes": 94720,
+      "script_sha256": "e14d5a4b291aab8bdcb2bcf0382b27ee96a7059a97cd61deb8198974a063d2e5",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 14,
+      "references": [
+        "define",
+        "has_capability",
+        "http_request",
+        "is_list_showing",
+        "json_decode",
+        "md5",
+        "play_remote",
+        "queue_remote_list",
+        "register_stream_media_tile",
+        "show_list",
+        "show_text_input",
+        "show_toast",
+        "storage.delete",
+        "storage.get",
+        "storage.set"
+      ],
+      "events": [],
+      "capabilities_checked": [
+        "playback.remote"
+      ],
+      "list_targets": [],
+      "raw_io_os": [
+        "os.time"
+      ],
+      "dynamic_access": [],
+      "package": "Qobuz",
+      "published": true,
+      "category": "Experimental",
+      "description": "Beta. Qobuz for a paid account. Sign in with your email and password.",
+      "companion_destinations": [],
+      "script_bytes": 29725,
+      "script_sha256": "47d39640168ab8576da007bef975839a6b53d25d06a36d41f56fe91e0593f2f0",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 15,
+      "references": [
+        "define",
+        "http_request",
+        "json_decode",
+        "play_list",
+        "register_stream_media_tile",
+        "sd_root",
+        "show_list",
+        "show_text_input",
+        "show_toast"
+      ],
+      "events": [],
+      "capabilities_checked": [],
+      "list_targets": [],
+      "raw_io_os": [
+        "io.open"
+      ],
+      "dynamic_access": [],
+      "package": "RadioBrowser",
+      "published": false,
+      "category": "Listening",
+      "description": "Merged into Net Radio. Existing users should disable or remove the old Radio Browser plugin and refresh plugins; keep Radio.txt.",
+      "companion_destinations": [],
+      "script_bytes": 19546,
+      "script_sha256": "4d6559440b0aa1e3eeaa45edc1d176116f6ac1aa45846d2538b5297306f3659b",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 13,
+      "references": [
+        "define",
+        "eq_load_profile",
+        "eq_reset",
+        "register_list_item",
+        "sd_root",
+        "show_list",
+        "show_toast"
+      ],
+      "events": [],
+      "capabilities_checked": [],
+      "list_targets": [
+        "music_audio"
+      ],
+      "raw_io_os": [
+        "io.open",
+        "os.remove",
+        "os.rename"
+      ],
+      "dynamic_access": [],
+      "package": "SoundProfiles",
+      "published": true,
+      "category": "Audio",
+      "description": "Saves and switches between parametric EQ profiles.",
+      "companion_destinations": [],
+      "script_bytes": 5731,
+      "script_sha256": "fa086cbb0d899d77d504e7b37f30f3730bcee89ecb1951b6096d8cd86d41c334",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 16,
+      "references": [
+        "close_progress",
+        "define",
+        "has_capability",
+        "has_startup_image",
+        "image_startup_async",
+        "is_list_showing",
+        "mkdir",
+        "pick_file",
+        "register_list_item",
+        "sd_root",
+        "set_startup_image_async",
+        "show_list",
+        "show_progress",
+        "show_toast"
+      ],
+      "events": [],
+      "capabilities_checked": [
+        "ui.file_picker",
+        "ui.list_showing",
+        "ui.list_update",
+        "ui.list_wrap",
+        "ui.progress",
+        "ui.startup_image"
+      ],
+      "list_targets": [
+        "display"
+      ],
+      "raw_io_os": [],
+      "dynamic_access": [],
+      "package": "StartupImage",
+      "published": true,
+      "category": "Customization",
+      "description": "Choose a JPG, PNG, or BMP up to 3 MB for the device startup splash. Changes apply on the next boot.",
+      "companion_destinations": [],
+      "script_bytes": 7745,
+      "script_sha256": "1a521914e7f8bbdcbb3755316ca688f1e60697c241b364e8d77f7cca16204613",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 9,
+      "references": [
+        "define"
+      ],
+      "events": [],
+      "capabilities_checked": [],
+      "list_targets": [],
+      "raw_io_os": [],
+      "dynamic_access": [],
+      "package": "ThemeArcticGlass",
+      "published": true,
+      "category": "Customization",
+      "description": "Icy blue and white surfaces with deep blue text.",
+      "companion_destinations": [
+        "Themes/ArcticGlass.theme",
+        "Themes/ArcticGlass.png"
+      ],
+      "script_bytes": 112,
+      "script_sha256": "60a55d59fdefc2c64dddf44e5acd3d9e23aed8b05426c7dbcda6917472a7d59c",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 9,
+      "references": [
+        "define"
+      ],
+      "events": [],
+      "capabilities_checked": [],
+      "list_targets": [],
+      "raw_io_os": [],
+      "dynamic_access": [],
+      "package": "ThemeBrassStudio",
+      "published": true,
+      "category": "Customization",
+      "description": "Warm brass accents over dark studio graphite.",
+      "companion_destinations": [
+        "Themes/BrassStudio.theme",
+        "Themes/BrassStudio.png"
+      ],
+      "script_bytes": 112,
+      "script_sha256": "6d3d9ec58fa8549062f5ec7d6a29b38d79857b4663edb5eb6e6151d33b4890dc",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 9,
+      "references": [
+        "define"
+      ],
+      "events": [],
+      "capabilities_checked": [],
+      "list_targets": [],
+      "raw_io_os": [],
+      "dynamic_access": [],
+      "package": "ThemeCherryNoir",
+      "published": true,
+      "category": "Customization",
+      "description": "Dark cherry surfaces with soft rose highlights.",
+      "companion_destinations": [
+        "Themes/CherryNoir.theme",
+        "Themes/CherryNoir.png"
+      ],
+      "script_bytes": 110,
+      "script_sha256": "339994fe6320631f4b8201359f3b3e11f27e8eb5ff34858684d391599a15e65b",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 9,
+      "references": [
+        "define"
+      ],
+      "events": [],
+      "capabilities_checked": [],
+      "list_targets": [],
+      "raw_io_os": [],
+      "dynamic_access": [],
+      "package": "ThemeCitrusSlate",
+      "published": true,
+      "category": "Customization",
+      "description": "Cool slate with bright citrus accents.",
+      "companion_destinations": [
+        "Themes/CitrusSlate.theme",
+        "Themes/CitrusSlate.png"
+      ],
+      "script_bytes": 112,
+      "script_sha256": "16d8d23004eba1fee5b20ff428529af1f021348ac4ee83bbf9857cdc2fc861d8",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 9,
+      "references": [
+        "define"
+      ],
+      "events": [],
+      "capabilities_checked": [],
+      "list_targets": [],
+      "raw_io_os": [],
+      "dynamic_access": [],
+      "package": "ThemeCobaltSignal",
+      "published": true,
+      "category": "Customization",
+      "description": "Deep navy surfaces with vivid cobalt accents.",
+      "companion_destinations": [
+        "Themes/CobaltSignal.theme",
+        "Themes/CobaltSignal.png"
+      ],
+      "script_bytes": 114,
+      "script_sha256": "58268ae148c4fda4a4bd71462582aee671fb3b2ddc0741d0f60723ad839e2f74",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 9,
+      "references": [
+        "define"
+      ],
+      "events": [],
+      "capabilities_checked": [],
+      "list_targets": [],
+      "raw_io_os": [],
+      "dynamic_access": [],
+      "package": "ThemeEarthy",
+      "published": true,
+      "category": "Customization",
+      "description": "Rustic clay, moss, and bark tones.",
+      "companion_destinations": [
+        "Themes/Earthy.theme",
+        "Themes/Earthy.png"
+      ],
+      "script_bytes": 100,
+      "script_sha256": "129d605999598132c704b46ef1b85169ae3405f4f5f4b320f10eff5de02398bb",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 9,
+      "references": [
+        "define"
+      ],
+      "events": [],
+      "capabilities_checked": [],
+      "list_targets": [],
+      "raw_io_os": [],
+      "dynamic_access": [],
+      "package": "ThemeGameBoy",
+      "published": true,
+      "category": "Customization",
+      "description": "Navy pixel-menu surfaces with crisp light text.",
+      "companion_destinations": [
+        "Themes/GameBoy.theme",
+        "Themes/GameBoy.png"
+      ],
+      "script_bytes": 104,
+      "script_sha256": "3ba142a523e61589c4ee0d096e5d34f96de68460ced9c2d6e40ec171618021fe",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 9,
+      "references": [
+        "define"
+      ],
+      "events": [],
+      "capabilities_checked": [],
+      "list_targets": [],
+      "raw_io_os": [],
+      "dynamic_access": [],
+      "package": "ThemeMidnightIndigo",
+      "published": true,
+      "category": "Customization",
+      "description": "Deep indigo surfaces with lilac highlights.",
+      "companion_destinations": [
+        "Themes/MidnightIndigo.theme",
+        "Themes/MidnightIndigo.png"
+      ],
+      "script_bytes": 118,
+      "script_sha256": "3647a1b585123b26d1a1b1a766f6f873c30184d8f94ac40632c0af9a36161dcd",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 9,
+      "references": [
+        "define"
+      ],
+      "events": [],
+      "capabilities_checked": [],
+      "list_targets": [],
+      "raw_io_os": [],
+      "dynamic_access": [],
+      "package": "ThemeMonastic",
+      "published": true,
+      "category": "Customization",
+      "description": "Quiet stone and undyed-wool neutrals.",
+      "companion_destinations": [
+        "Themes/Monastic.theme",
+        "Themes/Monastic.png"
+      ],
+      "script_bytes": 104,
+      "script_sha256": "0e95821addfe39bf54ac0076cbb1dcc7664a24014e930a9137594267874e29ba",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 9,
+      "references": [
+        "define"
+      ],
+      "events": [],
+      "capabilities_checked": [],
+      "list_targets": [],
+      "raw_io_os": [],
+      "dynamic_access": [],
+      "package": "ThemeMountainSunset",
+      "published": true,
+      "category": "Customization",
+      "description": "Dusk purples with warm sunset accents.",
+      "companion_destinations": [
+        "Themes/MountainSunset.theme",
+        "Themes/MountainSunset.png"
+      ],
+      "script_bytes": 118,
+      "script_sha256": "09c23d8ba40a7a043af49aa141bfee685ec952a362c67704995d76100a2cab5d",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 9,
+      "references": [
+        "define"
+      ],
+      "events": [],
+      "capabilities_checked": [],
+      "list_targets": [],
+      "raw_io_os": [],
+      "dynamic_access": [],
+      "package": "ThemeObsidianAudio",
+      "published": true,
+      "category": "Customization",
+      "description": "High-contrast graphite with restrained cyan accents.",
+      "companion_destinations": [
+        "Themes/ObsidianAudio.theme",
+        "Themes/ObsidianAudio.png"
+      ],
+      "script_bytes": 116,
+      "script_sha256": "c486397a7ed23ed2ccc3f062676b633cb7437e2a32cf542b33a60bec648eae65",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 9,
+      "references": [
+        "define"
+      ],
+      "events": [],
+      "capabilities_checked": [],
+      "list_targets": [],
+      "raw_io_os": [],
+      "dynamic_access": [],
+      "package": "ThemePorcelain",
+      "published": true,
+      "category": "Customization",
+      "description": "Clean ivory surfaces with blue-gray labels.",
+      "companion_destinations": [
+        "Themes/Porcelain.theme",
+        "Themes/Porcelain.png"
+      ],
+      "script_bytes": 106,
+      "script_sha256": "4c9ecbfac88765a6c016692d6a6fc99ad464fab39e315d574832b3ebeeae1a36",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 9,
+      "references": [
+        "define"
+      ],
+      "events": [],
+      "capabilities_checked": [],
+      "list_targets": [],
+      "raw_io_os": [],
+      "dynamic_access": [],
+      "package": "ThemeRetro",
+      "published": true,
+      "category": "Customization",
+      "description": "Cream, amber, and brown in a chunky 80s style.",
+      "companion_destinations": [
+        "Themes/Retro.theme",
+        "Themes/Retro.png"
+      ],
+      "script_bytes": 98,
+      "script_sha256": "781a8927d0f23bf2b638573ce1aebeaab9282d057f33951beb601d82cd020c0f",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 9,
+      "references": [
+        "define"
+      ],
+      "events": [],
+      "capabilities_checked": [],
+      "list_targets": [],
+      "raw_io_os": [],
+      "dynamic_access": [],
+      "package": "ThemeRoseQuartz",
+      "published": true,
+      "category": "Customization",
+      "description": "Soft rose and ivory with muted berry text.",
+      "companion_destinations": [
+        "Themes/RoseQuartz.theme",
+        "Themes/RoseQuartz.png"
+      ],
+      "script_bytes": 110,
+      "script_sha256": "e35d04f0d2454653a952b086da6bd792dd3a039b29a4d5c9863467b75d9edfdb",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 9,
+      "references": [
+        "define",
+        "list_dir",
+        "refresh_theme",
+        "register_list_item",
+        "sd_root",
+        "set_background_color",
+        "set_home_layout",
+        "set_icon",
+        "set_launcher_layout",
+        "set_text_color",
+        "show_list",
+        "show_toast"
+      ],
+      "events": [],
+      "capabilities_checked": [],
+      "list_targets": [
+        "display"
+      ],
+      "raw_io_os": [
+        "io.open"
+      ],
+      "dynamic_access": [],
+      "package": "Themes",
+      "published": false,
+      "category": "Customization",
+      "description": "Legacy theme bundle. Download individual theme packages for themes and their screenshots.",
+      "companion_destinations": [],
+      "script_bytes": 34824,
+      "script_sha256": "7ec8f7b80900a3b97fa51d1234317f744fe622454e2f1caa24797420186464b1",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 9,
+      "references": [
+        "define"
+      ],
+      "events": [],
+      "capabilities_checked": [],
+      "list_targets": [],
+      "raw_io_os": [],
+      "dynamic_access": [],
+      "package": "ThemeScreenshots",
+      "published": false,
+      "category": "Customization",
+      "description": "Installs 21 theme previews for the Themes picker.",
+      "companion_destinations": [],
+      "script_bytes": 116,
+      "script_sha256": "5fa827a6633da9d0d200663d2b8e3cc0105971e3f2b8a567d89522051447ee05",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 9,
+      "references": [
+        "define"
+      ],
+      "events": [],
+      "capabilities_checked": [],
+      "list_targets": [],
+      "raw_io_os": [],
+      "dynamic_access": [],
+      "package": "ThemeSwamp",
+      "published": true,
+      "category": "Customization",
+      "description": "Murky greens with earthy dark surfaces.",
+      "companion_destinations": [
+        "Themes/Swamp.theme",
+        "Themes/Swamp.png"
+      ],
+      "script_bytes": 98,
+      "script_sha256": "f89a612d6cbd29137f932fc99f53706da6234d01596245a2a20b91edb2a59c55",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 9,
+      "references": [
+        "define"
+      ],
+      "events": [],
+      "capabilities_checked": [],
+      "list_targets": [],
+      "raw_io_os": [],
+      "dynamic_access": [],
+      "package": "ThemeTerminal",
+      "published": true,
+      "category": "Customization",
+      "description": "Green-on-black CRT-inspired surfaces.",
+      "companion_destinations": [
+        "Themes/Terminal.theme",
+        "Themes/Terminal.png"
+      ],
+      "script_bytes": 104,
+      "script_sha256": "ebf16c93d2cabeffacfba757a689c43ee99897e8f79bcc1b1d2c39b9d64720c1",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 9,
+      "references": [
+        "define"
+      ],
+      "events": [],
+      "capabilities_checked": [],
+      "list_targets": [],
+      "raw_io_os": [],
+      "dynamic_access": [],
+      "package": "ThemeTrees",
+      "published": true,
+      "category": "Customization",
+      "description": "Forest greens with warm natural highlights.",
+      "companion_destinations": [
+        "Themes/Trees.theme",
+        "Themes/Trees.png"
+      ],
+      "script_bytes": 98,
+      "script_sha256": "22cf267c07f6bbc6d33e8d599099ad0f0fab4969588eadba0c009f2955b1d18f",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 9,
+      "references": [
+        "define"
+      ],
+      "events": [],
+      "capabilities_checked": [],
+      "list_targets": [],
+      "raw_io_os": [],
+      "dynamic_access": [],
+      "package": "ThemeVaporwave",
+      "published": true,
+      "category": "Customization",
+      "description": "Deep purple surfaces with hot-pink synthwave accents.",
+      "companion_destinations": [
+        "Themes/Vaporwave.theme",
+        "Themes/Vaporwave.png"
+      ],
+      "script_bytes": 106,
+      "script_sha256": "71ec2dd2a06232cc10d64024b001aef3e9252028d2c2e23be69f671ed26c1d22",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 9,
+      "references": [
+        "define"
+      ],
+      "events": [],
+      "capabilities_checked": [],
+      "list_targets": [],
+      "raw_io_os": [],
+      "dynamic_access": [],
+      "package": "ThemeWavy",
+      "published": true,
+      "category": "Customization",
+      "description": "Layered ocean blues with cool pale text.",
+      "companion_destinations": [
+        "Themes/Wavy.theme",
+        "Themes/Wavy.png"
+      ],
+      "script_bytes": 96,
+      "script_sha256": "f41350f6d3637e6dd573327cd46ae52bf9b9589d8de10b80fd502ebebc71434b",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 9,
+      "references": [
+        "define"
+      ],
+      "events": [],
+      "capabilities_checked": [],
+      "list_targets": [],
+      "raw_io_os": [],
+      "dynamic_access": [],
+      "package": "ThemeWhite",
+      "published": true,
+      "category": "Customization",
+      "description": "Soft blue-white surfaces with deep blue text.",
+      "companion_destinations": [
+        "Themes/White.theme",
+        "Themes/White.png"
+      ],
+      "script_bytes": 98,
+      "script_sha256": "b6ccb75038bd0f85127a71d87ed47c1c48363ef16bc4ccb814a577ffc22b0158",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 9,
+      "references": [
+        "define"
+      ],
+      "events": [],
+      "capabilities_checked": [],
+      "list_targets": [],
+      "raw_io_os": [],
+      "dynamic_access": [],
+      "package": "ThemeZenTerracotta",
+      "published": true,
+      "category": "Customization",
+      "description": "Warm terracotta with calm earthy neutrals.",
+      "companion_destinations": [
+        "Themes/ZenTerracotta.theme",
+        "Themes/ZenTerracotta.png"
+      ],
+      "script_bytes": 116,
+      "script_sha256": "3ea56c450c7c9e6a0b685ce0e31cc3c25ab7bb44df06dd08aab0741cad77f5a7",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 14,
+      "references": [
+        "clear_interval",
+        "define",
+        "has_capability",
+        "http_request",
+        "is_list_showing",
+        "json_decode",
+        "play_remote",
+        "queue_remote_list",
+        "register_stream_media_tile",
+        "set_interval",
+        "show_list",
+        "show_text_input",
+        "show_text_view",
+        "show_toast",
+        "storage.delete",
+        "storage.get",
+        "storage.set"
+      ],
+      "events": [],
+      "capabilities_checked": [
+        "playback.remote"
+      ],
+      "list_targets": [],
+      "raw_io_os": [
+        "os.time"
+      ],
+      "dynamic_access": [],
+      "package": "Tidal",
+      "published": true,
+      "category": "Experimental",
+      "description": "Beta. Tidal for a paid account. Sign in with a code on your phone.",
+      "companion_destinations": [],
+      "script_bytes": 36108,
+      "script_sha256": "c65f13ca27f88e899b0b5ae243e2e5aecc1e0ef94907af2ceb913d1046988f61",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 16,
+      "references": [
+        "define",
+        "get_eq_state",
+        "get_mseb_state",
+        "get_output_info",
+        "get_playback_format",
+        "get_track_metadata",
+        "has_capability",
+        "pick_file",
+        "register_list_item",
+        "sd_root",
+        "show_list",
+        "show_settings_list",
+        "show_toast",
+        "storage",
+        "storage.get",
+        "storage.set"
+      ],
+      "events": [],
+      "capabilities_checked": [
+        "audio.peq.state",
+        "library.track_metadata",
+        "playback.format",
+        "playback.output_info",
+        "storage.namespaced",
+        "ui.file_picker",
+        "ui.player_menu"
+      ],
+      "list_targets": [],
+      "raw_io_os": [
+        "io.open"
+      ],
+      "dynamic_access": [
+        {
+          "line": 22,
+          "reason": "plugin.storage table referenced indirectly"
+        },
+        {
+          "line": 31,
+          "reason": "plugin.storage table referenced indirectly"
+        },
+        {
+          "line": 836,
+          "reason": "computed plugin table access; inspect manually"
+        },
+        {
+          "line": 844,
+          "reason": "computed plugin table access; inspect manually"
+        }
+      ],
+      "package": "TrackInspector",
+      "published": true,
+      "category": "Audio",
+      "description": "Shows current track metadata, source format and quality, output route, sound processing, and an explanation of changes to the audio. It can inspect local WAV, FLAC, and AIFF headers.",
+      "companion_destinations": [],
+      "script_bytes": 66918,
+      "script_sha256": "01b5ab890af55eb11b918ac64ce19fb4af9f3ec43a645074ed5ed36d870361d4",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 15,
+      "references": [
+        "define",
+        "has_capability",
+        "sd_root",
+        "set_player_layout",
+        "storage.get",
+        "storage.set"
+      ],
+      "events": [],
+      "capabilities_checked": [
+        "ui.player_layout_xml"
+      ],
+      "list_targets": [],
+      "raw_io_os": [
+        "io.open",
+        "os.remove"
+      ],
+      "dynamic_access": [],
+      "package": "VinylPlayer",
+      "published": true,
+      "category": "Customization",
+      "description": "A vinyl-inspired Now Playing screen with an envelope waveform seek bar and standard playback controls.",
+      "companion_destinations": [
+        ".plugins/VinylPlayer/player_layouts/vinyl_player.xml",
+        ".plugins/VinylPlayer/player_layouts/vinyl_player_320x480.xml",
+        ".plugins/VinylPlayer/player_layouts/vinyl_player_480x720.xml",
+        ".plugins/VinylPlayer/player_layouts/vinyl_player.png"
+      ],
+      "script_bytes": 1632,
+      "script_sha256": "6c62096382820500c0b0335ca3a6efad7d3090f271e8b3445117c2742cda2823",
+      "unregistered_direct_references": []
+    },
+    {
+      "api_min_literal": 16,
+      "references": [
+        "define",
+        "get_volume",
+        "has_capability",
+        "json_decode",
+        "json_encode",
+        "on",
+        "register_list_item",
+        "set_volume",
+        "show_list",
+        "show_settings_list",
+        "show_toast",
+        "storage",
+        "storage.get",
+        "storage.set"
+      ],
+      "events": [
+        "volume_changed"
+      ],
+      "capabilities_checked": [
+        "playback.silent_volume",
+        "playback.transient_volume"
+      ],
+      "list_targets": [
+        "music_audio"
+      ],
+      "raw_io_os": [],
+      "dynamic_access": [
+        {
+          "line": 43,
+          "reason": "plugin.storage table referenced indirectly"
+        },
+        {
+          "line": 60,
+          "reason": "plugin.storage table referenced indirectly"
+        }
+      ],
+      "package": "VolumeLimiter",
+      "published": true,
+      "category": "Audio",
+      "description": "Sets a software maximum volume ceiling and quietly clamps playback volume without intrusive popups.",
+      "companion_destinations": [],
+      "script_bytes": 6997,
+      "script_sha256": "96657b5a0ba05edfe0dcd34ea1815f0fb1c4886662c3a05fb5e1703a32520935",
+      "unregistered_direct_references": []
+    }
+  ]
+}
