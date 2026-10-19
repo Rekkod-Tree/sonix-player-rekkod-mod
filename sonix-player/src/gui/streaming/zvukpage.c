@@ -51,8 +51,9 @@
 #define MAX_ROWS 150
 #define SLOT_COUNT 24
 #define ARTIST_TRACKS 20
+#define BROWSE_BOOKS_PAGE 20
 
-typedef enum { ROW_TRACK, ROW_ALBUM, ROW_ARTIST, ROW_PLAYLIST, ROW_BOOK, ROW_PODCAST } row_kind_t;
+typedef enum { ROW_TRACK, ROW_ALBUM, ROW_ARTIST, ROW_PLAYLIST, ROW_BOOK, ROW_PODCAST, ROW_MORE } row_kind_t;
 
 typedef struct {
 	row_kind_t kind;
@@ -76,7 +77,9 @@ typedef enum {
 	JOB_BOOK,
 	JOB_PODCAST,
 	JOB_ARTIST,
-	JOB_SEARCH, // `n`: the kind (zvuk_search_kind_t)
+	JOB_SEARCH,		  // `n`: the kind (zvuk_search_kind_t)
+	JOB_BROWSE_BOOKS, // `n`: offset, `b`: children or empty
+	JOB_BROWSE_PICKS,
 	// one page of the list on screen
 	JOB_PAGE,
 	// in order, none dropped: a like (`n` 1/0, `b` the kind), an album queued
@@ -208,6 +211,9 @@ static void add_row(row_kind_t kind, const void *what) {
 	case ROW_PLAYLIST:
 		r->u.playlist = *(const zvuk_playlist_t *)what;
 		break;
+	case ROW_MORE:
+		memset(&r->u, 0, sizeof(r->u));
+		break;
 	}
 }
 
@@ -292,6 +298,23 @@ static void run_list_job(const job_t *job) {
 		for (int i = 0; i < got; i++) {
 			add_row(ROW_PLAYLIST, &p[i]);
 		}
+		break;
+	}
+	case JOB_BROWSE_PICKS: {
+		zvuk_playlist_t *p = tmp;
+		got = zvuk_recommended_playlists(p, 50);
+		for (int i = 0; i < got; i++)
+			add_row(ROW_PLAYLIST, &p[i]);
+		break;
+	}
+	case JOB_BROWSE_BOOKS: {
+		zvuk_album_t *books = tmp;
+		bool more = false;
+		got = zvuk_recommended_books(!strcmp(job->b, "children"), job->n, books, BROWSE_BOOKS_PAGE, &more);
+		for (int i = 0; i < got; i++)
+			add_row(ROW_BOOK, &books[i]);
+		if (got >= 0 && more)
+			add_row(ROW_MORE, NULL);
 		break;
 	}
 	case JOB_ARTIST: {
@@ -470,6 +493,7 @@ static lv_obj_t *list_title, *list_box, *list_spin, *list_message, *list_error;
 static lv_obj_t *album_bar, *album_state_label, *album_btn_label;
 static lv_obj_t *artist_bar, *artist_like_label;
 static lv_obj_t *search_bar, *search_pills[ZVUK_SEARCH_KINDS];
+static lv_obj_t *books_bar, *books_pills[2];
 static svclist_t *list;
 static job_kind_t list_kind;
 static job_result_t *shown;
@@ -522,6 +546,10 @@ static bool row_saved(const row_t *r) {
 
 static void row_texts(const row_t *r, char *name, size_t ns, char *detail, size_t ds) {
 	switch (r->kind) {
+	case ROW_MORE:
+		snprintf(name, ns, "%s", tr("svc_browse_next"));
+		detail[0] = '\0';
+		break;
 	case ROW_TRACK:
 		snprintf(name, ns, "%s", r->u.track.title);
 		snprintf(detail, ds, "%s", r->u.track.artist);
@@ -668,6 +696,13 @@ static void list_bind(lv_obj_t *row, int index) {
 		first_char(r.u.playlist.title, letter, sizeof(letter));
 		sx_row_set_subtitle(row, detail, NULL, NULL);
 		sx_row_set_letter(row, letter, svcui_tone(r.u.playlist.title), false);
+		sx_row_set_trail(row, SX_ROW_TRAIL_CHEVRON);
+		sx_row_set_swipes(row, false, false);
+		break;
+	case ROW_MORE:
+		streamrowart_forget(row);
+		sx_row_set_subtitle(row, "", NULL, NULL);
+		sx_row_set_no_lead(row);
 		sx_row_set_trail(row, SX_ROW_TRAIL_CHEVRON);
 		sx_row_set_swipes(row, false, false);
 		break;
@@ -875,8 +910,14 @@ static void show_list(const list_step_t *step) {
 		artist_bar_refresh();
 	}
 	bool is_search = step->kind == JOB_SEARCH;
+	bool is_books = step->kind == JOB_BROWSE_BOOKS;
 	if (is_search) {
 		paint_search_pills(step->n);
+	}
+	if (is_books) {
+		bool children = !strcmp(step->b, "children");
+		for (int i = 0; i < 2; i++)
+			sx_pill_set_active(books_pills[i], i == (int)children);
 	}
 	lv_obj_set_hidden(album_bar, !is_album);
 	if (is_album) {
@@ -886,7 +927,8 @@ static void show_list(const list_step_t *step) {
 	}
 	lv_obj_set_hidden(artist_bar, !is_artist);
 	lv_obj_set_hidden(search_bar, !is_search);
-	place_list(is_album || is_artist || is_search ? 72 : 0);
+	lv_obj_set_hidden(books_bar, !is_books);
+	place_list(is_album || is_artist || is_search || is_books ? 72 : 0);
 	streamrowart_reset(list_box);
 	svclist_set_count(list, 0, false);
 	lv_obj_set_hidden(list_message, true);
@@ -937,6 +979,7 @@ static void fill_list(void) {
 		lv_obj_set_hidden(album_bar, true);
 		lv_obj_set_hidden(artist_bar, true);
 		lv_obj_set_hidden(search_bar, true);
+		lv_obj_set_hidden(books_bar, true);
 		// Open the existing file-import instructions when the session expires.
 		const char *text = shown->error_class == STREAM_ERR_SIGN_IN && zvuk_session_expired() ? tr("zvuk_token_expired") : shown->error;
 		streamerror_show(list_error, shown->error_class, text, retry_list, error_sign_in);
@@ -1028,6 +1071,10 @@ static void list_tap(lv_obj_t *row, void *user) {
 	switch (r.kind) {
 	case ROW_TRACK:
 		play_rows(index);
+		break;
+	case ROW_MORE:
+		if (list_current.kind == JOB_BROWSE_BOOKS)
+			open_list(list_current.title, JOB_BROWSE_BOOKS, NULL, list_current.b, list_current.n + BROWSE_BOOKS_PAGE);
 		break;
 	case ROW_ALBUM:
 		open_list(r.u.album.title, list_kind == JOB_SAVED ? JOB_SAVED_ALBUM : JOB_ALBUM, r.u.album.id, NULL, 0);
@@ -1285,6 +1332,8 @@ static void list_hold(lv_obj_t *row, void *user) {
 	if (index < 0 || !view_row(index, &menu_row)) {
 		return;
 	}
+	if (menu_row.kind == ROW_MORE)
+		return;
 	if (menu_row.kind == ROW_PODCAST) {
 		list_tap(row, user);
 		return; // A show is opened, never bulk-downloaded as an archive.
@@ -1333,6 +1382,7 @@ static void list_hold(lv_obj_t *row, void *user) {
 		break;
 	case ROW_BOOK:
 	case ROW_PODCAST:
+	case ROW_MORE:
 		break;
 	}
 	if (menu_row.kind != ROW_TRACK) {
@@ -1436,6 +1486,17 @@ static void search_pill_cb(lv_event_t *e) {
 	show_list(&list_current);
 }
 
+static void books_pill_cb(lv_event_t *e) {
+	if (switcher_back_drag_active() || list_current.kind != JOB_BROWSE_BOOKS)
+		return;
+	bool children = (intptr_t)lv_event_get_user_data(e) != 0;
+	if (children == (!strcmp(list_current.b, "children")))
+		return;
+	snprintf(list_current.b, sizeof(list_current.b), "%s", children ? "children" : "");
+	list_current.n = 0;
+	show_list(&list_current);
+}
+
 static void open_saved(void) { open_list(tr("zvuk_saved_on_card"), JOB_SAVED, NULL, NULL, 0); }
 
 static void list_loaded_cb(lv_event_t *e) {
@@ -1527,6 +1588,12 @@ static void build_list_page(gui_config_t *cfg) {
 	for (int i = 0; i < ZVUK_SEARCH_KINDS; i++) {
 		search_pills[i] = sx_pill(search_bar, tr(KINDS[i]), i, search_pill_cb);
 	}
+	books_bar = bar_create(list_screen, LV_FLEX_ALIGN_START);
+	lv_obj_set_scrollable(books_bar, true);
+	lv_obj_set_scroll_dir(books_bar, LV_DIR_HOR);
+	lv_obj_set_scrollbar_mode(books_bar, LV_SCROLLBAR_MODE_OFF);
+	books_pills[0] = sx_pill(books_bar, tr("svc_browse_recommended"), 0, books_pill_cb);
+	books_pills[1] = sx_pill(books_bar, tr("svc_browse_children"), 1, books_pill_cb);
 
 	list_message = lv_label_create(list_screen);
 	lv_label_set_long_mode(list_message, LV_LABEL_LONG_WRAP);
@@ -1858,11 +1925,7 @@ static void logout_cb(lv_event_t *e) {
 
 static void open_cb(lv_event_t *e) {
 	job_kind_t kind = (job_kind_t)(intptr_t)lv_event_get_user_data(e);
-	static const char *const TITLES[] = {[JOB_LIKED] = "zvuk_liked",
-										 [JOB_ALBUMS] = "zvuk_albums",
-										 [JOB_ARTISTS] = "zvuk_artists",
-										 [JOB_PLAYLISTS] = "zvuk_playlists",
-										 [JOB_SAVED] = "zvuk_saved_on_card"};
+	static const char *const TITLES[] = {[JOB_LIKED] = "zvuk_liked", [JOB_ALBUMS] = "zvuk_albums", [JOB_ARTISTS] = "zvuk_artists", [JOB_PLAYLISTS] = "zvuk_playlists", [JOB_BROWSE_BOOKS] = "audiobooks", [JOB_BROWSE_PICKS] = "svc_browse_picks", [JOB_SAVED] = "zvuk_saved_on_card"};
 	open_list(tr(TITLES[kind]), kind, NULL, NULL, 0);
 }
 
@@ -1990,6 +2053,8 @@ void zvukpage_init(gui_config_t *cfg) {
 
 	home_in = svcui_column(zvuk_screen, cfg);
 	lv_obj_t *navigation = sx_card_nav_group(home_in);
+	svcui_nav_card(navigation, tr("svc_browse_picks"), tr("svc_browse_picks_note"), open_cb, (void *)(intptr_t)JOB_BROWSE_PICKS);
+	svcui_nav_card(navigation, tr("audiobooks"), tr("svc_browse_books_note"), open_cb, (void *)(intptr_t)JOB_BROWSE_BOOKS);
 	liked_card = svcui_nav_card(navigation, tr("zvuk_liked"), NULL, open_cb, (void *)(intptr_t)JOB_LIKED);
 	svcui_nav_card(navigation, tr("zvuk_albums"), NULL, open_cb, (void *)(intptr_t)JOB_ALBUMS);
 	svcui_nav_card(navigation, tr("zvuk_artists"), NULL, open_cb, (void *)(intptr_t)JOB_ARTISTS);

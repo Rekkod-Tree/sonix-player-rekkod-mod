@@ -34,6 +34,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--quick-actions', action='store_true')
     parser.add_argument('--sleep-wait', action='store_true')
+    parser.add_argument('--catalog', action='store_true')
     parser.add_argument('--project', type=Path, required=True)
     parser.add_argument('--fixtures', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
@@ -67,12 +68,16 @@ def main():
             log = (output / (service + '-mock.log')).open('w', encoding='utf-8')
             server_logs.append(log)
             server_env = dict(os.environ)
+            if args.catalog and service == 'zvuk':
+                server_env['ZVUK_MOCK_MODE'] = str(root / 'catalog-mode.txt')
             if args.sleep_wait and service == 'yandex': server_env['YANDEX_MOCK_KBPS'] = '4'
             process = subprocess.Popen(['python3', str(source / 'tools' / (service + '_mock.py')),
                                         str(files), str(port)], stdout=log, stderr=subprocess.STDOUT, env=server_env)
             servers.append(process)
             wait_server(port, process)
         for height in (800, 720):
+            if args.catalog:
+                (root / 'catalog-mode.txt').write_text('ok\n')
             run = root / str(height)
             for part in ('card', 'local', 'tmp', 'app/usr'):
                 (run / part).mkdir(parents=True)
@@ -125,6 +130,9 @@ user=Test User
                     env['SONIX_UI_TEST_SLEEP_WAIT'] = '1'
                     env['SONIX_UI_TEST_WAIT_BYTES'] = str((files / 't103.mp3').stat().st_size)
                 env['SONIX_UI_TEST_TRACK'] = str(run / 'card/local-music.mp3')
+            if args.catalog:
+                env['SONIX_UI_TEST_CATALOG'] = '1'
+                env['SONIX_CATALOG_MOCK_MODE'] = str(root / 'catalog-mode.txt')
             # The pre-existing native runner uses these mounts too. They are
             # private to this child and disappear when it exits.
             script = '''set -eu
@@ -139,7 +147,7 @@ exec "$TEST_BINARY"
                 subprocess.run(['timeout', '-k', '5s', '300s' if args.sleep_wait else '180s', 'unshare', '-m', '--propagation', 'private',
                                 'bash', '-c', script], env=env, stdout=log, stderr=subprocess.STDOUT, check=True)
             text = (result / 'run.log').read_text(encoding='utf-8', errors='replace')
-            assert ('UI_TEST_PASS sleep wait:' if args.sleep_wait else 'UI_TEST_PASS quick actions:' if args.quick_actions else 'UI_TEST_PASS spoken:') in text, text[-2000:]
+            assert ('UI_TEST_PASS catalog:' if args.catalog else 'UI_TEST_PASS sleep wait:' if args.sleep_wait else 'UI_TEST_PASS quick actions:' if args.quick_actions else 'UI_TEST_PASS spoken:') in text, text[-2000:]
             print(f'PASS: spoken UI 480x{height}', flush=True)
     finally:
         for process in servers:
@@ -152,6 +160,11 @@ exec "$TEST_BINARY"
                 process.wait()
         for log in server_logs:
             log.close()
+    if args.catalog:
+        requests = (output / 'zvuk-mock.log').read_text(encoding='utf-8')
+        assert '"skip": 20' in requests and '"recType": "CHILDREN_BOOK"' in requests
+        print('PASS: catalog paging and child category requests; no search query required')
+        return
     if args.quick_actions:
         text = (output / 'yandex-mock.log').read_text(encoding='utf-8')
         assert text.count('mock: WAVE NEW ') == 2, 'Expected one station per panel; repeated opening must reuse it'

@@ -219,6 +219,12 @@ typedef enum {
 // zvuk_album_t (id/title/author/image); fetch their chapters/episodes on open.
 int zvuk_search(const char *text, zvuk_search_kind_t kind, void *out, int max);
 
+// Query-free discovery, using the official web client's recommendation API.
+// Worker only; metadata only, bounded to 50 rows per request. `more` reports
+// a lookahead item; the next offset advances by `max`, not by chapter count.
+int zvuk_recommended_books(bool children, int offset, zvuk_album_t *out, int max, bool *more);
+int zvuk_recommended_playlists(zvuk_playlist_t *out, int max);
+
 // ---------------------------------------------------------------------------
 // Likes: the account's collection, mirrored
 // ---------------------------------------------------------------------------

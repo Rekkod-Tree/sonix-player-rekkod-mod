@@ -1437,8 +1437,10 @@ static void home_layout_states(void) {
 #include "src/system/playback/sleeptimer.h"
 #include "graphite_quick_actions.inc"
 #include "graphite_sleep_wait.inc"
+#include "graphite_catalog.inc"
 
 static void run(lv_timer_t *timer) {
+	if (getenv("SONIX_UI_TEST_CATALOG")) { catalog_states(); return; }
 	if (getenv("SONIX_UI_TEST_SLEEP_WAIT")) { sleep_wait_states(); return; }
 	if (getenv("SONIX_UI_TEST_QUICK_ACTIONS")) { quick_actions_states(); return; }
 	if (getenv("SONIX_UI_TEST_HOME_LAYOUT")) { home_layout_states(); return; }

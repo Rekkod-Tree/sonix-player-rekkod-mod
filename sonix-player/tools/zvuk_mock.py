@@ -368,6 +368,23 @@ class Handler(BaseHTTPRequestHandler):
 
     def graphql(self, op, v, token, query):
         ids = [str(i) for i in v.get("ids", [])]
+        if op == "getBooksRecommendations":
+            if mode() == "catalog-empty":
+                return {"recommendation": {"books": []}}
+            start, count = int(v.get("skip", 0)), int(v.get("first", 20))
+            children = v.get("recType") == "CHILDREN_BOOK"
+            items = []
+            for index in range(start, min(start + count, 43)):
+                item = book_obj()
+                if children:
+                    item.update(id=str(8300 + index), title="Children book %02d" % (index + 1))
+                elif index:
+                    item.update(id=str(8400 + index), title="Browse book %02d" % (index + 1))
+                item.pop("chapters")
+                items.append(item)
+            return {"recommendation": {"books": items}}
+        if op == "getMusicRecommendations":
+            return {"dynamicBlockV2": {"items": [{"id": id, "title": item[0]} for id, item in PLAYLISTS.items()]}}
         if op == "getBookChapters":
             return {"getBooks": [book_obj()] if BOOK_ID in ids else []}
         if op == "getPodcastEpisodes":

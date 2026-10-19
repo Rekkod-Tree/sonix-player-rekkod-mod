@@ -180,6 +180,23 @@ int yandex_feed_playlists(yandex_playlist_t *out, int max);
 int yandex_chart(yandex_ref_cb each, void *user);
 // landing3/new-releases, then the albums (POST /albums).
 int yandex_new_releases(yandex_album_t *out, int max);
+
+// Discovery uses service categories, never hidden search queries. Paths are
+// opaque local routes (books, category/<id>, optionally #<section-id>, picks).
+typedef enum { YANDEX_CATALOG_CATEGORY, YANDEX_CATALOG_ALBUM, YANDEX_CATALOG_PLAYLIST } yandex_catalog_kind_t;
+typedef struct {
+	yandex_catalog_kind_t kind;
+	union {
+		struct {
+			char title[YANDEX_TITLE_MAX];
+			char path[YANDEX_TITLE_MAX];
+		} category;
+		yandex_album_t album;
+		yandex_playlist_t playlist;
+	} u;
+} yandex_catalog_item_t;
+// Worker only. Bounded metadata; no image, chapter or audio prefetching.
+int yandex_catalog(const char *path, yandex_catalog_item_t *out, int max);
 // An artist's tracks, the most listened to first; `total` (may be NULL) gets
 // how many the artist has in all.
 int yandex_artist_tracks(const char *artist_id, yandex_track_t *out, int max, int *total);

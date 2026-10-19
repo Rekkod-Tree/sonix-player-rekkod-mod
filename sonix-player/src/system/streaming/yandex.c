@@ -1470,6 +1470,122 @@ int yandex_new_releases(yandex_album_t *out, int max) {
 	return got;
 }
 
+// Only service-local category identifiers are accepted, never arbitrary URLs.
+static bool catalog_id_valid(const char *id) {
+	if (!id || !id[0] || strlen(id) > 100)
+		return false;
+	for (; *id; id++)
+		if (!isalnum((unsigned char)*id) && *id != '_' && *id != '-')
+			return false;
+	return true;
+}
+
+static bool catalog_entity(const json_doc_t *doc, int entity, const char *route, yandex_catalog_item_t *out) {
+	memset(out, 0, sizeof(*out));
+	char type[48];
+	json_obj_str(doc, entity, "type", type, sizeof(type));
+	int data = json_get(doc, entity, "data");
+	if (data < 0 || doc->toks[data].type != JSON_OBJECT)
+		return false;
+	if (!strcmp(route, "picks") && strcmp(type, "playlist"))
+		return false;
+	if (!strcmp(type, "album") || !strcmp(type, "podcast") || !strcmp(type, "album-chart-item")) {
+		int album = data;
+		if (strcmp(type, "album") != 0)
+			album = json_get(doc, data, !strcmp(type, "podcast") ? "podcast" : "album");
+		out->kind = YANDEX_CATALOG_ALBUM;
+		album_from(doc, album, &out->u.album);
+		return out->u.album.id[0] && out->u.album.title[0] && out->u.album.content_type == YANDEX_CONTENT_AUDIOBOOK && json_obj_bool(doc, album, "available", true);
+	}
+	if (!strcmp(type, "playlist") && !strcmp(route, "picks")) {
+		out->kind = YANDEX_CATALOG_PLAYLIST;
+		return json_obj_bool(doc, data, "available", true) && playlist_from(doc, data, &out->u.playlist) && out->u.playlist.title[0];
+	}
+	if (!strcmp(type, "category")) {
+		char id[128];
+		json_obj_str(doc, data, "categoryId", id, sizeof(id));
+		if (!catalog_id_valid(id))
+			return false;
+		out->kind = YANDEX_CATALOG_CATEGORY;
+		snprintf(out->u.category.path, sizeof(out->u.category.path), "category/%s", id);
+		// The visible web tile can contain only artwork and an invisible title.
+		json_obj_str(doc, data, "voiceTitle", out->u.category.title, sizeof(out->u.category.title));
+		if (!out->u.category.title[0])
+			json_obj_str(doc, data, "title", out->u.category.title, sizeof(out->u.category.title));
+		return out->u.category.title[0];
+	}
+	return false;
+}
+
+static int catalog_from(const json_doc_t *doc, const char *route, const char *section, yandex_catalog_item_t *out, int max) {
+	int blocks = json_path(doc, json_root(doc), "result.blocks");
+	if (blocks < 0 || doc->toks[blocks].type != JSON_ARRAY) {
+		set_error("%s", tr("svc_browse_unavailable"));
+		return -1;
+	}
+	int got = 0;
+	for (int b = next_element(doc, blocks, -1); b >= 0 && got < max; b = next_element(doc, blocks, b)) {
+		char id[128], type[48], title[YANDEX_TITLE_MAX];
+		json_obj_str(doc, b, "id", id, sizeof(id));
+		json_obj_str(doc, b, "type", type, sizeof(type));
+		json_obj_str(doc, b, "title", title, sizeof(title));
+		if (section[0] && strcmp(section, id))
+			continue;
+		int entities = json_get(doc, b, "entities");
+		bool directory = !section[0] && strcmp(route, "picks") && strcmp(type, "categories-tab");
+		for (int e = next_element(doc, entities, -1); e >= 0 && got < max; e = next_element(doc, entities, e)) {
+			yandex_catalog_item_t item;
+			if (!catalog_entity(doc, e, route, &item))
+				continue;
+			if (directory) {
+				if (!title[0] || !catalog_id_valid(id))
+					break;
+				memset(&item, 0, sizeof(item));
+				item.kind = YANDEX_CATALOG_CATEGORY;
+				snprintf(item.u.category.title, sizeof(item.u.category.title), "%s", title);
+				int n = snprintf(item.u.category.path, sizeof(item.u.category.path), "%s#%s", route, id);
+				if (n >= (int)sizeof(item.u.category.path))
+					break;
+			}
+			out[got++] = item;
+			if (directory)
+				break;
+		}
+	}
+	return got;
+}
+
+int yandex_catalog(const char *path, yandex_catalog_item_t *out, int max) {
+	if (!path || !out || max <= 0 || strlen(path) >= YANDEX_TITLE_MAX)
+		return -1;
+	char route[YANDEX_TITLE_MAX], section[128] = "", url[512];
+	snprintf(route, sizeof(route), "%s", path);
+	char *hash = strchr(route, '#');
+	if (hash) {
+		*hash++ = 0;
+		if (!catalog_id_valid(hash))
+			return -1;
+		snprintf(section, sizeof(section), "%s", hash);
+	}
+	if (!strcmp(route, "books"))
+		snprintf(url, sizeof(url), "%s/non-music/category/AUDIOBOOKS_MENU", api_url);
+	else if (!strcmp(route, "picks"))
+		snprintf(url, sizeof(url), "%s/landing3?blocks=new-playlists", api_url);
+	else if (!strncmp(route, "category/", 9) && catalog_id_valid(route + 9))
+		snprintf(url, sizeof(url), "%s/non-music/category/%s", api_url, route + 9);
+	else {
+		set_error("%s", tr("yandex_empty"));
+		return -1;
+	}
+	char *body;
+	json_doc_t doc;
+	if (!api(NULL, url, NULL, NULL, &body, &doc))
+		return -1;
+	int got = catalog_from(&doc, route, section, out, max);
+	api_done(body, &doc);
+	return got;
+}
+
 int yandex_artist_tracks(const char *artist_id, yandex_track_t *out, int max, int *total) {
 	// The artist's tracks, most listened to first: what the apps call
 	// "popular tracks". `total` gets how many there are in all.

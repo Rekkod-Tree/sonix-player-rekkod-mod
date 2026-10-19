@@ -1525,6 +1525,71 @@ int zvuk_artist_page(const char *artist_id, zvuk_track_t *tracks, int max_tracks
 	return *n_tracks + *n_albums;
 }
 
+int zvuk_recommended_books(bool children, int offset, zvuk_album_t *out, int max, bool *more) {
+	if (more)
+		*more = false;
+	if (!out || max < 1 || max > 50 || offset < 0 || offset > 10000)
+		return -1;
+	static const char query[] = "query getBooksRecommendations($first: Int!, $recType: RecBookTypeEnum!, $skip: Int!) { "
+								"recommendation { books(first: $first, recType: $recType, skip: $skip) { id title bookAuthors { rname } image { src } } } }";
+	char vars[128], *body;
+	snprintf(vars, sizeof(vars), "{\"first\":%d,\"recType\":\"%s\",\"skip\":%d}", max + 1, children ? "CHILDREN_BOOK" : "BOOK", offset);
+	json_doc_t doc;
+	int data;
+	if (!gql("getBooksRecommendations", query, vars, &body, &doc, &data))
+		return -1;
+	int arr = json_path(&doc, data, "recommendation.books");
+	if (arr < 0 || doc.toks[arr].type != JSON_ARRAY) {
+		done(body, &doc);
+		set_error("%s", tr("zvuk_unreadable_reply"));
+		return -1;
+	}
+	int count = json_len(&doc, arr), got = 0;
+	for (int i = 0; i < count && i < max; i++) {
+		int obj = json_at(&doc, arr, i);
+		zvuk_album_t item = {0};
+		id_of(&doc, obj, "id", item.id, sizeof(item.id));
+		json_obj_str(&doc, obj, "title", item.title, sizeof(item.title));
+		spoken_names(&doc, obj, "bookAuthors", "rname", item.artist, sizeof(item.artist));
+		image_of(&doc, obj, 600, item.cover, sizeof(item.cover));
+		if (spoken_id_valid(item.id) && item.title[0])
+			out[got++] = item;
+	}
+	if (more)
+		*more = count > max && offset + max <= 10000;
+	done(body, &doc);
+	return got;
+}
+
+int zvuk_recommended_playlists(zvuk_playlist_t *out, int max) {
+	if (!out || max < 1 || max > 150)
+		return -1;
+	static const char query[] = "query getMusicRecommendations($limit: Int!) { dynamicBlockV2(contentType: Music, "
+								"blockName: DYNAMIC_BLOCK, itemType: [Playlist], segment: UNKNOWN, limit: $limit, offset: 0) { "
+								"items { ... on Playlist { id title } } } }";
+	char vars[48], *body;
+	snprintf(vars, sizeof(vars), "{\"limit\":%d}", max);
+	json_doc_t doc;
+	int data;
+	if (!gql("getMusicRecommendations", query, vars, &body, &doc, &data))
+		return -1;
+	int arr = json_path(&doc, data, "dynamicBlockV2.items");
+	if (arr < 0 || doc.toks[arr].type != JSON_ARRAY) {
+		done(body, &doc);
+		set_error("%s", tr("zvuk_unreadable_reply"));
+		return -1;
+	}
+	int got = 0;
+	for (int i = 0; i < json_len(&doc, arr) && got < max; i++) {
+		zvuk_playlist_t item;
+		playlist_from(&doc, json_at(&doc, arr, i), &item);
+		if (spoken_id_valid(item.id) && item.title[0])
+			out[got++] = item;
+	}
+	done(body, &doc);
+	return got;
+}
+
 int zvuk_search(const char *text, zvuk_search_kind_t kind, void *out, int max) {
 	if ((unsigned)kind >= ZVUK_SEARCH_KINDS) {
 		return -1;

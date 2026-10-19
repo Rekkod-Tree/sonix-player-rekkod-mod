@@ -65,7 +65,7 @@
 
 // ROW_MORE: "All tracks" on an artist's page, the artist in `u.artist`, how
 // many in `count`.
-typedef enum { ROW_TRACK, ROW_ALBUM, ROW_ARTIST, ROW_PLAYLIST, ROW_MORE } row_kind_t;
+typedef enum { ROW_TRACK, ROW_ALBUM, ROW_ARTIST, ROW_PLAYLIST, ROW_MORE, ROW_CATEGORY } row_kind_t;
 
 typedef struct {
 	row_kind_t kind;
@@ -75,6 +75,10 @@ typedef struct {
 		yandex_album_t album;
 		yandex_artist_t artist;
 		yandex_playlist_t playlist;
+		struct {
+			char title[YANDEX_TITLE_MAX];
+			char path[YANDEX_TITLE_MAX];
+		} category;
 	} u;
 } row_t;
 
@@ -97,6 +101,7 @@ typedef enum {
 	JOB_FEED,
 	JOB_CHART,
 	JOB_NEW_RELEASES,
+	JOB_CATALOG,
 	JOB_ARTIST_TRACKS,
 	JOB_DISLIKE,
 	// Liking an artist or an album (`n`: 1 like, 0 remove), sent in order
@@ -332,7 +337,7 @@ static void run_list_job(const job_t *job) {
 	// Room for the answers that come whole (an album, a search...); the long
 	// lists come as ids and need none.
 	yandex_track_t *tmp = NULL;
-	if (job->kind != JOB_LIKED && job->kind != JOB_PLAYLIST && job->kind != JOB_CHART && job->kind != JOB_ARTIST_TRACKS) {
+	if (job->kind != JOB_LIKED && job->kind != JOB_PLAYLIST && job->kind != JOB_CHART && job->kind != JOB_ARTIST_TRACKS && job->kind != JOB_CATALOG) {
 		tmp = calloc(MAX_ROWS * 2, sizeof(*tmp));
 		if (!tmp) {
 			snprintf(result_error, sizeof(result_error), "%s", tr("out_of_memory"));
@@ -385,6 +390,27 @@ static void run_list_job(const job_t *job) {
 		yandex_playlist_t *p = (yandex_playlist_t *)tmp;
 		got = yandex_feed_playlists(p, MAX_ROWS);
 		add_playlist_rows(p, got);
+		break;
+	}
+	case JOB_CATALOG: {
+		yandex_catalog_item_t *items = calloc(MAX_ROWS, sizeof(*items));
+		got = items ? yandex_catalog(job->a, items, MAX_ROWS) : -1;
+		for (int i = 0; i < got; i++) {
+			row_t *row = &result[result_count++];
+			memset(row, 0, sizeof(*row));
+			if (items[i].kind == YANDEX_CATALOG_CATEGORY) {
+				row->kind = ROW_CATEGORY;
+				snprintf(row->u.category.title, sizeof(row->u.category.title), "%s", items[i].u.category.title);
+				snprintf(row->u.category.path, sizeof(row->u.category.path), "%s", items[i].u.category.path);
+			} else if (items[i].kind == YANDEX_CATALOG_ALBUM) {
+				row->kind = ROW_ALBUM;
+				row->u.album = items[i].u.album;
+			} else {
+				row->kind = ROW_PLAYLIST;
+				row->u.playlist = items[i].u.playlist;
+			}
+		}
+		free(items);
 		break;
 	}
 	case JOB_LIKED_ARTISTS: {
@@ -686,6 +712,10 @@ static void queue_watch_cb(lv_timer_t *timer) {
 
 static void row_texts(const row_t *r, char *name, size_t ns, char *detail, size_t ds) {
 	switch (r->kind) {
+	case ROW_CATEGORY:
+		snprintf(name, ns, "%s", r->u.category.title);
+		detail[0] = '\0';
+		break;
 	case ROW_TRACK:
 		snprintf(name, ns, "%s", r->u.track.title);
 		snprintf(detail, ds, "%s%s", r->u.track.artist, r->u.track.available ? "" : " \xC2\xB7 —");
@@ -920,6 +950,13 @@ static void list_bind(lv_obj_t *row, int index) {
 		first_char(r.u.playlist.title, letter, sizeof(letter));
 		sx_row_set_subtitle(row, detail, NULL, NULL);
 		sx_row_set_letter(row, letter, svcui_tone(r.u.playlist.title), false);
+		sx_row_set_trail(row, SX_ROW_TRAIL_CHEVRON);
+		sx_row_set_swipes(row, false, false);
+		break;
+	case ROW_CATEGORY:
+		streamrowart_forget(row);
+		sx_row_set_subtitle(row, "", NULL, NULL);
+		sx_row_set_no_lead(row);
 		sx_row_set_trail(row, SX_ROW_TRAIL_CHEVRON);
 		sx_row_set_swipes(row, false, false);
 		break;
@@ -1291,6 +1328,9 @@ static void list_tap(lv_obj_t *row, void *user) {
 	case ROW_TRACK:
 		play_rows(index);
 		break;
+	case ROW_CATEGORY:
+		open_list(r.u.category.title, JOB_CATALOG, r.u.category.path, NULL);
+		break;
 	case ROW_ALBUM:
 		// In the Saved list an album opens from the card, network or not.
 		open_list(r.u.album.title, list_kind == JOB_SAVED ? JOB_SAVED_ALBUM : JOB_ALBUM, r.u.album.id, NULL);
@@ -1589,6 +1629,8 @@ static void list_hold(lv_obj_t *row, void *user) {
 	if (index < 0 || !view_row(index, &menu_row)) {
 		return;
 	}
+	if (menu_row.kind == ROW_CATEGORY)
+		return;
 	sx_sheet_item_t items[7];
 	memset(items, 0, sizeof(items));
 	int n = 0;
@@ -2167,6 +2209,11 @@ static void open_search_cb(lv_event_t *e) {
 	(void)e;
 	switch_screen(search_screen);
 }
+
+static void open_catalog_cb(lv_event_t *e) {
+	const char *path = lv_event_get_user_data(e);
+	open_list(tr(!strcmp(path, "books") ? "audiobooks" : "svc_browse_picks"), JOB_CATALOG, path, NULL);
+}
 // What is saved on the card, from the index: opens with Wi-Fi off, and even
 // signed out -- the files are the user's.
 static void open_saved_cb(lv_event_t *e) {
@@ -2370,13 +2417,16 @@ void yandexpage_init(gui_config_t *cfg) {
 	// what the service puts forward under its own heading, the sound
 	// quality and the account.
 	home_signed_in = svcui_column(yandex_screen, cfg);
-	svcui_nav_card(home_signed_in, tr("yandex_my_wave"), NULL, open_wave_cb, NULL);
-	svcui_nav_card(home_signed_in, tr("yandex_liked"), NULL, open_liked_cb, NULL);
-	svcui_nav_card(home_signed_in, tr("yandex_artists"), NULL, open_artists_cb, NULL);
-	svcui_nav_card(home_signed_in, tr("yandex_albums"), NULL, open_albums_cb, NULL);
-	svcui_nav_card(home_signed_in, tr("yandex_playlists"), NULL, open_playlists_cb, NULL);
-	svcui_nav_card(home_signed_in, tr("yandex_search"), NULL, open_search_cb, NULL);
-	saved_card = svcui_nav_card(home_signed_in, tr("yandex_saved_on_card"), NULL, open_saved_cb, NULL);
+	lv_obj_t *navigation = sx_card_nav_group(home_signed_in);
+	svcui_nav_card(navigation, tr("svc_browse_picks"), tr("svc_browse_picks_note"), open_catalog_cb, "picks");
+	svcui_nav_card(navigation, tr("audiobooks"), tr("svc_browse_books_note"), open_catalog_cb, "books");
+	svcui_nav_card(navigation, tr("yandex_my_wave"), NULL, open_wave_cb, NULL);
+	svcui_nav_card(navigation, tr("yandex_liked"), NULL, open_liked_cb, NULL);
+	svcui_nav_card(navigation, tr("yandex_artists"), NULL, open_artists_cb, NULL);
+	svcui_nav_card(navigation, tr("yandex_albums"), NULL, open_albums_cb, NULL);
+	svcui_nav_card(navigation, tr("yandex_playlists"), NULL, open_playlists_cb, NULL);
+	svcui_nav_card(navigation, tr("yandex_search"), NULL, open_search_cb, NULL);
+	saved_card = svcui_nav_card(navigation, tr("yandex_saved_on_card"), NULL, open_saved_cb, NULL);
 	// What is being saved to the library, while something is: under the
 	// saved tracks, where it is seen without scrolling.
 	save_status = svcui_note(home_signed_in, "");

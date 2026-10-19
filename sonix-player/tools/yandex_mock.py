@@ -351,6 +351,17 @@ class Handler(BaseHTTPRequestHandler):
             plus = not os.environ.get("YANDEX_MOCK_NO_PLUS")
             return self.send_json({"result": {"account": {"uid": UID, "login": "tester", "displayName": "Test User"},
                                               "plus": {"hasPlus": plus}}})
+        if p == "/landing3":
+            return self.send_json({"result": {"blocks": [{"id": "new-playlists", "type": "new-playlists",
+                "title": "Popular playlists", "entities": [{"type": "playlist", "data": {
+                    "kind": 3, "title": "Road Trip", "trackCount": 2, "owner": {"uid": UID}}}]}]}})
+        if p.startswith("/non-music/category/"):
+            book = album_obj(BOOK_ID, self.headers.get("Host"))
+            return self.send_json({"result": {"blocks": [
+                {"id": "chart", "title": "Book chart", "type": "editorial-playlists", "entities": [{"type": "album", "data": book}]},
+                {"id": "genres", "type": "categories-tab", "entities": [{"type": "category", "data": {
+                    "categoryId": "fiction", "voiceTitle": "Fiction", "title": ""}}]},
+                {"id": "ad", "type": "promotions", "entities": [{"type": "promotion", "data": {"url": "https://example.invalid"}}]}]}})
         if p == f"/users/{UID}/likes/tracks":
             with lock:
                 ids = [{"id": t, "albumId": str(any_track(t)["albums"][0]["id"]),

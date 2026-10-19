@@ -1,5 +1,21 @@
 ﻿# Features
 
+## Browse streaming catalogs without search
+
+- Yandex Music and Zvuk expose Discover and Audiobooks directly on their
+  service pages. Existing search, collection, queue and saved-media entries remain.
+- Yandex lists current service playlists and the audiobook chart, editorial
+  sections, new arrivals and genre categories supplied by its catalog.
+  External promotions and unsupported entity types are excluded.
+- Zvuk exposes recommended playlists and separate general/children's book
+  recommendations. Books load 20 at a time with explicit More books navigation;
+  Back returns through the existing list history. These are recommendation lists,
+  not a replacement genre taxonomy or a claim to enumerate the whole service.
+- Selecting a book opens the existing typed book page and its download action.
+  Browsing does not autoplay or download audio. Only visible cover rows use the
+  existing bounded thumbnail worker; no catalog polling or persistent catalog
+  cache is added. Existing authentication and playback-quality code is retained.
+
 ## Graphite 2 personalized Home
 
 - Five configurable shortcuts and a permanent More tile in the last grid cell.
