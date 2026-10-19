@@ -394,7 +394,12 @@ static void run_list_job(const job_t *job) {
 	}
 	case JOB_CATALOG: {
 		yandex_catalog_item_t *items = calloc(MAX_ROWS, sizeof(*items));
-		got = items ? yandex_catalog(job->a, items, MAX_ROWS) : -1;
+		if (!items) {
+			snprintf(result_error, sizeof(result_error), "%s", tr("out_of_memory"));
+			result_class = STREAM_ERR_OTHER;
+			return;
+		}
+		got = yandex_catalog(job->a, items, MAX_ROWS);
 		for (int i = 0; i < got; i++) {
 			row_t *row = &result[result_count++];
 			memset(row, 0, sizeof(*row));
