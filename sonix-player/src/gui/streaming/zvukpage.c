@@ -1492,6 +1492,9 @@ static void books_pill_cb(lv_event_t *e) {
 	bool children = (intptr_t)lv_event_get_user_data(e) != 0;
 	if (children == (!strcmp(list_current.b, "children")))
 		return;
+	// A filter replaces the browse path, not a step back into its old pages.
+	while (list_history_len > 0 && list_history[list_history_len - 1].kind == JOB_BROWSE_BOOKS)
+		list_history_len--;
 	snprintf(list_current.b, sizeof(list_current.b), "%s", children ? "children" : "");
 	list_current.n = 0;
 	show_list(&list_current);

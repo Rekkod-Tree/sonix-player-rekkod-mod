@@ -21,6 +21,14 @@ static void catalog_mode(const char *mode) {
 	assert(fclose(f) == 0);
 }
 
+static void catalog_scroll_end(const char *first_title) {
+	lv_obj_t *scroll = lv_obj_get_parent(find_label(lv_screen_active(), first_title));
+	while (scroll && lv_obj_get_scroll_bottom(scroll) < 1000)
+		scroll = lv_obj_get_parent(scroll);
+	assert(scroll);
+	lv_obj_scroll_to_y(scroll, lv_obj_get_scroll_y(scroll) + lv_obj_get_scroll_bottom(scroll), LV_ANIM_OFF);
+}
+
 static void catalog_states(void) {
 	static int step;
 	static bool light;
@@ -141,11 +149,7 @@ static void catalog_states(void) {
 	case 16: {
 		if (!spoken_wait_label("Fixture Complete"))
 			return;
-		lv_obj_t *scroll = lv_obj_get_parent(find_label(lv_screen_active(), "Fixture Complete"));
-		while (scroll && lv_obj_get_scroll_bottom(scroll) < 1000)
-			scroll = lv_obj_get_parent(scroll);
-		assert(scroll);
-		lv_obj_scroll_to_y(scroll, lv_obj_get_scroll_y(scroll) + lv_obj_get_scroll_bottom(scroll), LV_ANIM_OFF);
+		catalog_scroll_end("Fixture Complete");
 		break;
 	}
 	case 17:
@@ -169,9 +173,41 @@ static void catalog_states(void) {
 		if (!spoken_wait_label("Children book 01"))
 			return;
 		capture(light ? "catalog-zvuk-children-light" : "catalog-zvuk-children-dark");
-		catalog_mode("catalog-empty");
+		catalog_scroll_end("Children book 01");
+		step = 201;
+		return;
+	case 201:
+		if (!spoken_wait_label(tr("svc_browse_next")))
+			return;
+		catalog_row(tr("svc_browse_next"));
+		break;
+	case 202:
+		if (!spoken_wait_label("Children book 21"))
+			return;
 		catalog_nav(tr("svc_browse_recommended"));
 		break;
+	case 203:
+		if (!spoken_wait_label("Fixture Complete"))
+			return;
+		back_btn_cb(NULL);
+		break;
+	case 204:
+		assert(lv_screen_active() == zvuk_screen);
+		capture(light ? "catalog-filter-back-home-light" : "catalog-filter-back-home-dark");
+		catalog_nav(tr("audiobooks"));
+		break;
+	case 205:
+		if (!spoken_wait_label("Fixture Complete"))
+			return;
+		catalog_nav(tr("svc_browse_children"));
+		break;
+	case 206:
+		if (!spoken_wait_label("Children book 01"))
+			return;
+		catalog_mode("catalog-empty");
+		catalog_nav(tr("svc_browse_recommended"));
+		step = 21;
+		return;
 	case 21:
 		if (!spoken_wait_label(tr("zvuk_empty")))
 			return;
