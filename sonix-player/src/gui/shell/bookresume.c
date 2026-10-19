@@ -91,7 +91,7 @@ void bookresume_description(char *text, size_t size) {
 	const char *title = config_get("home", "resume_title", "");
 	snprintf(text, size, "%s", title[0] ? title : tr("home_choose_book"));
 }
-static void play(const char *book) {
+static void play(const char *book, bool confirmed) {
 	if (!book[0]) {
 		switch_screen(audiobooks_screen);
 		return;
@@ -100,8 +100,9 @@ static void play(const char *book) {
 		toast_error("home_card_unavailable");
 		return;
 	}
-	if (audiobookdb_is_finished(book)) {
-		toast_error("audiobook_finished");
+	if (!confirmed && audiobookdb_is_finished(book)) {
+		// A finished selection needs an explicit choice, not an error toast.
+		bookresume_menu();
 		return;
 	}
 	char current[512], file[512];
@@ -126,11 +127,11 @@ static void play(const char *book) {
 void bookresume_play(void) {
 	char book[512];
 	selected_book(book, sizeof(book));
-	play(book);
+	play(book, false);
 }
 static void continue_action(void *unused) {
 	(void)unused;
-	play(menu_book);
+	play(menu_book, true);
 }
 static void other_action(void *unused) {
 	(void)unused;

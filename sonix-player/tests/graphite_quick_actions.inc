@@ -20,11 +20,20 @@ static void quick_actions_states(void) {
 		char folder[640];
 		snprintf(folder, sizeof(folder), "%s/.service-fixture", getenv("SONIX_SD_ROOT"));
 		assert(!mkdir(folder, 0755));
+		const char *service[] = {"FOUND.000", "found.123", "LOST.DIR", "Found.music"};
+		for (unsigned i = 0; i < sizeof(service) / sizeof(service[0]); i++) {
+			snprintf(folder, sizeof(folder), "%s/%s", getenv("SONIX_SD_ROOT"), service[i]);
+			assert(!mkdir(folder, 0755));
+		}
 		filespage_open();
 		break;
 	}
 	case 1: {
 		assert(!find_label(filespage_screen, ".service-fixture"));
+		assert(!find_label(filespage_screen, "FOUND.000"));
+		assert(!find_label(filespage_screen, "found.123"));
+		assert(!find_label(filespage_screen, "LOST.DIR"));
+		assert(find_label(filespage_screen, "Found.music"));
 		capture("files-service-hidden");
 		lv_obj_t *icon = find_visible_image(filespage_screen, &icon_ellipsis_vertical);
 		assert(icon);
@@ -39,6 +48,9 @@ static void quick_actions_states(void) {
 	}
 	case 3:
 		assert(find_label(filespage_screen, ".service-fixture"));
+		assert(find_label(filespage_screen, "FOUND.000"));
+		assert(find_label(filespage_screen, "found.123"));
+		assert(find_label(filespage_screen, "LOST.DIR"));
 		assert(config_get_int("files", "show_service", 0) == 1);
 		capture("files-service-visible");
 		switch_screen_no_history(main_menu_screen);

@@ -1332,6 +1332,10 @@ static void home_layout_states(void) {
 		assert(!rename(moved, book));
 		audiobookdb_mark_finished(book);
 		bookresume_play();
+		assert(sx_sheet_is_open());
+		assert(find_label(lv_layer_top(), tr("home_resume_book")));
+		capture("home-finished-book-choice");
+		sx_sheet_close();
 		device_state_get(&state);
 		assert(!strcmp(state.current_file, getenv("SONIX_UI_TEST_TRACK")));
 		main_menu_reset();

@@ -31,6 +31,12 @@
   saved position. Playing/paused books retain their live position; finished or
   unavailable books never silently restart or switch identity. Hiding the tile
   does not forget the book.
+- Selecting a finished book from Home opens its action sheet instead of an
+  error toast. Explicit Continue uses the saved position; merely opening the
+  sheet never starts playback.
+- Files hides FAT recovery directories (`FOUND.000` through `FOUND.999` and
+  `LOST.DIR`) by default. Show service files restores access without deletion;
+  ordinary folders such as `Found.music` remain visible.
 - A permanent Settings button sits beside brightness in the quick panel. Search
   is available through More or an optional Home shortcut; choose local music,
   Yandex Music or Zvuk before opening that source's existing search. No query is
