@@ -9,6 +9,9 @@
   when the native client pair was supplied. Qobuz returned its public album
   catalog. Personal login and signed audio playback remain separate checks;
   see `NATIVE_STREAMING_KEYS.md` for the evidence and limits.
+- The same private resource includes the owner's Podcast Index and Last.fm
+  application parameters. Podcast Index accepted a signed catalog request.
+  Last.fm returned HTTP 403/error 11; login and scrobbling remain unverified.
 
 ## Browse streaming catalogs without search
 
