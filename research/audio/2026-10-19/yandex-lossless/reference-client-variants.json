@@ -1,0 +1,34 @@
+[
+  {
+    "variant": "ma-encraw",
+    "http_status": 200,
+    "codec": "aac-mp4",
+    "quality": "nq",
+    "transport": "encraw",
+    "bitrate": 192
+  },
+  {
+    "variant": "ma-raw",
+    "http_status": 200,
+    "codec": "aac-mp4",
+    "quality": "nq",
+    "transport": "raw",
+    "bitrate": 192
+  },
+  {
+    "variant": "web-origin-raw",
+    "http_status": 200,
+    "codec": "mp3",
+    "quality": "nq",
+    "transport": "raw",
+    "bitrate": 192
+  },
+  {
+    "variant": "mp3-high-profile",
+    "http_status": 200,
+    "codec": "mp3",
+    "quality": "nq",
+    "transport": "raw",
+    "bitrate": 192
+  }
+]

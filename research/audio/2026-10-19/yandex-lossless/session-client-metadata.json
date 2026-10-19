@@ -1,0 +1,8 @@
+{
+  "userinfo_http_status": 200,
+  "oauth_client_matches_firmware_example": true,
+  "oauth_client_sha256": "aa1acdc9341c9e807a57e4bdf6d48582235249b2f5efee892b17f24e70f188bb",
+  "permissions_expired": false,
+  "permissions_default": null,
+  "direct_subscription_count": 1
+}

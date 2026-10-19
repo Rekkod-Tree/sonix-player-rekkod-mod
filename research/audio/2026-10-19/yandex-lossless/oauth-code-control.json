@@ -1,0 +1,19 @@
+{
+  "player_session_replaced": false,
+  "candidate_saved": false,
+  "same_account_and_application": true,
+  "access_token_changed": true,
+  "original": {
+    "http_status": 200,
+    "codec": "aac-mp4",
+    "quality": "nq",
+    "transport": "encraw"
+  },
+  "fresh": {
+    "http_status": 200,
+    "codec": "aac-mp4",
+    "quality": "nq",
+    "transport": "encraw"
+  },
+  "original_session_still_valid": true
+}

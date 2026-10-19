@@ -67,13 +67,15 @@ def device_token(adb, serial):
     return token
 
 
-def request(opener, token, client, endpoint, params=None):
-    if endpoint not in ("/account/status", "/get-file-info", "/search") and not (
+def request(opener, token, client, endpoint, params=None, api_base=API):
+    if api_base not in (API, "https://api.music.yandex.ru"):
+        raise ValueError("API origin not allowlisted")
+    if endpoint not in ("/account/status", "/account/settings", "/get-file-info", "/search") and not (
         re.fullmatch(r"/tracks/[0-9]+(?::[0-9]+)?/download-info", endpoint)
         or re.fullmatch(r"/users/yandexmusic/playlists/[0-9]+", endpoint)
     ):
         raise ValueError("Endpoint not allowlisted")
-    url = API + endpoint
+    url = api_base + endpoint
     if params:
         url += "?" + urllib.parse.urlencode(params)
     req = urllib.request.Request(url, headers={

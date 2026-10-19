@@ -1,0 +1,18 @@
+[
+  {
+    "variant": "mobile-firmware-codecs-encraw",
+    "http_status": 200,
+    "codec": "aac-mp4",
+    "quality": "nq",
+    "transport": "encraw",
+    "bitrate": 192
+  },
+  {
+    "variant": "mobile-reference-raw",
+    "http_status": 200,
+    "codec": "mp3",
+    "quality": "nq",
+    "transport": "raw",
+    "bitrate": 192
+  }
+]

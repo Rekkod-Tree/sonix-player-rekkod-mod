@@ -1,0 +1,7 @@
+{
+  "token_exchange_http_status": 400,
+  "new_token_received": false,
+  "new_token_persisted": false,
+  "player_session_replaced": false,
+  "original_session_still_valid": true
+}

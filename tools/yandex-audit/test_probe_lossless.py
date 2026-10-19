@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 
 import probe_lossless as probe
+import oauth_control
 
 
 class ProbeTests(unittest.TestCase):
@@ -50,6 +51,17 @@ class ProbeTests(unittest.TestCase):
         for endpoint in ("/users/private-user/playlists/1", "https://other.example", "/get-file-info/../account"):
             with self.subTest(endpoint=endpoint), self.assertRaises(ValueError):
                 probe.request(None, "PRIVATE_TOKEN", "test-client", endpoint)
+
+    def test_foreign_api_origin_is_rejected(self):
+        with self.assertRaises(ValueError):
+            probe.request(None, "PRIVATE_TOKEN", "test-client", "/account/status",
+                          api_base="https://other.example")
+
+    def test_oauth_form_accepts_one_code_and_rejects_invalid_forms(self):
+        self.assertEqual(oauth_control.parse_code(b"code=LOCAL_TEST_CODE"), "LOCAL_TEST_CODE")
+        for body in (b"", b"other=x", b"code=", b"code=a&code=b", b"code=\xff"):
+            with self.subTest(body=body), self.assertRaises((ValueError, UnicodeError)):
+                oauth_control.parse_code(body)
 
     def test_redirects_are_not_followed(self):
         self.assertIsNone(probe.NoRedirect().redirect_request(
