@@ -298,13 +298,8 @@ static int entry_cmp(const void *a, const void *b) {
 
 // Visibility only: recursive copy/move/delete must still include hidden children.
 static bool service_hidden(const char *name) {
-	// FAT recovery directories remain accessible through Show service files.
-	bool recovery = !strcasecmp(name, "LOST.DIR") ||
-		(strlen(name) == 9 && !strncasecmp(name, "FOUND.", 6) &&
-		 name[6] >= '0' && name[6] <= '9' && name[7] >= '0' && name[7] <= '9' &&
-		 name[8] >= '0' && name[8] <= '9');
 	return !config_get_int("files", "show_service", 0) &&
-		(name[0] == '.' || playlist_is_junk_name(name) || recovery);
+		(name[0] == '.' || playlist_is_junk_name(name));
 }
 
 static void read_folder(void) {

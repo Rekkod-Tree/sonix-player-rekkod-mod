@@ -36,7 +36,8 @@
   sheet never starts playback.
 - Files hides FAT recovery directories (`FOUND.000` through `FOUND.999` and
   `LOST.DIR`) by default. Show service files restores access without deletion;
-  ordinary folders such as `Found.music` remain visible.
+  ordinary folders such as `Found.music` remain visible. The music folder
+  browser and recursive music queues use the same recovery-name filter.
 - A permanent Settings button sits beside brightness in the quick panel. Search
   is available through More or an optional Home shortcut; choose local music,
   Yandex Music or Zvuk before opening that source's existing search. No query is

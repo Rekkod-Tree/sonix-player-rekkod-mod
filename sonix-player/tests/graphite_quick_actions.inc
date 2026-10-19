@@ -1,6 +1,8 @@
 // Native UI checks against disposable Yandex fixtures, never a user account.
 static void quick_actions_states(void) {
 	static int step, wait;
+	static int music_files_wait;
+	static bool music_files_check;
 	static char wave_file[512];
 	device_state_t state;
 	grid_entry_t entry;
@@ -47,13 +49,29 @@ static void quick_actions_states(void) {
 		break;
 	}
 	case 3:
+		if (music_files_check) {
+			if (!find_label(browser_screen, "Found.music")) {
+				assert(++music_files_wait < 100);
+				step--;
+				break;
+			}
+			assert(!find_label(browser_screen, "FOUND.000"));
+			assert(!find_label(browser_screen, "found.123"));
+			assert(!find_label(browser_screen, "LOST.DIR"));
+			capture("music-files-service-hidden");
+			switch_screen_no_history(main_menu_screen);
+			break;
+		}
 		assert(find_label(filespage_screen, ".service-fixture"));
 		assert(find_label(filespage_screen, "FOUND.000"));
 		assert(find_label(filespage_screen, "found.123"));
 		assert(find_label(filespage_screen, "LOST.DIR"));
 		assert(config_get_int("files", "show_service", 0) == 1);
 		capture("files-service-visible");
-		switch_screen_no_history(main_menu_screen);
+		browser_open_dir_public(getenv("SONIX_SD_ROOT"));
+		switch_screen_no_history(browser_screen);
+		music_files_check = true;
+		step--;
 		break;
 	case 4: {
 		capture("home-wave-and-liked-light");

@@ -211,6 +211,15 @@ bool playlist_is_junk_name(const char *name) {
 		return true;
 	}
 
+	// FAT recovery directories are not music. The file manager can explicitly
+	// reveal service entries without deleting or changing their contents.
+	if (!strcasecmp(name, "LOST.DIR") ||
+		(strlen(name) == 9 && !strncasecmp(name, "FOUND.", 6) &&
+		 name[6] >= '0' && name[6] <= '9' && name[7] >= '0' && name[7] <= '9' &&
+		 name[8] >= '0' && name[8] <= '9')) {
+		return true;
+	}
+
 	// And the rest of what a desktop scatters over a card. Nothing here is a
 	// track, and a folder of them is not a folder of music.
 	static const char *const JUNK[] = {".DS_Store", "__MACOSX", ".Spotlight-V100", ".Trashes",
