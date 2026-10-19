@@ -1,5 +1,15 @@
 ﻿# Features
 
+## Native streaming application parameters
+
+- Alpha21 packaging is prepared to use the Tidal and Qobuz application
+  parameters from the user's stock R1 image through the existing sealed-key
+  loader. Key values and account sessions stay outside Git.
+- Tidal accepted device authorization and returned `authorization_pending`
+  when the native client pair was supplied. Qobuz returned its public album
+  catalog. Personal login and signed audio playback remain separate checks;
+  see `NATIVE_STREAMING_KEYS.md` for the evidence and limits.
+
 ## Browse streaming catalogs without search
 
 - Yandex Music and Zvuk expose Discover and Audiobooks directly on their
