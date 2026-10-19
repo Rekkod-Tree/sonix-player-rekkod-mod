@@ -1,0 +1,23 @@
+{
+  "public_playlist": "https://music.yandex.ru/users/yandexmusic/playlists/1383",
+  "playlist_http_status": 200,
+  "track_count": 63,
+  "probes": [
+    {
+      "track_sha256": "aa615f6f3e3e51771df5470135655575985cd46d4a867cb94e786a98952e4efa",
+      "http_status": 200,
+      "codec": "aac-mp4",
+      "quality": "nq",
+      "transport": "encraw",
+      "bitrate_kbps": 192
+    },
+    {
+      "track_sha256": "c21295e21faf789724ef5a655cd6878de9ef06bc77e4b8a277ff0c3d7f3b64cd",
+      "http_status": 200,
+      "codec": "aac-mp4",
+      "quality": "nq",
+      "transport": "encraw",
+      "bitrate_kbps": 192
+    }
+  ]
+}

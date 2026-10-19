@@ -1,0 +1,39 @@
+{
+  "protocol_source_sha256": "21fb6a874f5814a3cfaf2d9067aacf4ab17f948d0d57f234611039a34e165ac6",
+  "client": "YandexMusicDesktopAppWindows/5.95.0",
+  "track_sha256": "39958482615fae9d57dfa0419a0387e3a37a09b0cfe1a972b728348660b970b2",
+  "account_status_http": 200,
+  "has_plus": true,
+  "requests": [
+    {
+      "variant": "firmware-codecs-encraw",
+      "http_status": 200,
+      "codec": "aac-mp4",
+      "quality": "nq",
+      "transport": "encraw",
+      "bitrate_kbps": 192,
+      "file_url_present": true,
+      "file_key_present": true
+    },
+    {
+      "variant": "flac-only-encraw",
+      "http_status": 200,
+      "codec": "mp3",
+      "quality": "nq",
+      "transport": "encraw",
+      "bitrate_kbps": 192,
+      "file_url_present": true,
+      "file_key_present": true
+    },
+    {
+      "variant": "firmware-codecs-raw",
+      "http_status": 200,
+      "codec": "aac-mp4",
+      "quality": "nq",
+      "transport": "raw",
+      "bitrate_kbps": 192,
+      "file_url_present": true,
+      "file_key_present": false
+    }
+  ]
+}

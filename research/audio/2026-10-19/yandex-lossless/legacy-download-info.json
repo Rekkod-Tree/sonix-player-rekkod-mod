@@ -1,0 +1,10 @@
+{
+  "http_status": 200,
+  "formats": [
+    {
+      "codec": "mp3",
+      "kbps": 192,
+      "preview": false
+    }
+  ]
+}
