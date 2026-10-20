@@ -1,52 +1,51 @@
 #include "qobuzpage.h"
 #include "src/system/playback/sleeptimer.h"
 
-
-#include <stdatomic.h>
-#include <pthread.h>
-#include <stdio.h>
-#include <string.h>
 #include <malloc.h>
+#include <pthread.h>
+#include <stdatomic.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
-#include "src/gui/shell/confirm.h"
 #include "src/gui/fonts/fonts.h"
+#include "src/gui/nowplaying/player.h"
+#include "src/gui/shell/confirm.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/keyboard.h"
-#include "src/gui/nowplaying/player.h"
 #include "src/gui/shell/popover.h"
-#include "src/gui/streaming/qobuzart.h"
+#include "src/gui/shell/settingsrow.h"
+#include "src/gui/shell/spinner.h"
+#include "src/gui/shell/switcher.h"
 #include "src/gui/shell/sx_card.h"
 #include "src/gui/shell/sx_row.h"
 #include "src/gui/shell/sx_sheet.h"
 #include "src/gui/shell/sx_styles.h"
 #include "src/gui/shell/sx_toast.h"
 #include "src/gui/shell/sx_tokens.h"
-#include "src/gui/streaming/streamerror.h"
-#include "src/gui/streaming/svclist.h"
-#include "src/gui/streaming/svcui.h"
-#include "src/gui/shell/settingsrow.h"
-#include "src/gui/shell/spinner.h"
-#include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
 #include "src/gui/shell/toast.h"
 #include "src/gui/shell/touch.h"
+#include "src/gui/streaming/qobuzart.h"
+#include "src/gui/streaming/streamerror.h"
+#include "src/gui/streaming/svclist.h"
+#include "src/gui/streaming/svcui.h"
 #include "src/gui/wireless/wifisettings.h"
-#include "src/system/decode/growfile.h"
-#include "src/system/playback/device_state.h"
 #include "src/system/core/lang.h"
-#include "src/system/playback/playlist.h"
-#include "src/system/streaming/qobuz.h"
-#include "src/system/streaming/qobuzcache.h"
-#include "src/system/streaming/provider.h"
-#include "src/system/streaming/streamerr.h"
-#include "src/system/net/http.h"
-#include "src/system/streaming/streamturn.h"
-#include "src/system/streaming/qobuzsync.h"
-#include "src/system/device/system.h"
 #include "src/system/core/utils.h"
+#include "src/system/decode/growfile.h"
+#include "src/system/device/system.h"
+#include "src/system/net/http.h"
 #include "src/system/net/wifi.h"
 #include "src/system/net/wifitransfer.h"
+#include "src/system/playback/device_state.h"
+#include "src/system/playback/playlist.h"
+#include "src/system/streaming/provider.h"
+#include "src/system/streaming/qobuz.h"
+#include "src/system/streaming/qobuzcache.h"
+#include "src/system/streaming/qobuzsync.h"
+#include "src/system/streaming/streamerr.h"
+#include "src/system/streaming/streamturn.h"
 
 // ---------------------------------------------------------------------------
 // Qobuz front end.
@@ -66,7 +65,6 @@
 // asks for another fifty; past this cap the list really stops, because every
 // entry is static memory on a device with 64 MB in total.
 #define QOBUZ_MAX_HELD (4 * QOBUZ_PAGE_LIMIT)
-
 
 static lv_obj_t *login_screen;
 lv_obj_t *qobuz_list_screen;
@@ -102,12 +100,12 @@ typedef enum {
 typedef struct {
 	job_kind_t kind;
 	unsigned sleep_serial;
-	char text[256];	   // search terms, or user name
-	char text2[128];   // password
-	char id_text[40];  // album identifier
-	long id;		   // numeric identifier
-	int index;		   // which track of the list playback starts from
-	int offset;		   // first entry of this page: 0 = new list
+	char text[256];		  // search terms, or user name
+	char text2[128];	  // password
+	char id_text[40];	  // album identifier
+	long id;			  // numeric identifier
+	int index;			  // which track of the list playback starts from
+	int offset;			  // first entry of this page: 0 = new list
 	unsigned list_serial; // list jobs: list_serial when asked
 } job_t;
 
@@ -210,14 +208,9 @@ static void duration_text(int seconds, char *out, size_t size) {
 	snprintf(out, size, "%d:%02d", seconds / 60, seconds % 60);
 }
 
-static bool kind_is_tracks(job_kind_t kind) {
-	return kind == JOB_SEARCH_TRACKS || kind == JOB_ALBUM_TRACKS || kind == JOB_PLAYLIST_TRACKS ||
-		   kind == JOB_FAV_TRACKS;
-}
+static bool kind_is_tracks(job_kind_t kind) { return kind == JOB_SEARCH_TRACKS || kind == JOB_ALBUM_TRACKS || kind == JOB_PLAYLIST_TRACKS || kind == JOB_FAV_TRACKS; }
 
-static bool kind_is_albums(job_kind_t kind) {
-	return kind == JOB_SEARCH_ALBUMS || kind == JOB_FAV_ALBUMS || kind == JOB_ARTIST_ALBUMS || kind == JOB_FEATURED;
-}
+static bool kind_is_albums(job_kind_t kind) { return kind == JOB_SEARCH_ALBUMS || kind == JOB_FAV_ALBUMS || kind == JOB_ARTIST_ALBUMS || kind == JOB_FEATURED; }
 
 static void run(const job_t *job, const char *waiting_text);
 
@@ -245,7 +238,7 @@ static void refused_async(void *user) {
 static void sync_done(bool ok, const char *error, void *user) {
 	(void)user;
 	if (!ok) {
-		gui_post(refused_async, strdup(error ? error : ""));
+		gui_post_or_free(refused_async, strdup(error ? error : ""));
 	}
 }
 
@@ -422,7 +415,7 @@ static void reload_list_async(void *user) {
 static void playlist_deleted(bool ok, const char *error, void *user) {
 	(void)user;
 	if (!ok) {
-		gui_post(refused_async, strdup(error ? error : ""));
+		gui_post_or_free(refused_async, strdup(error ? error : ""));
 	} else {
 		gui_post(reload_list_async, NULL);
 	}
@@ -459,10 +452,8 @@ static void list_hold(lv_obj_t *row, void *user) {
 	int n = 0;
 	static char title[QOBUZ_TITLE_MAX];
 	if (kind_is_tracks(list_kind) || kind_is_albums(list_kind)) {
-		items[n++] = (sx_sheet_item_t){.label = tr("queue_play_next"), .icon = &icon_list_start, .action = sheet_queue,
-									   .user = (void *)(intptr_t)PLAYLIST_QUEUE_NEXT};
-		items[n++] = (sx_sheet_item_t){.label = tr("queue_add_to_end"), .icon = &icon_list_plus_small,
-									   .action = sheet_queue, .user = (void *)(intptr_t)PLAYLIST_QUEUE_END};
+		items[n++] = (sx_sheet_item_t){.label = tr("queue_play_next"), .icon = &icon_list_start, .action = sheet_queue, .user = (void *)(intptr_t)PLAYLIST_QUEUE_NEXT};
+		items[n++] = (sx_sheet_item_t){.label = tr("queue_add_to_end"), .icon = &icon_list_plus_small, .action = sheet_queue, .user = (void *)(intptr_t)PLAYLIST_QUEUE_END};
 	}
 	if (kind_is_tracks(list_kind)) {
 		const qobuz_track_t *t = &result_tracks[index];
@@ -470,10 +461,7 @@ static void list_hold(lv_obj_t *row, void *user) {
 			n = 0; // nothing of the queue for a track that will not play
 		}
 		bool fav = qobuzsync_is_favorite(t->id);
-		items[n++] = (sx_sheet_item_t){.label = tr(fav ? "remove_from_favourites" : "medialist_add_to_favourites"),
-									   .icon = fav ? &icon_star_filled : &icon_star,
-									   .action = sheet_star,
-									   .user = fav ? NULL : (void *)1};
+		items[n++] = (sx_sheet_item_t){.label = tr(fav ? "remove_from_favourites" : "medialist_add_to_favourites"), .icon = fav ? &icon_star_filled : &icon_star, .action = sheet_star, .user = fav ? NULL : (void *)1};
 		if (t->album_id[0] && list_kind != JOB_ALBUM_TRACKS) {
 			items[n++] = (sx_sheet_item_t){.label = tr("show_album"), .icon = &icon_chevron_right, .action = sheet_album};
 		}
@@ -482,14 +470,10 @@ static void list_hold(lv_obj_t *row, void *user) {
 		// Qobuz says whether an album is a favourite only in the list of
 		// favourites: there it is offered for removal, elsewhere for adding.
 		bool fav = list_kind == JOB_FAV_ALBUMS;
-		items[n++] = (sx_sheet_item_t){.label = tr(fav ? "remove_from_favourites" : "medialist_add_to_favourites"),
-									   .icon = fav ? &icon_star_filled : &icon_star,
-									   .action = sheet_star,
-									   .user = fav ? NULL : (void *)1};
+		items[n++] = (sx_sheet_item_t){.label = tr(fav ? "remove_from_favourites" : "medialist_add_to_favourites"), .icon = fav ? &icon_star_filled : &icon_star, .action = sheet_star, .user = fav ? NULL : (void *)1};
 		snprintf(title, sizeof(title), "%s", result_albums[index].title);
 	} else if (list_kind == JOB_USER_PLAYLISTS) {
-		items[n++] = (sx_sheet_item_t){
-			.label = tr("delete_playlist"), .icon = &icon_trash, .destructive = true, .action = sheet_playlist_delete};
+		items[n++] = (sx_sheet_item_t){.label = tr("delete_playlist"), .icon = &icon_trash, .destructive = true, .action = sheet_playlist_delete};
 		snprintf(title, sizeof(title), "%s", result_playlists[index].name);
 	} else {
 		return; // an artist: nothing but opening it
@@ -1038,8 +1022,7 @@ static bool track_is_playable(const char *path) {
 	bool growing = growfile_is_growing(path);
 	bool downloading = id != 0 && qobuzcache_downloading_id() == id;
 	if (growing != downloading) {
-		fprintf(stderr, "qobuz: '%s' -- growfile says %d, the cache says %d: THEY DISAGREE\n", path, growing,
-				downloading);
+		fprintf(stderr, "qobuz: '%s' -- growfile says %d, the cache says %d: THEY DISAGREE\n", path, growing, downloading);
 	}
 	return growing || downloading;
 }
@@ -1069,8 +1052,7 @@ static bool qobuz_prepare_track(const char *path) {
 	// Not there. The reason goes to the log in full: when this decision is
 	// wrong the player spins in circles, and without this line the device logs
 	// cost days.
-	fprintf(stderr, "qobuz: '%s' not ready (id=%ld, downloading=%ld): stopping and requesting it\n", path,
-			qobuzcache_track_id(path), qobuzcache_downloading_id());
+	fprintf(stderr, "qobuz: '%s' not ready (id=%ld, downloading=%ld): stopping and requesting it\n", path, qobuzcache_track_id(path), qobuzcache_downloading_id());
 
 	// Whatever was playing is stopped FIRST, and not out of politeness: the
 	// previous track is reading a file that is still downloading, and it is one
@@ -1113,7 +1095,6 @@ static void play_started_async(void *user) {
 		svclist_rebind(list);
 	}
 }
-
 
 // ---------------------------------------------------------------------------
 // prefetching, on a thread of its own
@@ -1253,21 +1234,21 @@ static bool prepare_track(const qobuz_track_t *track, char *path, size_t size) {
 		fprintf(stderr, "qobuz: WARNING real name '%s' but the queue expects '%s'\n", path, guessed);
 	}
 
-	qobuzcache_write_sidecars(track->id, mime, track->title, track->artist, track->album, track->album_id,
-							  track->track_number, track->cover);
+	qobuzcache_write_sidecars(track->id, mime, track->title, track->artist, track->album, track->album_id, track->track_number, track->cover);
 	// Prefetched tracks count too: they are files taking up card space, which is
 	// what the periodic cleanup has to keep in check.
 	qobuzcache_note_played(path);
 
 	char *owned = strdup(path);
 	if (owned) {
-		gui_post(cover_ready_async, owned);
+		gui_post_or_free(cover_ready_async, owned);
 	}
 	return true;
 }
 
 static void do_play(int index, unsigned sleep_serial) {
-	if (sleep_serial != sleeptimer_expiration_serial()) return;
+	if (sleep_serial != sleeptimer_expiration_serial())
+		return;
 	if (index < 0 || index >= result_count) {
 		return;
 	}
@@ -1286,8 +1267,7 @@ static void do_play(int index, unsigned sleep_serial) {
 	char mime[64];
 	if (!qobuz_track_url(track->id, url, sizeof(url), mime, sizeof(mime), NULL)) {
 		const char *why = qobuz_last_error();
-		result_class = streamerr_describe("qobuz", why && why[0] ? why : tr("download_failed"), result_error,
-										  sizeof(result_error));
+		result_class = streamerr_describe("qobuz", why && why[0] ? why : tr("download_failed"), result_error, sizeof(result_error));
 		return;
 	}
 
@@ -1297,8 +1277,7 @@ static void do_play(int index, unsigned sleep_serial) {
 		// full. The generic "download failed" is left only for the case where
 		// even it does not know.
 		const char *why = qobuzcache_last_error();
-		result_class = streamerr_describe("qobuz", why && why[0] ? why : tr("download_failed"), result_error,
-										  sizeof(result_error));
+		result_class = streamerr_describe("qobuz", why && why[0] ? why : tr("download_failed"), result_error, sizeof(result_error));
 		return;
 	}
 
@@ -1306,8 +1285,7 @@ static void do_play(int index, unsigned sleep_serial) {
 
 	// Tags BEFORE starting playback: that is when device_state reads the
 	// metadata, and a moment later would be too late.
-	qobuzcache_write_sidecars(track->id, mime, track->title, track->artist, track->album, track->album_id,
-							  track->track_number, NULL);
+	qobuzcache_write_sidecars(track->id, mime, track->title, track->artist, track->album, track->album_id, track->track_number, NULL);
 
 	// --- the queue: the WHOLE list, not only what has downloaded ------------
 	//
@@ -1360,14 +1338,14 @@ static void do_play(int index, unsigned sleep_serial) {
 		qobuzcache_write_sidecars(t->id, expected, t->title, t->artist, t->album, t->album_id, t->track_number, NULL);
 	}
 
-	if (sleep_serial != sleeptimer_expiration_serial()) return;
+	if (sleep_serial != sleeptimer_expiration_serial())
+		return;
 	device_state_play_list(path_ptr, queued_count, start);
 
 	// The cover last, with the music already playing: it is another download and
 	// not worth delaying the first note for. It deliberately comes before the
 	// player is opened, so the image is there when the page appears.
-	qobuzcache_write_sidecars(track->id, mime, track->title, track->artist, track->album, track->album_id,
-							  track->track_number, track->cover);
+	qobuzcache_write_sidecars(track->id, mime, track->title, track->artist, track->album, track->album_id, track->track_number, track->cover);
 
 	gui_post(play_started_async, NULL);
 
@@ -1725,7 +1703,10 @@ static void *worker_main(void *arg) {
 		a->where = job.index;
 		snprintf(a->what, sizeof(a->what), "%s", job.text);
 		a->tracks = album_tracks;
-		gui_post(job_done_cb, a);
+		if (!gui_post(job_done_cb, a)) {
+			free(a->tracks);
+			free(a);
+		}
 	}
 	return NULL;
 }
@@ -1760,9 +1741,7 @@ static int list_history_len;
 static job_t current_list_job;
 static bool have_current_list;
 
-static bool job_is_list(job_kind_t kind) {
-	return kind != JOB_PLAY && kind != JOB_LOGIN && kind != JOB_NONE && kind != JOB_QUEUE_ALBUM;
-}
+static bool job_is_list(job_kind_t kind) { return kind != JOB_PLAY && kind != JOB_LOGIN && kind != JOB_NONE && kind != JOB_QUEUE_ALBUM; }
 
 // A list's title, known before it comes: the list page opens under it at once.
 static const char *job_title(const job_t *job) {
@@ -1826,9 +1805,7 @@ static void run(const job_t *job_in, const char *waiting_text) {
 		// Re-reading the SAME list is not a step forward: the whole job is
 		// compared, not just its kind, otherwise two albums in a row would not
 		// stack.
-		bool same = have_current_list && current_list_job.kind == job->kind && current_list_job.id == job->id &&
-					strcmp(current_list_job.id_text, job->id_text) == 0 &&
-					strcmp(current_list_job.text, job->text) == 0;
+		bool same = have_current_list && current_list_job.kind == job->kind && current_list_job.id == job->id && strcmp(current_list_job.id_text, job->id_text) == 0 && strcmp(current_list_job.text, job->text) == 0;
 		bool on_list = lv_screen_active() == list_screen;
 		if (have_current_list && !same && on_list && list_history_len < LIST_HISTORY_DEPTH) {
 			list_history[list_history_len++] = current_list_job;
@@ -2021,8 +1998,7 @@ static void search_accept_cb(lv_event_t *e) {
 	}
 
 	job_t job = {0};
-	job.kind = search_kind_index == 1 ? JOB_SEARCH_ALBUMS
-									  : (search_kind_index == 2 ? JOB_SEARCH_ARTISTS : JOB_SEARCH_TRACKS);
+	job.kind = search_kind_index == 1 ? JOB_SEARCH_ALBUMS : (search_kind_index == 2 ? JOB_SEARCH_ARTISTS : JOB_SEARCH_TRACKS);
 	snprintf(job.text, sizeof(job.text), "%s", text);
 	run(&job, "searching");
 }
@@ -2085,8 +2061,7 @@ static void build_search_page(gui_config_t *cfg) {
 	}
 	paint_search_pills();
 
-	search_keyboard = keyboard_create(search_screen, cfg->screen_width, 316, search_field, NULL, "ok",
-									  search_accept_cb, NULL);
+	search_keyboard = keyboard_create(search_screen, cfg->screen_width, 316, search_field, NULL, "ok", search_accept_cb, NULL);
 	switcher_attach_back_gesture(search_screen);
 }
 
@@ -2194,8 +2169,7 @@ static void build_login_page(gui_config_t *cfg) {
 	lv_obj_set_style_text_font(note, &font_ui_20, 0);
 	lv_label_set_text(note, tr("qobuz_login_note"));
 
-	login_keyboard = keyboard_create(login_screen, cfg->screen_width, 316, user_field, NULL, "ok", login_accept_cb,
-									 NULL);
+	login_keyboard = keyboard_create(login_screen, cfg->screen_width, 316, user_field, NULL, "ok", login_accept_cb, NULL);
 	switcher_attach_back_gesture(login_screen);
 }
 
@@ -2222,14 +2196,12 @@ static void open_login_cb(lv_event_t *e) {
 static lv_obj_t *home_container;
 static lv_obj_t *search_btn;
 
-static const int QUALITY_VALUES[4] = {QOBUZ_FORMAT_MP3, QOBUZ_FORMAT_CD, QOBUZ_FORMAT_HIRES96,
-									  QOBUZ_FORMAT_HIRES192};
+static const int QUALITY_VALUES[4] = {QOBUZ_FORMAT_MP3, QOBUZ_FORMAT_CD, QOBUZ_FORMAT_HIRES96, QOBUZ_FORMAT_HIRES192};
 
 // Full names rather than shorthand: "24/192" alone does not tell anyone that
 // a FLAC is behind it. Nearly symbols, but not quite: the decimal separator is
 // locale-dependent, so these go through tr() like everything else.
-static const char *const QUALITY_NAMES[4] = {"qobuz_mp3_320_kbps", "qobuz_flac_16_44_1", "qobuz_flac_24_96",
-											 "qobuz_flac_24_192"};
+static const char *const QUALITY_NAMES[4] = {"qobuz_mp3_320_kbps", "qobuz_flac_16_44_1", "qobuz_flac_24_96", "qobuz_flac_24_192"};
 static lv_obj_t *quality_pills[4];
 
 // The magnifier appears only once signed in: before that there is nothing to
@@ -2431,9 +2403,7 @@ static void build_list_page(gui_config_t *cfg) {
 
 // "Show album" from the player, as the provider registry asks for it: the
 // screen back leads to, or NULL when the album could not be opened.
-static void *provider_open_album(const char *album_id, const char *title) {
-	return qobuzpage_open_album(album_id, title) ? qobuz_list_screen : NULL;
-}
+static void *provider_open_album(const char *album_id, const char *title) { return qobuzpage_open_album(album_id, title) ? qobuz_list_screen : NULL; }
 
 void qobuzpage_init(gui_config_t *cfg) {
 	// What only the GUI can tell the rest of the program about Qobuz: its mark

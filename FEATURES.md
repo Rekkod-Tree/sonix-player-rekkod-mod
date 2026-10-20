@@ -1,5 +1,38 @@
 ﻿# Features
 
+## Spotify integration candidate
+
+- The alpha21 R1 image omits the Spotify transport to stay within its fixed
+  rootfs partition. Integration sources remain available; an absent transport
+  hides Spotify from the service picker. Other services, fonts and languages
+  remain included.
+
+- Graphite 2 service pages reuse the existing lists, navigation, queue,
+  mini-player, track actions and global sleep timer. Premium is required;
+  offline downloading is not implemented.
+- An on-demand MIPS librespot process provides catalog/stream transport.
+  Sonix owns Vorbis decoding, output, DSP and ReplayGain through its existing
+  audio path. Stream metadata arrives before playback; cached file names
+  are not substituted for service titles.
+- Cache trimming preserves the playing and prefetched tracks without reading
+  the GUI-owned queue from a background thread. Read-only Spotify items never
+  become local library favourites through their cache paths.
+- Host and native fixture tests cover navigation/scroll state, queue changes,
+  cancellation, service switching and sleep. Real Premium authentication,
+  playback, long-running stability and battery life remain unverified.
+
+## HiBy 2.0 and dependency candidate
+
+- The R1 BCM candidate keeps the official 2.0 power, shared SDIO power and
+  fuel-gauge modules/loaders with a matching Sonix-patched kernel. Its first
+  boot and deep suspend remain separate hardware acceptance checks.
+- SQLite 3.54.1, private OpenSSL 3.5.9, ALSA 1.2.16.1 and matched BlueALSA 5
+  components have passed isolated R1 userspace checks. ALSA keeps the stock
+  unversioned client ABI; the original system OpenSSL 1.1 remains available.
+- LTO remains enabled. This intermediate image deliberately disables PGO;
+  training follows acceptance of the new base. No battery-life or overall
+  speed improvement is claimed. See `STOCK2_MIGRATION.md` for limits.
+
 ## Native streaming application parameters
 
 - Alpha21 packaging is prepared to use the Tidal and Qobuz application

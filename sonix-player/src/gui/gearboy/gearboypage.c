@@ -10,13 +10,13 @@
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/gearboy/gearboyplay.h"
 #include "src/gui/gearboy/gearboysettings.h"
-#include "src/gui/shell/icons.h"
 #include "src/gui/nowplaying/player.h"
+#include "src/gui/shell/icons.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
-#include "src/system/gearboy/gbdb.h"
 #include "src/system/core/lang.h"
+#include "src/system/gearboy/gbdb.h"
 
 lv_obj_t *gearboypage_screen;
 
@@ -67,9 +67,7 @@ static void open_rom_cb(lv_event_t *e) {
 //
 // The name is not a UI label, it comes from the cartridge database. tr() passes
 // it through unchanged, since a missing key returns the string it was given.
-static void add_row(int index) {
-	settingsrow_action(list_box, roms[index].name, open_rom_cb, (void *)(intptr_t)index);
-}
+static void add_row(int index) { settingsrow_action(list_box, roms[index].name, open_rom_cb, (void *)(intptr_t)index); }
 
 static void refresh_view_buttons(void) {
 	lv_obj_t *const buttons[] = {btn_gb, btn_gbc};
@@ -101,8 +99,7 @@ static void rebuild_rows(void) {
 		return;
 	}
 
-	lv_label_set_text(status_label, show_color ? tr("gearboy_empty_note")
-											   : tr("gearboy_empty_gb_note"));
+	lv_label_set_text(status_label, show_color ? tr("gearboy_empty_note") : tr("gearboy_empty_gb_note"));
 	lv_obj_set_hidden(status_label, false);
 }
 
@@ -182,7 +179,10 @@ static void *scan_thread(void *arg) {
 	res->list = list;
 	res->count = count;
 
-	gui_post(scan_done_cb, res);
+	if (!gui_post(scan_done_cb, res)) {
+		free(res->list);
+		free(res);
+	}
 	return NULL;
 }
 

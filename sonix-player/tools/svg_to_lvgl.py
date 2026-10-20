@@ -441,6 +441,7 @@ ICONS += [
     ("ui3-disc.svg", "menu_qobuz", 34),
     ("ui3-server.svg", "menu_subsonic", 34),
     ("ui3-music.svg", "menu_yandex", 34),
+    ("ui3-spotify.svg", "menu_spotify", 34),
 ]
 
 COLOR_ICONS = [

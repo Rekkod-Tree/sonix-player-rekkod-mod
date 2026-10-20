@@ -108,9 +108,7 @@ static bool track_path_known(const char *id, bool look, bool any_saved, char *ou
 	return false;
 }
 
-static bool track_path(const char *id, bool look, char *out, size_t size) {
-	return track_path_known(id, look, zvukdl_saved_count() > 0, out, size);
-}
+static bool track_path(const char *id, bool look, char *out, size_t size) { return track_path_known(id, look, zvukdl_saved_count() > 0, out, size); }
 
 static uint32_t id_hash(const char *s) {
 	uint32_t h = 2166136261u;
@@ -169,14 +167,14 @@ static void claim_saved(void) {
 	}
 	zvuklist_t *q = queue_get();
 	int count = zvuklist_count(q);
-	char(*paths)[512] = NULL;
+	char (*paths)[512] = NULL;
 	int n = 0;
 	for (int i = 0; i < count; i++) {
 		char id[ZVUK_ID_MAX], path[512];
 		if (!zvuklist_id(q, i, id, sizeof(id)) || !zvukdl_saved(id) || !zvukdl_local(id, path, sizeof(path))) {
 			continue;
 		}
-		char(*grown)[512] = realloc(paths, (size_t)(n + 1) * sizeof(*paths));
+		char (*grown)[512] = realloc(paths, (size_t)(n + 1) * sizeof(*paths));
 		if (!grown) {
 			break;
 		}
@@ -354,8 +352,7 @@ static void submit(job_kind_t kind, const char *id, bool waiting, const char *pa
 	job.generation = queue_generation;
 	pthread_mutex_unlock(&queue_lock);
 	if (kind == JOB_METADATA) {
-		if ((metadata_requested_generation == job.generation && strcmp(metadata_requested, path) == 0) ||
-			(!waiting && metadata_pending.kind != JOB_NONE)) {
+		if ((metadata_requested_generation == job.generation && strcmp(metadata_requested, path) == 0) || (!waiting && metadata_pending.kind != JOB_NONE)) {
 			pthread_mutex_unlock(&job_lock);
 			return;
 		}
@@ -634,7 +631,10 @@ static void signed_out_note_async(void *user) {
 	gui_notify_popup(tr(zvuk_session_expired() ? "zvuk_token_expired" : "zvuk_not_signed_in"));
 }
 
-typedef struct { unsigned sleep_serial; char path[512]; } requeue_note_t;
+typedef struct {
+	unsigned sleep_serial;
+	char path[512];
+} requeue_note_t;
 static void requeue_async(void *user) {
 	requeue_note_t *note = user;
 	char *path = note->path;
@@ -675,11 +675,11 @@ bool zvukplay_prepare_track(const char *path) {
 		if (zvukdl_claimed(path) && access(path, R_OK) != 0) {
 			requeue_note_t *copy = malloc(sizeof(*copy));
 			if (copy) {
-			copy->sleep_serial = sleeptimer_expiration_serial();
-			snprintf(copy->path, sizeof(copy->path), "%s", path);
+				copy->sleep_serial = sleeptimer_expiration_serial();
+				snprintf(copy->path, sizeof(copy->path), "%s", path);
 				zvukcache_set_network_wanted(true);
 				device_state_stop();
-				gui_post(requeue_async, copy);
+				gui_post_or_free(requeue_async, copy);
 				return false;
 			}
 		}
@@ -700,7 +700,7 @@ bool zvukplay_prepare_track(const char *path) {
 			copy->sleep_serial = sleeptimer_expiration_serial();
 			snprintf(copy->path, sizeof(copy->path), "%s", path);
 			device_state_stop();
-			gui_post(requeue_async, copy);
+			gui_post_or_free(requeue_async, copy);
 			return false;
 		}
 	}
@@ -799,8 +799,7 @@ static void watch_cb(lv_timer_t *timer) {
 	static const char *keep_ptr[ZVUKCACHE_PROTECTED_MAX];
 	int protect = 0;
 	int count = playlist_count();
-	for (int i = playlist_current_index(); !library_queue && i >= 0 && i < count && protect < ZVUKCACHE_PROTECTED_MAX;
-		 i++) {
+	for (int i = playlist_current_index(); !library_queue && i >= 0 && i < count && protect < ZVUKCACHE_PROTECTED_MAX; i++) {
 		if (playlist_path_at(i, keep[protect], sizeof(keep[0])) && zvukcache_owns(keep[protect])) {
 			keep_ptr[protect] = keep[protect];
 			protect++;

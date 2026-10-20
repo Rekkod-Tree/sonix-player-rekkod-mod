@@ -35,8 +35,8 @@ static lv_obj_t *tile_grid;
 static home_item_t order[HOME_CUSTOM_SLOTS];
 static int order_n;
 static bool loaded;
-static const char *ids[] = {"music", "streaming", "networks", "audiobooks", "settings", "continue_book", "tidal", "qobuz", "radio", "podcasts", "subsonic", "yandex", "zvuk", "music_all", "music_albums", "music_artists", "music_album_artists", "music_genres", "music_years", "music_favourites", "music_most_played", "music_recent_added", "music_recent_played", "music_playlists", "music_browse", "search", "files", "yandex_wave", "yandex_liked"};
-static const char *tags[] = {"music", "streaming", "wireless", "audiobooks", "settings", "home_resume_book", "tidal", "qobuz", "radio", "podcasts", "subsonic", "yandex", "zvuk", "music_all_tracks", "albums", "artists", "music_album_artists", "music_genres", "music_year", "favourites", "music_most_played", "music_recently_added", "music_recently_played", "playlists", "music_browse", "home_search", "file_explorer", "yandex_my_wave", "yandex_liked"};
+static const char *ids[] = {"music", "streaming", "networks", "audiobooks", "settings", "continue_book", "tidal", "qobuz", "radio", "podcasts", "subsonic", "yandex", "zvuk", "music_all", "music_albums", "music_artists", "music_album_artists", "music_genres", "music_years", "music_favourites", "music_most_played", "music_recent_added", "music_recent_played", "music_playlists", "music_browse", "search", "files", "yandex_wave", "yandex_liked", "spotify"};
+static const char *tags[] = {"music", "streaming", "wireless", "audiobooks", "settings", "home_resume_book", "tidal", "qobuz", "radio", "podcasts", "subsonic", "yandex", "zvuk", "music_all_tracks", "albums", "artists", "music_album_artists", "music_genres", "music_year", "favourites", "music_most_played", "music_recently_added", "music_recently_played", "playlists", "music_browse", "home_search", "file_explorer", "yandex_my_wave", "yandex_liked", "spotify"};
 static const lv_image_dsc_t *icons[] = {&icon_menu_music, &icon_menu_streaming, &icon_menu_wireless, &icon_menu_audiobooks, &icon_menu_settings, &icon_menu_audiobooks};
 
 _Static_assert(sizeof(ids) / sizeof(ids[0]) == HOME_ITEM_COUNT, "Home IDs must match items");
@@ -107,7 +107,7 @@ const lv_image_dsc_t *main_menu_icon(home_item_t item) {
 		return &icon_search;
 	if (item == HOME_FILES)
 		return &icon_menu_file_explorer;
-	if (item > HOME_CONTINUE_BOOK && item <= HOME_ZVUK && streaming_home_entry(ids[item], &entry))
+	if (((item > HOME_CONTINUE_BOOK && item <= HOME_ZVUK) || item == HOME_SPOTIFY) && streaming_home_entry(ids[item], &entry))
 		return entry.icon;
 	return item >= 0 && item <= HOME_CONTINUE_BOOK ? icons[item] : &icon_menu_more;
 }
@@ -131,9 +131,7 @@ static void network_description(char *text, size_t size) {
 	const char *tag = wifi.state == WIFI_STATE_CONNECTED ? "home_wifi_connected" : bluetooth_connected_device(&device) ? "home_bt_connected" : "home_no_connections";
 	snprintf(text, size, "%s", tr(tag));
 }
-static void yandex_description(char *text, size_t size) {
-	snprintf(text, size, "%s", tr("yandex"));
-}
+static void yandex_description(char *text, size_t size) { snprintf(text, size, "%s", tr("yandex")); }
 bool main_menu_get_entry(home_item_t item, grid_entry_t *out) {
 	if (!valid(item) || !out)
 		return false;
@@ -148,8 +146,7 @@ bool main_menu_get_entry(home_item_t item, grid_entry_t *out) {
 		return true;
 	}
 	if (item == HOME_YANDEX_WAVE || item == HOME_YANDEX_LIKED) {
-		*out = (grid_entry_t){tags[item], main_menu_icon(item), NULL,
-			item == HOME_YANDEX_WAVE ? yandexpage_wave_open : yandexpage_liked_open, yandex_description};
+		*out = (grid_entry_t){tags[item], main_menu_icon(item), NULL, item == HOME_YANDEX_WAVE ? yandexpage_wave_open : yandexpage_liked_open, yandex_description};
 		return true;
 	}
 	if (item > HOME_CONTINUE_BOOK)

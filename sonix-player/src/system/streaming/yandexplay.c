@@ -185,7 +185,7 @@ static void claim_saved(void) {
 	}
 	yandexlist_t *q = queue_get();
 	int count = yandexlist_count(q);
-	char(*paths)[512] = NULL;
+	char (*paths)[512] = NULL;
 	const char **ptrs = NULL;
 	int n = 0;
 	for (int i = 0; i < count; i++) {
@@ -193,7 +193,7 @@ static void claim_saved(void) {
 		if (!yandexlist_ids(q, i, id, sizeof(id), NULL, 0) || !yandexsaved_has(id) || !yandexsaved_local(id, path, sizeof(path))) {
 			continue;
 		}
-		char(*grown)[512] = realloc(paths, (size_t)(n + 1) * sizeof(*paths));
+		char (*grown)[512] = realloc(paths, (size_t)(n + 1) * sizeof(*paths));
 		if (!grown) {
 			break;
 		}
@@ -391,8 +391,7 @@ static void submit(job_kind_t kind, const char *id, bool waiting, const char *pa
 	job.generation = queue_generation;
 	pthread_mutex_unlock(&queue_lock);
 	if (kind == JOB_METADATA) {
-		if ((metadata_requested_generation == job.generation && strcmp(metadata_requested, path) == 0) ||
-			(!waiting && metadata_pending.kind != JOB_NONE)) {
+		if ((metadata_requested_generation == job.generation && strcmp(metadata_requested, path) == 0) || (!waiting && metadata_pending.kind != JOB_NONE)) {
 			pthread_mutex_unlock(&job_lock);
 			return;
 		}
@@ -701,7 +700,10 @@ static void downloading_note_async(void *user) {
 // made (it plays from the card instead of being fetched). The entry gets its
 // name anew and playback restarts there; for a track that must be fetched,
 // starting it lands in the prepare callback again, which fetches it.
-typedef struct { unsigned sleep_serial; char path[512]; } requeue_note_t;
+typedef struct {
+	unsigned sleep_serial;
+	char path[512];
+} requeue_note_t;
 static void requeue_async(void *user) {
 	requeue_note_t *note = user;
 	char *path = note->path;
@@ -754,11 +756,11 @@ bool yandexplay_prepare_track(const char *path) {
 		if (yandexsaved_claimed(path) && access(path, R_OK) != 0) {
 			requeue_note_t *copy = malloc(sizeof(*copy));
 			if (copy) {
-			copy->sleep_serial = sleeptimer_expiration_serial();
-			snprintf(copy->path, sizeof(copy->path), "%s", path);
+				copy->sleep_serial = sleeptimer_expiration_serial();
+				snprintf(copy->path, sizeof(copy->path), "%s", path);
 				yandexcache_set_network_wanted(true);
 				device_state_stop();
-				gui_post(requeue_async, copy);
+				gui_post_or_free(requeue_async, copy);
 				return false;
 			}
 		}
@@ -782,7 +784,7 @@ bool yandexplay_prepare_track(const char *path) {
 			copy->sleep_serial = sleeptimer_expiration_serial();
 			snprintf(copy->path, sizeof(copy->path), "%s", path);
 			device_state_stop();
-			gui_post(requeue_async, copy);
+			gui_post_or_free(requeue_async, copy);
 			return false;
 		}
 	}
@@ -829,8 +831,7 @@ static void wave_batch_async(void *user) {
 		// Run out: stopped on the last entry, which is a file that played --
 		// not one waiting for its download.
 		bool ran_out = state.status == AUDIO_STATUS_STOPPED && count_before > 0 && playlist_current_index() == count_before - 1;
-		ran_out = ran_out && access(state.current_file, F_OK) == 0 && !worker_fetching() &&
-			wave_sleep_serial == sleeptimer_expiration_serial();
+		ran_out = ran_out && access(state.current_file, F_OK) == 0 && !worker_fetching() && wave_sleep_serial == sleeptimer_expiration_serial();
 		yandexlist_t *q = queue_get();
 		for (int i = 0; i < b->count; i++) {
 			char path[512];
@@ -978,7 +979,8 @@ static void wave_watch(bool ours_now) {
 }
 
 void yandexplay_watch(void) {
-	if (audio_get_status() == AUDIO_STATUS_PLAYING) wave_sleep_serial = sleeptimer_expiration_serial();
+	if (audio_get_status() == AUDIO_STATUS_PLAYING)
+		wave_sleep_serial = sleeptimer_expiration_serial();
 	pthread_mutex_lock(&queue_lock);
 	bool any = queue != NULL;
 	pthread_mutex_unlock(&queue_lock);

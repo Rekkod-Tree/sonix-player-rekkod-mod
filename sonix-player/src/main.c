@@ -2,86 +2,86 @@
 #include "src/system/device/chargescreen.h"
 
 #include <dirent.h>
+#include <linux/input.h>
 #include <malloc.h>
 #include <poll.h>
-#include <sys/mman.h>
 #include <pthread.h>
-#include <linux/input.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <ucontext.h>
-#include <sys/stat.h>
 #include <unistd.h>
 
-#include "src/gui/nowplaying/cover.h"
-#include "src/system/audio/waveform.h"
 #include "src/gui/fonts/fonts.h"
-#include "src/gui/shell/gui.h"
-#include "src/gui/shell/switcher.h"
-#include "src/gui/shell/sx_palette.h"
+#include "src/gui/nowplaying/cover.h"
 #include "src/gui/nowplaying/player.h"
 #include "src/gui/settings/powersettings.h"
 #include "src/gui/settings/settings.h"
-#include "src/system/device/adb.h"
+#include "src/gui/shell/gui.h"
+#include "src/gui/shell/switcher.h"
+#include "src/gui/shell/sx_palette.h"
 #include "src/system/audio/alsa-controls.h"
-#include "src/system/playback/sleeptimer.h"
-#include "src/system/playback/device_state.h"
-#include "src/system/audio/usbaudio.h"
 #include "src/system/audio/audio.h"
-#include "src/system/library/audiobookdb.h"
-#include "src/system/library/covertone.h"
+#include "src/system/audio/eq.h"
+#include "src/system/audio/headset.h"
+#include "src/system/audio/usbaudio.h"
+#include "src/system/audio/waveform.h"
 #include "src/system/bluetooth/bluetooth.h"
 #include "src/system/bluetooth/btlog.h"
 #include "src/system/bluetooth/btplayer.h"
-#include "src/system/device/clock.h"
-#include "src/system/device/factoryreset.h"
 #include "src/system/core/config.h"
 #include "src/system/core/lang.h"
+#include "src/system/device/adb.h"
+#include "src/system/device/clock.h"
+#include "src/system/device/factoryreset.h"
 #include "src/system/device/led.h"
-#include "src/system/audio/eq.h"
-#include "src/system/audio/headset.h"
 #include "src/system/input/keymap.h"
-#include "src/system/streaming/qobuz.h"
-#include "src/system/streaming/tidal.h"
-#include "src/system/streaming/subsonic.h"
-#include "src/system/streaming/yandex.h"
+#include "src/system/library/audiobookdb.h"
+#include "src/system/library/covertone.h"
+#include "src/system/playback/device_state.h"
+#include "src/system/playback/sleeptimer.h"
 #include "src/system/streaming/cardimport.h"
+#include "src/system/streaming/qobuz.h"
+#include "src/system/streaming/spotify.h"
+#include "src/system/streaming/subsonic.h"
 #include "src/system/streaming/subsonicimport.h"
+#include "src/system/streaming/tidal.h"
+#include "src/system/streaming/yandex.h"
 #ifdef SONIX_ZVUK
 #include "src/system/streaming/zvuk.h"
 #endif
-#include "src/system/remote/dlna.h"
-#include "src/system/gearboy/gbdb.h"
-#include "src/system/gearboy/gearboy.h"
-#include "src/system/remote/sonixlink.h"
-#include "src/system/core/panel.h"
-#include "src/system/streaming/provider.h"
-#include "src/system/streaming/podcastcache.h"
-#include "src/system/streaming/podcastsubs.h"
-#include "src/system/streaming/podcaststate.h"
-#include "src/system/streaming/tidalcache.h"
-#include "src/system/streaming/streamkeys.h"
-#include "src/system/lastfm/lastfm.h"
-#include "src/system/library/library.h"
 #include "src/system/core/logging.h"
-#include "src/system/playback/playlist.h"
-#include "src/system/library/playlists.h"
+#include "src/system/core/panel.h"
+#include "src/system/core/utils.h"
 #include "src/system/device/perfstat.h"
 #include "src/system/device/power.h"
-#include "src/system/streaming/radio.h"
 #include "src/system/device/screenshot.h"
 #include "src/system/device/sysinfo.h"
-#include "src/system/net/tls.h"
 #include "src/system/device/system.h"
 #include "src/system/device/usb.h"
-#include "src/system/core/utils.h"
+#include "src/system/gearboy/gbdb.h"
+#include "src/system/gearboy/gearboy.h"
+#include "src/system/lastfm/lastfm.h"
+#include "src/system/library/library.h"
+#include "src/system/library/playlists.h"
+#include "src/system/net/tls.h"
 #include "src/system/net/webcgi.h"
 #include "src/system/net/wifi.h"
-
+#include "src/system/playback/playlist.h"
+#include "src/system/remote/dlna.h"
+#include "src/system/remote/sonixlink.h"
+#include "src/system/streaming/podcastcache.h"
+#include "src/system/streaming/podcaststate.h"
+#include "src/system/streaming/podcastsubs.h"
+#include "src/system/streaming/provider.h"
+#include "src/system/streaming/radio.h"
+#include "src/system/streaming/streamkeys.h"
+#include "src/system/streaming/tidalcache.h"
 
 static volatile sig_atomic_t running = 1;
 
@@ -105,8 +105,7 @@ static void host_shot_poll_cb(lv_timer_t *timer) {
 static bool restore_saved_track(void) {
 	char saved_track[512];
 	double saved_pos = 0;
-	if (!library_playback_state_load(saved_track, sizeof(saved_track), &saved_pos) ||
-		access(saved_track, R_OK) != 0) {
+	if (!library_playback_state_load(saved_track, sizeof(saved_track), &saved_pos) || access(saved_track, R_OK) != 0) {
 		return false;
 	}
 
@@ -129,8 +128,7 @@ static bool restore_saved_track(void) {
 			char **extra = NULL;
 			int *extra_slots = NULL;
 			int extra_count = library_queue_load_extra(&extra, &extra_slots);
-			player_restore_index(ix, spec_pos, (const char *const *)extra, extra_slots, extra_count, saved_track,
-								 saved_pos);
+			player_restore_index(ix, spec_pos, (const char *const *)extra, extra_slots, extra_count, saved_track, saved_pos);
 			library_queue_free(extra, extra_count);
 			free(extra_slots);
 			return true;
@@ -292,8 +290,7 @@ static uintptr_t text_begin(void) {
 #if defined(__GLIBC__) && defined(__mips__)
 #define CRASH_REGS 32
 static const char *const REG_NAMES[CRASH_REGS] = {
-	"zero", "at", "v0", "v1", "a0", "a1", "a2", "a3", "t0", "t1", "t2",	 "t3", "t4", "t5", "t6", "t7",
-	"s0",	"s1", "s2", "s3", "s4", "s5", "s6", "s7", "t8", "t9", "k0",	 "k1", "gp", "sp", "s8", "ra",
+	"zero", "at", "v0", "v1", "a0", "a1", "a2", "a3", "t0", "t1", "t2", "t3", "t4", "t5", "t6", "t7", "s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7", "t8", "t9", "k0", "k1", "gp", "sp", "s8", "ra",
 };
 static uintptr_t crash_reg(const ucontext_t *uc, int i) { return (uintptr_t)uc->uc_mcontext.gregs[i]; }
 static uintptr_t crash_pc(const ucontext_t *uc) { return (uintptr_t)uc->uc_mcontext.pc; }
@@ -384,8 +381,7 @@ static void write_stack_trace(uintptr_t sp) {
 
 	write_raw("*** on the stack, addr2line these:\n*** ");
 	int shown = 0;
-	for (uintptr_t at = sp; at + sizeof(uintptr_t) <= high && shown < CRASH_TRACE_MAX;
-		 at += sizeof(uintptr_t)) {
+	for (uintptr_t at = sp; at + sizeof(uintptr_t) <= high && shown < CRASH_TRACE_MAX; at += sizeof(uintptr_t)) {
 		uintptr_t word;
 		memcpy(&word, (const void *)at, sizeof(word));
 		if (word < code_begin || word >= code_end) {
@@ -538,8 +534,7 @@ static void report_memory(const char *when) {
 	if (st) {
 		char line[128];
 		while (fgets(line, sizeof(line), st)) {
-			if (strncmp(line, "VmSize:", 7) == 0 || strncmp(line, "VmRSS:", 6) == 0 ||
-				strncmp(line, "VmLck:", 6) == 0) {
+			if (strncmp(line, "VmSize:", 7) == 0 || strncmp(line, "VmRSS:", 6) == 0 || strncmp(line, "VmLck:", 6) == 0) {
 				fprintf(stderr, "memory (%s): %s", when, line);
 			}
 		}
@@ -550,15 +545,13 @@ static void report_memory(const char *when) {
 	if (mi) {
 		char line[128];
 		while (fgets(line, sizeof(line), mi)) {
-			if (strncmp(line, "MemTotal:", 9) == 0 || strncmp(line, "MemFree:", 8) == 0 ||
-				strncmp(line, "MemAvailable:", 13) == 0) {
+			if (strncmp(line, "MemTotal:", 9) == 0 || strncmp(line, "MemFree:", 8) == 0 || strncmp(line, "MemAvailable:", 13) == 0) {
 				fprintf(stderr, "memory (%s): %s", when, line);
 			}
 		}
 		fclose(mi);
 	}
 }
-
 
 // Pins the executable pages -- the player's and the libraries' -- in RAM, and
 // nothing else.
@@ -706,8 +699,7 @@ static void watchdog_dump_threads(void) {
 	if (mi) {
 		char line[128];
 		while (fgets(line, sizeof(line), mi)) {
-			if (strncmp(line, "MemFree:", 8) == 0 || strncmp(line, "MemAvailable:", 13) == 0 ||
-				strncmp(line, "Dirty:", 6) == 0 || strncmp(line, "Writeback:", 10) == 0) {
+			if (strncmp(line, "MemFree:", 8) == 0 || strncmp(line, "MemAvailable:", 13) == 0 || strncmp(line, "Dirty:", 6) == 0 || strncmp(line, "Writeback:", 10) == 0) {
 				fprintf(stderr, "watchdog:   %s", line);
 			}
 		}
@@ -830,8 +822,7 @@ static void *watchdog_thread(void *arg) {
 		if (waiting_ms >= WATCHDOG_PLAY_STALL_MS) {
 			if (!play_dumped) {
 				play_dumped = true;
-				fprintf(stderr, "watchdog: the playback thread has not taken a play request for %ld ms -- thread dump:\n",
-						waiting_ms);
+				fprintf(stderr, "watchdog: the playback thread has not taken a play request for %ld ms -- thread dump:\n", waiting_ms);
 				watchdog_dump_threads();
 				logging_sync();
 			}
@@ -852,8 +843,9 @@ static void *watchdog_thread(void *arg) {
 
 		stalled_for++;
 		if (stalled_for >= WATCHDOG_STALL_SECONDS && !dumped) {
-			fprintf(stderr, "watchdog: UI thread has not run for %d s (playback loop %u turns in the last second) "
-							"-- thread dump:\n",
+			fprintf(stderr,
+					"watchdog: UI thread has not run for %d s (playback loop %u turns in the last second) "
+					"-- thread dump:\n",
 					stalled_for, turns_this_second);
 			watchdog_dump_threads();
 			logging_sync();
@@ -1087,8 +1079,7 @@ static void panel_size(int *width, int *height, int fb_w, int fb_h) {
 	if (!model && fb_w > 0 && fb_h > 0) {
 		model = sysinfo_model_by_panel(fb_w, fb_h);
 		if (model) {
-			printf("panel: system-info.json names no known model; the framebuffer is %dx%d, the %s's panel\n",
-				   fb_w, fb_h, model->name);
+			printf("panel: system-info.json names no known model; the framebuffer is %dx%d, the %s's panel\n", fb_w, fb_h, model->name);
 		}
 	}
 	*width = model ? model->panel_width : SCREEN_WIDTH;
@@ -1137,8 +1128,7 @@ static const struct {
 	SDL_Keycode key;
 	int code;
 } HOST_BUTTONS[] = {
-	{SDLK_p, KEY_POWER},		{SDLK_u, KEY_VOLUMEUP},		{SDLK_i, KEY_VOLUMEDOWN},
-	{SDLK_b, KEY_NEXTSONG},		{SDLK_n, KEY_PLAYPAUSE},	{SDLK_m, KEY_PREVIOUSSONG},
+	{SDLK_p, KEY_POWER}, {SDLK_u, KEY_VOLUMEUP}, {SDLK_i, KEY_VOLUMEDOWN}, {SDLK_b, KEY_NEXTSONG}, {SDLK_n, KEY_PLAYPAUSE}, {SDLK_m, KEY_PREVIOUSSONG},
 };
 
 static int host_key_watch(void *userdata, SDL_Event *event) {
@@ -1384,11 +1374,11 @@ static struct fb_var_screeninfo fb_var;
 // until it has been measured on the device.
 // ---------------------------------------------------------------------------
 
-static lv_display_t *fb_display;   // the page-flipping display, NULL on the fallback
-static lv_indev_t *fb_touch;	   // so the calibration can be flipped with the screen
+static lv_display_t *fb_display; // the page-flipping display, NULL on the fallback
+static lv_indev_t *fb_touch;	 // so the calibration can be flipped with the screen
 static bool fb_rotated;
-static bool fb_cached_render;	   // [display] cached_render took effect: the RAM page is permanent
-static uint8_t *shadow_page;	   // the RAM page LVGL draws into while rotated or rendering cached
+static bool fb_cached_render; // [display] cached_render took effect: the RAM page is permanent
+static uint8_t *shadow_page;  // the RAM page LVGL draws into while rotated or rendering cached
 
 // What this frame touched, and what each framebuffer page has not been given
 // yet (a bounding box each -- cheap, and a frame's damage is one region in
@@ -1436,8 +1426,7 @@ static void area_set_full(lv_area_t *a) {
 
 // Copies one dirty rectangle into `dst` (a whole framebuffer page) rotated by
 // 180 degrees: the pixel at (x, y) lands at (W-1-x, H-1-y).
-static void blit_rotated_180(uint16_t *dst, const uint16_t *src, const lv_area_t *area, int32_t width,
-							 int32_t height) {
+static void blit_rotated_180(uint16_t *dst, const uint16_t *src, const lv_area_t *area, int32_t width, int32_t height) {
 	int32_t x1 = area->x1 < 0 ? 0 : area->x1;
 	int32_t y1 = area->y1 < 0 ? 0 : area->y1;
 	int32_t x2 = area->x2 >= width ? width - 1 : area->x2;
@@ -1454,8 +1443,7 @@ static void blit_rotated_180(uint16_t *dst, const uint16_t *src, const lv_area_t
 
 // The same, the right way up: row by row, or one copy when the rectangle spans
 // whole lines (and so is contiguous in both).
-static void blit_straight(uint16_t *dst, const uint16_t *src, const lv_area_t *area, int32_t width,
-						  int32_t height) {
+static void blit_straight(uint16_t *dst, const uint16_t *src, const lv_area_t *area, int32_t width, int32_t height) {
 	int32_t x1 = area->x1 < 0 ? 0 : area->x1;
 	int32_t y1 = area->y1 < 0 ? 0 : area->y1;
 	int32_t x2 = area->x2 >= width ? width - 1 : area->x2;
@@ -1544,8 +1532,7 @@ static lv_display_t *try_panned_display(void) {
 	// thing about this device the player cannot work out for itself, it is what
 	// the whole interface is then laid out against, and it is the first thing
 	// anyone needs when the interface does not appear.
-	printf("fb: %ux%u (virtual %ux%u), %u bpp, stride %u, %u bytes of memory\n", fb_var.xres, fb_var.yres,
-		   fb_var.xres_virtual, fb_var.yres_virtual, fb_var.bits_per_pixel, fix.line_length, fix.smem_len);
+	printf("fb: %ux%u (virtual %ux%u), %u bpp, stride %u, %u bytes of memory\n", fb_var.xres, fb_var.yres, fb_var.xres_virtual, fb_var.yres_virtual, fb_var.bits_per_pixel, fix.line_length, fix.smem_len);
 
 	// LVGL renders with a stride of xres * bytespp; a padded framebuffer line
 	// would shear the picture, so refuse and fall back.
@@ -1570,8 +1557,7 @@ static lv_display_t *try_panned_display(void) {
 
 	fb_page_size = (size_t)fix.line_length * fb_var.yres;
 	if ((size_t)fix.smem_len < fb_page_size * 2) {
-		printf("fb: %u bytes of memory is under the %zu two pages need, so no page flipping\n", fix.smem_len,
-			   fb_page_size * 2);
+		printf("fb: %u bytes of memory is under the %zu two pages need, so no page flipping\n", fix.smem_len, fb_page_size * 2);
 		close(fb_fd);
 		fb_fd = -1;
 		return NULL;
@@ -1607,21 +1593,18 @@ static lv_display_t *try_panned_display(void) {
 			area_set_full(&shadow_page_pending[0]);
 			area_set_full(&shadow_page_pending[1]);
 		} else {
-			fprintf(stderr, "fb: no memory for cached rendering (%zu bytes), drawing into the framebuffer\n",
-					fb_page_size);
+			fprintf(stderr, "fb: no memory for cached rendering (%zu bytes), drawing into the framebuffer\n", fb_page_size);
 		}
 	}
 	if (fb_cached_render) {
 		lv_display_set_buffers(disp, shadow_page, NULL, (uint32_t)fb_page_size, LV_DISPLAY_RENDER_MODE_DIRECT);
 	} else {
-		lv_display_set_buffers(disp, fb_mem, fb_mem + fb_page_size, (uint32_t)fb_page_size,
-							   LV_DISPLAY_RENDER_MODE_DIRECT);
+		lv_display_set_buffers(disp, fb_mem, fb_mem + fb_page_size, (uint32_t)fb_page_size, LV_DISPLAY_RENDER_MODE_DIRECT);
 	}
 	lv_display_set_flush_cb(disp, fb_pan_flush_cb);
 	fb_display = disp;
 
-	printf("fb: double-buffered, page flip on FBIOPAN_DISPLAY (%ux%u)%s\n", fb_var.xres, fb_var.yres,
-		   fb_cached_render ? ", rendered in cached RAM" : "");
+	printf("fb: double-buffered, page flip on FBIOPAN_DISPLAY (%ux%u)%s\n", fb_var.xres, fb_var.yres, fb_cached_render ? ", rendered in cached RAM" : "");
 	return disp;
 }
 
@@ -1762,8 +1745,8 @@ const char *panel_touch_device(void) { return fb_touch_node[0] ? fb_touch_node :
 // timed reading as a fallback; an explicit 1 opts other models in.
 // ---------------------------------------------------------------------------
 
-static int fb_touch_fd = -1;  // the descriptor lv_evdev reads; -1 without on-demand reading
-static bool touch_parked;	  // the read timer is paused by this code, waiting on the fd
+static int fb_touch_fd = -1; // the descriptor lv_evdev reads; -1 without on-demand reading
+static bool touch_parked;	 // the read timer is paused by this code, waiting on the fd
 static bool touch_enabled = true;
 
 static bool fd_has_input(int fd) {
@@ -1778,8 +1761,7 @@ static void touch_read_timer_cb(lv_timer_t *t) {
 	if (fb_touch_fd < 0 || !touch_enabled) {
 		return;
 	}
-	if (lv_indev_get_state(indev) == LV_INDEV_STATE_RELEASED && lv_indev_get_scroll_obj(indev) == NULL &&
-		!fd_has_input(fb_touch_fd)) {
+	if (lv_indev_get_state(indev) == LV_INDEV_STATE_RELEASED && lv_indev_get_scroll_obj(indev) == NULL && !fd_has_input(fb_touch_fd)) {
 		lv_timer_pause(t);
 		touch_parked = true;
 	}
@@ -1863,8 +1845,7 @@ void display_set_rotated(bool rotated) {
 		area_set_full(&shadow_page_pending[1]);
 		fb_rotated = false;
 	} else {
-		lv_display_set_buffers(fb_display, fb_mem, fb_mem + fb_page_size, (uint32_t)fb_page_size,
-							   LV_DISPLAY_RENDER_MODE_DIRECT);
+		lv_display_set_buffers(fb_display, fb_mem, fb_mem + fb_page_size, (uint32_t)fb_page_size, LV_DISPLAY_RENDER_MODE_DIRECT);
 		fb_rotated = false;
 		lv_async_call(free_shadow_page_cb, NULL);
 	}
@@ -1905,9 +1886,7 @@ void display_set_rotated(bool rotated) {
 // probing; false when none does.
 #define TOUCH_PROBE_WAIT_MS 2000
 
-static bool input_bit(const unsigned long *bits, int bit) {
-	return (bits[bit / (8 * (int)sizeof(long))] >> (bit % (8 * (int)sizeof(long)))) & 1UL;
-}
+static bool input_bit(const unsigned long *bits, int bit) { return (bits[bit / (8 * (int)sizeof(long))] >> (bit % (8 * (int)sizeof(long)))) & 1UL; }
 
 // lv_evdev_create() with the open done here, so the descriptor is known: the
 // main loop waits on it (see touch_read_timer_cb). Same flags as LVGL's own
@@ -2008,8 +1987,7 @@ static lv_display_t *init_target_display(void) {
 		} else {
 			fb_touch_fd = -1;
 		}
-		printf("Touch screen input driver successfully registered%s.\n",
-			   fb_touch_fd >= 0 ? " (read on demand)" : "");
+		printf("Touch screen input driver successfully registered%s.\n", fb_touch_fd >= 0 ? " (read on demand)" : "");
 	} else {
 		fprintf(stderr, "Warning: No touch input device found.\n");
 	}
@@ -2189,6 +2167,7 @@ int main(int argc, char **argv) {
 	tidal_init();
 	subsonic_init();
 	yandex_init();
+	spotify_init();
 #ifdef SONIX_ZVUK
 	zvuk_init();
 #endif
@@ -2307,8 +2286,7 @@ int main(int argc, char **argv) {
 	// out at. They should agree; when they do not, this line is the one that
 	// says so, and it costs nothing to print once.
 	if (fb_w != panel_w || fb_h != panel_h) {
-		printf("panel: the framebuffer reports %dx%d, the model says %dx%d -- laying out at the model's\n", fb_w,
-			   fb_h, panel_w, panel_h);
+		printf("panel: the framebuffer reports %dx%d, the model says %dx%d -- laying out at the model's\n", fb_w, fb_h, panel_w, panel_h);
 	}
 #else
 	panel_size(&panel_w, &panel_h, 0, 0);
@@ -2316,8 +2294,7 @@ int main(int argc, char **argv) {
 
 	{
 		const sysinfo_model_t *model = sysinfo_model();
-		printf("panel: laying the interface out at %dx%d (%s)\n", panel_w, panel_h,
-			   model ? model->name : "no model this build knows, so the default");
+		printf("panel: laying the interface out at %dx%d (%s)\n", panel_w, panel_h, model ? model->name : "no model this build knows, so the default");
 	}
 
 	gui_config_t gui_cfg = {
@@ -2456,8 +2433,7 @@ int main(int argc, char **argv) {
 	// Only what the first frame shows, unless that frame is the now-playing
 	// page (see the restore further down), which needs the player built and
 	// its track put back first.
-	bool nowplaying_first =
-		device_state_remember_enabled() && config_get_bool("music", "nowplaying_at_boot", false);
+	bool nowplaying_first = device_state_remember_enabled() && config_get_bool("music", "nowplaying_at_boot", false);
 	bool rest_pending = gui_init(&gui_cfg, !nowplaying_first);
 
 	// "Rotate screen", as it was left. After gui_init so there are screens to
@@ -2542,7 +2518,6 @@ int main(int argc, char **argv) {
 			lv_timer_create(restore_track_timer_cb, 600, NULL);
 		}
 	}
-
 
 	lv_timer_create(tls_preload_timer_cb, 1000, NULL);
 

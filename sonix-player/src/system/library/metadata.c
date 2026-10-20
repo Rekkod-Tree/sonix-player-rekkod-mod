@@ -1,16 +1,18 @@
 #include "metadata.h"
 
-#include "src/system/library/cue.h"
+#include "src/system/core/config.h"
+#include "src/system/core/utils.h"
+#include "src/system/decode/apedec.h"
 #include "src/system/decode/decode.h"
 #include "src/system/decode/dr_flac.h"
 #include "src/system/decode/mp4.h"
-#include "src/system/decode/apedec.h"
-#include "src/system/library/oggtags.h"
 #include "src/system/image/miniz/miniz_tinfl.h"
-#include "src/system/core/config.h"
-#include "src/system/core/utils.h"
+#include "src/system/library/cue.h"
+#include "src/system/library/oggtags.h"
 
 #include <ctype.h>
+#include <float.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,39 +23,198 @@
 // both ID3v1 tags and ID3v2 TCON frames written in the old "(N)" style. Past
 // "Hard Rock" are Winamp's additions, which every tagger since has written.
 static const char *id3v1_genres[] = {
-	"Blues", "Classic Rock", "Country", "Dance", "Disco", "Funk", "Grunge",
-	"Hip-Hop", "Jazz", "Metal", "New Age", "Oldies", "Other", "Pop", "R&B",
-	"Rap", "Reggae", "Rock", "Techno", "Industrial", "Alternative", "Ska",
-	"Death Metal", "Pranks", "Soundtrack", "Euro-Techno", "Ambient",
-	"Trip-Hop", "Vocal", "Jazz+Funk", "Fusion", "Trance", "Classical",
-	"Instrumental", "Acid", "House", "Game", "Sound Clip", "Gospel", "Noise",
-	"AlternRock", "Bass", "Soul", "Punk", "Space", "Meditative",
-	"Instrumental Pop", "Instrumental Rock", "Ethnic", "Gothic", "Darkwave",
-	"Techno-Industrial", "Electronic", "Pop-Folk", "Eurodance", "Dream",
-	"Southern Rock", "Comedy", "Cult", "Gangsta", "Top 40", "Christian Rap",
-	"Pop/Funk", "Jungle", "Native American", "Cabaret", "New Wave",
-	"Psychedelic", "Rave", "Showtunes", "Trailer", "Lo-Fi", "Tribal",
-	"Acid Punk", "Acid Jazz", "Polka", "Retro", "Musical", "Rock & Roll",
-	"Hard Rock", "Folk", "Folk-Rock", "National Folk", "Swing", "Fast Fusion",
-	"Bebop", "Latin", "Revival", "Celtic", "Bluegrass", "Avantgarde",
-	"Gothic Rock", "Progressive Rock", "Psychedelic Rock", "Symphonic Rock",
-	"Slow Rock", "Big Band", "Chorus", "Easy Listening", "Acoustic", "Humour",
-	"Speech", "Chanson", "Opera", "Chamber Music", "Sonata", "Symphony",
-	"Booty Bass", "Primus", "Porn Groove", "Satire", "Slow Jam", "Club", "Tango",
-	"Samba", "Folklore", "Ballad", "Power Ballad", "Rhythmic Soul", "Freestyle",
-	"Duet", "Punk Rock", "Drum Solo", "A Cappella", "Euro-House", "Dance Hall",
-	"Goa", "Drum & Bass", "Club-House", "Hardcore", "Terror", "Indie", "BritPop",
-	"Negerpunk", "Polsk Punk", "Beat", "Christian Gangsta Rap", "Heavy Metal",
-	"Black Metal", "Crossover", "Contemporary Christian", "Christian Rock",
-	"Merengue", "Salsa", "Thrash Metal", "Anime", "JPop", "Synthpop", "Abstract",
-	"Art Rock", "Baroque", "Bhangra", "Big Beat", "Breakbeat", "Chillout",
-	"Downtempo", "Dub", "EBM", "Eclectic", "Electro", "Electroclash", "Emo",
-	"Experimental", "Garage", "Global", "IDM", "Illbient", "Industro-Goth",
-	"Jam Band", "Krautrock", "Leftfield", "Lounge", "Math Rock", "New Romantic",
-	"Nu-Breakz", "Post-Punk", "Post-Rock", "Psytrance", "Shoegaze", "Space Rock",
-	"Trop Rock", "World Music", "Neoclassical", "Audiobook", "Audio Theatre",
-	"Neue Deutsche Welle", "Podcast", "Indie Rock", "G-Funk", "Dubstep",
-	"Garage Rock", "Psybient",
+	"Blues",
+	"Classic Rock",
+	"Country",
+	"Dance",
+	"Disco",
+	"Funk",
+	"Grunge",
+	"Hip-Hop",
+	"Jazz",
+	"Metal",
+	"New Age",
+	"Oldies",
+	"Other",
+	"Pop",
+	"R&B",
+	"Rap",
+	"Reggae",
+	"Rock",
+	"Techno",
+	"Industrial",
+	"Alternative",
+	"Ska",
+	"Death Metal",
+	"Pranks",
+	"Soundtrack",
+	"Euro-Techno",
+	"Ambient",
+	"Trip-Hop",
+	"Vocal",
+	"Jazz+Funk",
+	"Fusion",
+	"Trance",
+	"Classical",
+	"Instrumental",
+	"Acid",
+	"House",
+	"Game",
+	"Sound Clip",
+	"Gospel",
+	"Noise",
+	"AlternRock",
+	"Bass",
+	"Soul",
+	"Punk",
+	"Space",
+	"Meditative",
+	"Instrumental Pop",
+	"Instrumental Rock",
+	"Ethnic",
+	"Gothic",
+	"Darkwave",
+	"Techno-Industrial",
+	"Electronic",
+	"Pop-Folk",
+	"Eurodance",
+	"Dream",
+	"Southern Rock",
+	"Comedy",
+	"Cult",
+	"Gangsta",
+	"Top 40",
+	"Christian Rap",
+	"Pop/Funk",
+	"Jungle",
+	"Native American",
+	"Cabaret",
+	"New Wave",
+	"Psychedelic",
+	"Rave",
+	"Showtunes",
+	"Trailer",
+	"Lo-Fi",
+	"Tribal",
+	"Acid Punk",
+	"Acid Jazz",
+	"Polka",
+	"Retro",
+	"Musical",
+	"Rock & Roll",
+	"Hard Rock",
+	"Folk",
+	"Folk-Rock",
+	"National Folk",
+	"Swing",
+	"Fast Fusion",
+	"Bebop",
+	"Latin",
+	"Revival",
+	"Celtic",
+	"Bluegrass",
+	"Avantgarde",
+	"Gothic Rock",
+	"Progressive Rock",
+	"Psychedelic Rock",
+	"Symphonic Rock",
+	"Slow Rock",
+	"Big Band",
+	"Chorus",
+	"Easy Listening",
+	"Acoustic",
+	"Humour",
+	"Speech",
+	"Chanson",
+	"Opera",
+	"Chamber Music",
+	"Sonata",
+	"Symphony",
+	"Booty Bass",
+	"Primus",
+	"Porn Groove",
+	"Satire",
+	"Slow Jam",
+	"Club",
+	"Tango",
+	"Samba",
+	"Folklore",
+	"Ballad",
+	"Power Ballad",
+	"Rhythmic Soul",
+	"Freestyle",
+	"Duet",
+	"Punk Rock",
+	"Drum Solo",
+	"A Cappella",
+	"Euro-House",
+	"Dance Hall",
+	"Goa",
+	"Drum & Bass",
+	"Club-House",
+	"Hardcore",
+	"Terror",
+	"Indie",
+	"BritPop",
+	"Negerpunk",
+	"Polsk Punk",
+	"Beat",
+	"Christian Gangsta Rap",
+	"Heavy Metal",
+	"Black Metal",
+	"Crossover",
+	"Contemporary Christian",
+	"Christian Rock",
+	"Merengue",
+	"Salsa",
+	"Thrash Metal",
+	"Anime",
+	"JPop",
+	"Synthpop",
+	"Abstract",
+	"Art Rock",
+	"Baroque",
+	"Bhangra",
+	"Big Beat",
+	"Breakbeat",
+	"Chillout",
+	"Downtempo",
+	"Dub",
+	"EBM",
+	"Eclectic",
+	"Electro",
+	"Electroclash",
+	"Emo",
+	"Experimental",
+	"Garage",
+	"Global",
+	"IDM",
+	"Illbient",
+	"Industro-Goth",
+	"Jam Band",
+	"Krautrock",
+	"Leftfield",
+	"Lounge",
+	"Math Rock",
+	"New Romantic",
+	"Nu-Breakz",
+	"Post-Punk",
+	"Post-Rock",
+	"Psytrance",
+	"Shoegaze",
+	"Space Rock",
+	"Trop Rock",
+	"World Music",
+	"Neoclassical",
+	"Audiobook",
+	"Audio Theatre",
+	"Neue Deutsche Welle",
+	"Podcast",
+	"Indie Rock",
+	"G-Funk",
+	"Dubstep",
+	"Garage Rock",
+	"Psybient",
 };
 #define ID3V1_GENRE_COUNT (sizeof(id3v1_genres) / sizeof(id3v1_genres[0]))
 
@@ -119,7 +280,7 @@ static bool replaygain_field(song_metadata_t *out, const char *key, const char *
 
 	char *end = NULL;
 	double number = strtod(buf, &end);
-	if (end == buf) {
+	if (end == buf || !isfinite(number) || fabs(number) > FLT_MAX) {
 		return false; // not a number at all
 	}
 
@@ -130,8 +291,12 @@ static bool replaygain_field(song_metadata_t *out, const char *key, const char *
 		out->album_gain_db = (float)number;
 		out->has_album_gain = true;
 	} else if (strcmp(key, "REPLAYGAIN_TRACK_PEAK") == 0) {
+		if (number <= 0)
+			return false;
 		out->track_peak = (float)number;
 	} else if (strcmp(key, "REPLAYGAIN_ALBUM_PEAK") == 0) {
+		if (number <= 0)
+			return false;
 		out->album_peak = (float)number;
 	} else {
 		return false;
@@ -356,10 +521,7 @@ static bool flag_is_set(const char *value, size_t len) {
 // The album artists a compilation is credited to when its tracks carry no
 // flag: still a compilation, and still a name that says nothing about who is
 // singing.
-static bool various_artists(const char *name) {
-	return strcasecmp(name, "Various Artists") == 0 || strcasecmp(name, "Various") == 0 ||
-		   strcasecmp(name, "VA") == 0 || strcasecmp(name, "V.A.") == 0;
-}
+static bool various_artists(const char *name) { return strcasecmp(name, "Various Artists") == 0 || strcasecmp(name, "Various") == 0 || strcasecmp(name, "VA") == 0 || strcasecmp(name, "V.A.") == 0; }
 
 // -1 until the configuration is first asked.
 static int track_artist = -1;
@@ -407,8 +569,7 @@ static void apply_vorbis_comment(song_metadata_t *out, const char *comment, size
 	}
 	key[key_len] = '\0';
 
-	if (strcmp(key, "LYRICS") == 0 || strcmp(key, "UNSYNCEDLYRICS") == 0 || strcmp(key, "UNSYNCED LYRICS") == 0 ||
-		strcmp(key, "SYNCEDLYRICS") == 0) {
+	if (strcmp(key, "LYRICS") == 0 || strcmp(key, "UNSYNCEDLYRICS") == 0 || strcmp(key, "UNSYNCED LYRICS") == 0 || strcmp(key, "SYNCEDLYRICS") == 0) {
 		lyrics_offer(value, value_len);
 		return;
 	}
@@ -502,8 +663,7 @@ static void flac_meta_callback(void *pUserData, drflac_metadata *pMetadata) {
 	song_metadata_t *out = (song_metadata_t *)pUserData;
 
 	drflac_vorbis_comment_iterator iter;
-	drflac_init_vorbis_comment_iterator(&iter, pMetadata->data.vorbis_comment.commentCount,
-										 pMetadata->data.vorbis_comment.pComments);
+	drflac_init_vorbis_comment_iterator(&iter, pMetadata->data.vorbis_comment.commentCount, pMetadata->data.vorbis_comment.pComments);
 
 	drflac_uint32 comment_len;
 	const char *comment;
@@ -512,12 +672,10 @@ static void flac_meta_callback(void *pUserData, drflac_metadata *pMetadata) {
 	}
 }
 
-
 static void flac_streaminfo(song_metadata_t *out, const unsigned char *si) {
 	uint32_t rate = ((uint32_t)si[10] << 12) | ((uint32_t)si[11] << 4) | (uint32_t)(si[12] >> 4);
 	int bits = (int)((((si[12] & 0x01) << 4) | (si[13] >> 4)) + 1);
-	uint64_t samples = ((uint64_t)(si[13] & 0x0f) << 32) | ((uint32_t)si[14] << 24) | ((uint32_t)si[15] << 16) |
-					   ((uint32_t)si[16] << 8) | si[17];
+	uint64_t samples = ((uint64_t)(si[13] & 0x0f) << 32) | ((uint32_t)si[14] << 24) | ((uint32_t)si[15] << 16) | ((uint32_t)si[16] << 8) | si[17];
 	out->has_stream = true;
 	out->sample_rate = (int)rate;
 	out->bits_per_sample = bits;
@@ -536,8 +694,7 @@ static bool ogg_comment(void *user, const char *comment, size_t len) {
 	return true;
 }
 
-static bool ogg_long_comment(void *user, const char *key, size_t key_len, uint32_t value_len,
-							 oggtags_value_t *value) {
+static bool ogg_long_comment(void *user, const char *key, size_t key_len, uint32_t value_len, oggtags_value_t *value) {
 	if (oggtags_key_is_picture(key, key_len) || value_len > OGG_TEXT_LONG_MAX) {
 		return true;
 	}
@@ -556,22 +713,15 @@ static bool ogg_long_comment(void *user, const char *key, size_t key_len, uint32
 	return true;
 }
 
-static void read_ogg_metadata(const char *filepath, song_metadata_t *out) {
-	oggtags_walk(filepath, OGG_TEXT_MAX, ogg_comment, ogg_long_comment, out);
-}
+static void read_ogg_metadata(const char *filepath, song_metadata_t *out) { oggtags_walk(filepath, OGG_TEXT_MAX, ogg_comment, ogg_long_comment, out); }
 
 // ---------------------------------------------------------------------------
 // MP3 (ID3v1 / ID3v2) parsing
 // ---------------------------------------------------------------------------
 
-static uint32_t syncsafe_to_uint32(const uint8_t b[4]) {
-	return ((uint32_t)(b[0] & 0x7F) << 21) | ((uint32_t)(b[1] & 0x7F) << 14) |
-		   ((uint32_t)(b[2] & 0x7F) << 7) | (uint32_t)(b[3] & 0x7F);
-}
+static uint32_t syncsafe_to_uint32(const uint8_t b[4]) { return ((uint32_t)(b[0] & 0x7F) << 21) | ((uint32_t)(b[1] & 0x7F) << 14) | ((uint32_t)(b[2] & 0x7F) << 7) | (uint32_t)(b[3] & 0x7F); }
 
-static uint32_t plain_to_uint32(const uint8_t b[4]) {
-	return ((uint32_t)b[0] << 24) | ((uint32_t)b[1] << 16) | ((uint32_t)b[2] << 8) | (uint32_t)b[3];
-}
+static uint32_t plain_to_uint32(const uint8_t b[4]) { return ((uint32_t)b[0] << 24) | ((uint32_t)b[1] << 16) | ((uint32_t)b[2] << 8) | (uint32_t)b[3]; }
 
 // Converts UTF-16 (LE or BE) text to UTF-8, stopping at a null terminator.
 static void utf16_to_utf8(const uint8_t *data, size_t len, bool big_endian, char *out, size_t out_size) {
@@ -718,9 +868,7 @@ static uint32_t cp1251_code(uint8_t c) {
 // the quotes and the currency signs that share the upper half.
 static bool cp1251_is_letter(uint8_t c) { return c >= 0xC0 || c == 0xA8 || c == 0xB8; }
 
-static bool ascii_alnum(uint8_t c) {
-	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
-}
+static bool ascii_alnum(uint8_t c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'); }
 
 // A whole word of high bytes, with no ASCII letter touching either end, is the
 // tell. An accent inside a Latin word always has letters beside it -- the u in
@@ -1084,8 +1232,7 @@ static void id3_txxx(song_metadata_t *out, uint8_t encoding, const uint8_t *data
 		replaygain_field(out, key, text, strlen(text));
 	} else if (strcmp(key, "COMPILATION") == 0) {
 		out->compilation = flag_is_set(text, strlen(text));
-	} else if ((strcmp(key, "ALBUM ARTIST") == 0 || strcmp(key, "ALBUMARTIST") == 0 || strcmp(key, "ALBUM_ARTIST") == 0) &&
-			   !out->album_artist[0]) {
+	} else if ((strcmp(key, "ALBUM ARTIST") == 0 || strcmp(key, "ALBUMARTIST") == 0 || strcmp(key, "ALBUM_ARTIST") == 0) && !out->album_artist[0]) {
 		// TPE2, when the tag has one too, overwrites this wherever it comes.
 		copy_bounded(out->album_artist, sizeof(out->album_artist), text);
 	}
@@ -1176,8 +1323,7 @@ static bool id3_frame_ends_at(id3_stream_t *s, off_t at) {
 		return false;
 	}
 	uint8_t id[4];
-	bool ok = s->end - at < 4 || (fseeko(s->f, at, SEEK_SET) == 0 && fread(id, 1, 4, s->f) == 4 &&
-								  (id[0] == 0 || id3_frame_id_ok(id, 4)));
+	bool ok = s->end - at < 4 || (fseeko(s->f, at, SEEK_SET) == 0 && fread(id, 1, 4, s->f) == 4 && (id[0] == 0 || id3_frame_id_ok(id, 4)));
 	fseeko(s->f, s->pos, SEEK_SET);
 	return ok;
 }
@@ -1192,8 +1338,7 @@ static uint8_t *id3_inflate(const uint8_t *data, size_t len, uint32_t size, size
 	if (!out) {
 		return NULL;
 	}
-	size_t got = tinfl_decompress_mem_to_mem(out, size, data, len,
-											 TINFL_FLAG_PARSE_ZLIB_HEADER | TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF);
+	size_t got = tinfl_decompress_mem_to_mem(out, size, data, len, TINFL_FLAG_PARSE_ZLIB_HEADER | TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF);
 	if (got == TINFL_DECOMPRESS_MEM_TO_MEM_FAILED || got == 0) {
 		free(out);
 		return NULL;
@@ -1322,8 +1467,7 @@ static bool read_id3v2(FILE *f, song_metadata_t *out) {
 			// lands on the next frame and the syncsafe one does not.
 			if (v24 && plain != frame_size) {
 				bool high = (frame_header[4] | frame_header[5] | frame_header[6] | frame_header[7]) & 0x80;
-				if (high || (!id3_frame_ends_at(&s, s.pos + (off_t)frame_size) &&
-							 id3_frame_ends_at(&s, s.pos + (off_t)plain))) {
+				if (high || (!id3_frame_ends_at(&s, s.pos + (off_t)frame_size) && id3_frame_ends_at(&s, s.pos + (off_t)plain))) {
 					frame_size = plain;
 				}
 			}
@@ -1371,11 +1515,7 @@ static bool read_id3v2(FILE *f, song_metadata_t *out) {
 		// The 2.2 identifiers are the same fields under their older names; they
 		// are translated here so that everything below reads one set.
 		if (v22) {
-			static const char *const V22_MAP[][2] = {{"TT2", "TIT2"}, {"TP1", "TPE1"}, {"TP2", "TPE2"},
-													 {"TAL", "TALB"}, {"TCO", "TCON"}, {"TRK", "TRCK"},
-													 {"TPA", "TPOS"}, {"TYE", "TYER"}, {"TXX", "TXXX"},
-													 {"ULT", "USLT"}, {"SLT", "SYLT"}, {"TCP", "TCMP"},
-													 {"COM", "COMM"}, {"TOR", "TORY"}};
+			static const char *const V22_MAP[][2] = {{"TT2", "TIT2"}, {"TP1", "TPE1"}, {"TP2", "TPE2"}, {"TAL", "TALB"}, {"TCO", "TCON"}, {"TRK", "TRCK"}, {"TPA", "TPOS"}, {"TYE", "TYER"}, {"TXX", "TXXX"}, {"ULT", "USLT"}, {"SLT", "SYLT"}, {"TCP", "TCMP"}, {"COM", "COMM"}, {"TOR", "TORY"}};
 			for (size_t i = 0; i < sizeof(V22_MAP) / sizeof(V22_MAP[0]); i++) {
 				if (strcmp(frame_id, V22_MAP[i][0]) == 0) {
 					snprintf(frame_id, sizeof(frame_id), "%s", V22_MAP[i][1]);
@@ -1384,11 +1524,7 @@ static bool read_id3v2(FILE *f, song_metadata_t *out) {
 			}
 		}
 
-		bool wanted = strcmp(frame_id, "MVNM") == 0 || strcmp(frame_id, "MVIN") == 0 || strcmp(frame_id, "TIT2") == 0 ||
-					  strcmp(frame_id, "TPE1") == 0 || strcmp(frame_id, "TPE2") == 0 || strcmp(frame_id, "TALB") == 0 ||
-					  strcmp(frame_id, "TCON") == 0 || strcmp(frame_id, "TRCK") == 0 || strcmp(frame_id, "TPOS") == 0 ||
-					  strcmp(frame_id, "TYER") == 0 || strcmp(frame_id, "TDRC") == 0 || strcmp(frame_id, "TORY") == 0 ||
-					  strcmp(frame_id, "TDOR") == 0 || strcmp(frame_id, "TXXX") == 0 || strcmp(frame_id, "TCMP") == 0;
+		bool wanted = strcmp(frame_id, "MVNM") == 0 || strcmp(frame_id, "MVIN") == 0 || strcmp(frame_id, "TIT2") == 0 || strcmp(frame_id, "TPE1") == 0 || strcmp(frame_id, "TPE2") == 0 || strcmp(frame_id, "TALB") == 0 || strcmp(frame_id, "TCON") == 0 || strcmp(frame_id, "TRCK") == 0 || strcmp(frame_id, "TPOS") == 0 || strcmp(frame_id, "TYER") == 0 || strcmp(frame_id, "TDRC") == 0 || strcmp(frame_id, "TORY") == 0 || strcmp(frame_id, "TDOR") == 0 || strcmp(frame_id, "TXXX") == 0 || strcmp(frame_id, "TCMP") == 0;
 
 		bool lyrics_frame = lyrics_wanted && (strcmp(frame_id, "USLT") == 0 || strcmp(frame_id, "SYLT") == 0);
 		bool comment_frame = description_wanted && strcmp(frame_id, "COMM") == 0;
@@ -1658,9 +1794,7 @@ static void read_mp3_metadata(const char *filepath, song_metadata_t *out) {
 #define FLAC_TEXT_LONG_MAX (1024 * 1024)
 #define FLAC_KEY_MAX 64
 
-static uint32_t le32_bytes(const uint8_t *b) {
-	return (uint32_t)b[0] | ((uint32_t)b[1] << 8) | ((uint32_t)b[2] << 16) | ((uint32_t)b[3] << 24);
-}
+static uint32_t le32_bytes(const uint8_t *b) { return (uint32_t)b[0] | ((uint32_t)b[1] << 8) | ((uint32_t)b[2] << 16) | ((uint32_t)b[3] << 24); }
 
 // One VORBIS_COMMENT block of `size` bytes at the current position of `f`.
 // Each comment is checked against what is left of the block, and the first
@@ -1723,8 +1857,7 @@ static void flac_read_comments(FILE *f, uint32_t size, song_metadata_t *out) {
 			key[key_len++] = (char)c;
 		}
 		uint32_t rest = len - read;
-		if (has_key && (lyrics_wanted || description_wanted) && !oggtags_key_is_picture(key, key_len) &&
-			rest <= FLAC_TEXT_LONG_MAX) {
+		if (has_key && (lyrics_wanted || description_wanted) && !oggtags_key_is_picture(key, key_len) && rest <= FLAC_TEXT_LONG_MAX) {
 			size_t whole = key_len + 1 + rest;
 			char *comment = malloc(whole + 1);
 			if (!comment) {
@@ -1843,8 +1976,7 @@ static bool chunk_fits(FILE *f, off_t at, off_t limit, bool big_endian) {
 			return false;
 		}
 	}
-	uint32_t size = big_endian ? ((uint32_t)h[4] << 24) | ((uint32_t)h[5] << 16) | ((uint32_t)h[6] << 8) | h[7]
-							   : le32_bytes(h + 4);
+	uint32_t size = big_endian ? ((uint32_t)h[4] << 24) | ((uint32_t)h[5] << 16) | ((uint32_t)h[6] << 8) | h[7] : le32_bytes(h + 4);
 	return (off_t)size <= limit - (at + 8);
 }
 
@@ -1854,16 +1986,13 @@ static bool chunk_fits(FILE *f, off_t at, off_t limit, bool big_endian) {
 // byte was never written.
 static off_t chunk_next(FILE *f, off_t body, uint64_t size, off_t limit, bool big_endian) {
 	off_t next = body + (off_t)size + (off_t)(size & 1);
-	if ((size & 1) && next + 8 <= limit && !chunk_fits(f, next, limit, big_endian) &&
-		chunk_fits(f, next - 1, limit, big_endian)) {
+	if ((size & 1) && next + 8 <= limit && !chunk_fits(f, next, limit, big_endian) && chunk_fits(f, next - 1, limit, big_endian)) {
 		next--;
 	}
 	return next;
 }
 
-static uint32_t be32_bytes(const uint8_t *b) {
-	return ((uint32_t)b[0] << 24) | ((uint32_t)b[1] << 16) | ((uint32_t)b[2] << 8) | (uint32_t)b[3];
-}
+static uint32_t be32_bytes(const uint8_t *b) { return ((uint32_t)b[0] << 24) | ((uint32_t)b[1] << 16) | ((uint32_t)b[2] << 8) | (uint32_t)b[3]; }
 
 static uint64_t be64_bytes(const uint8_t *b) { return ((uint64_t)be32_bytes(b) << 32) | be32_bytes(b + 4); }
 
@@ -1937,8 +2066,7 @@ static void read_dff_diin(FILE *f, off_t sub, off_t end, song_metadata_t *out) {
 					len = sizeof(text) - 1;
 				}
 				if (fread(text, 1, len, f) == len) {
-					info_text(text, len, artist ? out->artist : out->title,
-							  artist ? sizeof(out->artist) : sizeof(out->title));
+					info_text(text, len, artist ? out->artist : out->title, artist ? sizeof(out->artist) : sizeof(out->title));
 				}
 			}
 		}
@@ -2078,8 +2206,7 @@ static void read_wav_metadata(const char *filepath, song_metadata_t *out) {
 		return;
 
 	uint8_t riff_header[12];
-	if (fread(riff_header, 1, 12, f) != 12 || memcmp(riff_header, "RIFF", 4) != 0 ||
-		memcmp(riff_header + 8, "WAVE", 4) != 0) {
+	if (fread(riff_header, 1, 12, f) != 12 || memcmp(riff_header, "RIFF", 4) != 0 || memcmp(riff_header + 8, "WAVE", 4) != 0) {
 		fclose(f);
 		return;
 	}
@@ -2186,8 +2313,7 @@ static void read_aiff_metadata(const char *filepath, song_metadata_t *out) {
 			if (fread(text, 1, len, f) == len) {
 				text[len] = '\0';
 				bool name = ch[0] == 'N';
-				info_text(text, len, name ? native->title : native->artist,
-						  name ? sizeof(native->title) : sizeof(native->artist));
+				info_text(text, len, name ? native->title : native->artist, name ? sizeof(native->title) : sizeof(native->artist));
 			}
 		}
 		pos = chunk_next(f, body, size, file_end, true);
@@ -2348,7 +2474,6 @@ static void read_mp4_metadata(const char *filepath, song_metadata_t *out) {
 // Opus and WavPack
 // ---------------------------------------------------------------------------
 
-
 // APEv2 tags (.wv, .ape). The names are not the Vorbis comment ones --
 // "Track" instead of "TRACKNUMBER", "Year" instead of "DATE" -- but the rest
 // matches, so the few that differ are renamed and the same reader is reused.
@@ -2370,8 +2495,7 @@ static void apev2_tag_cb(void *user, const char *key, const char *value) {
 		vorbis = "TRACKNUMBER";
 	} else if (strcasecmp(key, "Year") == 0 || strcasecmp(key, "date") == 0) {
 		vorbis = "DATE";
-	} else if (strcasecmp(key, "Album Artist") == 0 || strcasecmp(key, "AlbumArtist") == 0 ||
-			   strcasecmp(key, "album_artist") == 0) {
+	} else if (strcasecmp(key, "Album Artist") == 0 || strcasecmp(key, "AlbumArtist") == 0 || strcasecmp(key, "album_artist") == 0) {
 		vorbis = "ALBUMARTIST";
 	}
 
@@ -2443,6 +2567,9 @@ static void read_sidecar_tags(const char *filepath, song_metadata_t *out) {
 		const char *key = line;
 		const char *value = equals + 1;
 		if (!value[0]) {
+			continue;
+		}
+		if (replaygain_field(out, key, value, strlen(value))) {
 			continue;
 		}
 

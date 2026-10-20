@@ -41,7 +41,7 @@
 #define UUID_A2DP_SINK "0000110b-0000-1000-8000-00805f9b34fb"
 #define UUID_A2DP_SOURCE "0000110a-0000-1000-8000-00805f9b34fb"
 
-#define CALL_MS 8000		// anything that is not pairing or connecting
+#define CALL_MS 8000 // anything that is not pairing or connecting
 #define OBJECT_PATH_MAX 160
 
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
@@ -204,9 +204,7 @@ static bool pcm_path_dir(const char *address, bool receiving, char *out, size_t 
 	return true;
 }
 
-static bool pcm_path(const char *address, char *out, size_t size) {
-	return pcm_path_dir(address, false, out, size);
-}
+static bool pcm_path(const char *address, char *out, size_t size) { return pcm_path_dir(address, false, out, size); }
 
 // ..../dev_AA_BB_CC_DD_EE_FF/.... -> AA:BB:CC:DD:EE:FF
 static bool address_from_path(const char *path, char *out, size_t size) {
@@ -234,9 +232,7 @@ static bool address_from_path(const char *path, char *out, size_t size) {
 	return true;
 }
 
-static bool path_is_transport(const char *path) {
-	return strncmp(path, "/org/bluez/", 11) == 0 && strstr(path, "/dev_") != NULL && strstr(path, "/fd") != NULL;
-}
+static bool path_is_transport(const char *path) { return strncmp(path, "/org/bluez/", 11) == 0 && strstr(path, "/dev_") != NULL && strstr(path, "/fd") != NULL; }
 
 // Under `lock`.
 static void transport_note(const char *path, const char *state) {
@@ -350,13 +346,9 @@ static bool read_transport_state(dbus_reader_t *r, char *state, size_t size) {
 // the cache of bluealsa PCM objects
 // ---------------------------------------------------------------------------
 
-static bool path_is_a2dp_sink(const char *path) {
-	return strncmp(path, "/org/bluealsa/", 14) == 0 && strstr(path, "/a2dpsrc/sink") != NULL;
-}
+static bool path_is_a2dp_sink(const char *path) { return strncmp(path, "/org/bluealsa/", 14) == 0 && strstr(path, "/a2dpsrc/sink") != NULL; }
 
-static bool path_is_a2dp_source(const char *path) {
-	return strncmp(path, "/org/bluealsa/", 14) == 0 && strstr(path, "/a2dpsnk/source") != NULL;
-}
+static bool path_is_a2dp_source(const char *path) { return strncmp(path, "/org/bluealsa/", 14) == 0 && strstr(path, "/a2dpsnk/source") != NULL; }
 
 // ---------------------------------------------------------------------------
 // the headsets' battery (see headset_batteries above)
@@ -746,8 +738,7 @@ static void on_signal(dbus_conn_t *c, const dbus_msg_t *m, void *user) {
 		// moves a step at a time while the music plays, and each step is one
 		// of these.
 		char address[BT_ADDR_MAX];
-		if (strcmp(iface, BALSA_RFCOMM_IFACE) == 0 && path_is_rfcomm(m->path) &&
-			address_from_path(m->path, address, sizeof(address))) {
+		if (strcmp(iface, BALSA_RFCOMM_IFACE) == 0 && path_is_rfcomm(m->path) && address_from_path(m->path, address, sizeof(address))) {
 			int percent = -1;
 			if (read_rfcomm_props(&r, &percent)) {
 				pthread_mutex_lock(&lock);
@@ -825,9 +816,7 @@ static void on_call(dbus_conn_t *c, const dbus_msg_t *m, void *user) {
 
 	// Everything that is answered by simply agreeing. An empty reply is what
 	// bluez reads as "accepted".
-	if (strcmp(m->member, "Release") == 0 || strcmp(m->member, "Cancel") == 0 ||
-		strcmp(m->member, "RequestConfirmation") == 0 || strcmp(m->member, "RequestAuthorization") == 0 ||
-		strcmp(m->member, "DisplayPasskey") == 0 || strcmp(m->member, "DisplayPinCode") == 0) {
+	if (strcmp(m->member, "Release") == 0 || strcmp(m->member, "Cancel") == 0 || strcmp(m->member, "RequestConfirmation") == 0 || strcmp(m->member, "RequestAuthorization") == 0 || strcmp(m->member, "DisplayPasskey") == 0 || strcmp(m->member, "DisplayPinCode") == 0) {
 		fprintf(stderr, "btstack: agent %s -> accepted\n", m->member);
 		dbus_reply_begin(c, m, "");
 		dbus_reply_send(c);
@@ -868,8 +857,7 @@ static void on_call(dbus_conn_t *c, const dbus_msg_t *m, void *user) {
 
 // A call with no arguments. The error, when there is one, is logged here and
 // also handed back in `err_out` (empty for a call that got no reply at all).
-static bool call_ok_why(const char *destination, const char *path, const char *interface, const char *member,
-						int timeout_ms, char *err_out, size_t err_size) {
+static bool call_ok_why(const char *destination, const char *path, const char *interface, const char *member, int timeout_ms, char *err_out, size_t err_size) {
 	if (err_out && err_size) {
 		err_out[0] = '\0';
 	}
@@ -891,10 +879,7 @@ static bool call_ok_why(const char *destination, const char *path, const char *i
 	return ok;
 }
 
-static bool call_ok(const char *destination, const char *path, const char *interface, const char *member,
-					int timeout_ms) {
-	return call_ok_why(destination, path, interface, member, timeout_ms, NULL, 0);
-}
+static bool call_ok(const char *destination, const char *path, const char *interface, const char *member, int timeout_ms) { return call_ok_why(destination, path, interface, member, timeout_ms, NULL, 0); }
 
 bool btstack_service_ready(const char *name) {
 	pthread_mutex_lock(&lock);
@@ -903,8 +888,7 @@ bool btstack_service_ready(const char *name) {
 	if (!c || !name) {
 		return false;
 	}
-	dbus_writer_t *w =
-		dbus_call_begin(c, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "NameHasOwner", "s");
+	dbus_writer_t *w = dbus_call_begin(c, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "NameHasOwner", "s");
 	dbus_w_string(w, name);
 	if (!dbus_call_send(c, CALL_MS, NULL, 0)) {
 		return false;
@@ -1038,8 +1022,7 @@ static bool set_bool_property(const char *path, const char *interface, const cha
 	char err[DBUS_NAME_MAX];
 	bool ok = dbus_call_send(c, CALL_MS, err, sizeof(err));
 	if (!ok) {
-		fprintf(stderr, "btstack: %s = %s refused: %s\n", name, value ? "true" : "false",
-				err[0] ? err : "no reply");
+		fprintf(stderr, "btstack: %s = %s refused: %s\n", name, value ? "true" : "false", err[0] ? err : "no reply");
 	}
 	return ok;
 }
@@ -1104,28 +1087,18 @@ bool btstack_wait_adapter(int timeout_ms) {
 	}
 }
 
-bool btstack_set_powered(bool on) {
-	return set_bool_property(BLUEZ_ADAPTER_PATH, BLUEZ_ADAPTER_IFACE, "Powered", on);
-}
+bool btstack_set_powered(bool on) { return set_bool_property(BLUEZ_ADAPTER_PATH, BLUEZ_ADAPTER_IFACE, "Powered", on); }
 
-bool btstack_get_powered(bool *out) {
-	return get_bool_property(BLUEZ_ADAPTER_PATH, BLUEZ_ADAPTER_IFACE, "Powered", out);
-}
+bool btstack_get_powered(bool *out) { return get_bool_property(BLUEZ_ADAPTER_PATH, BLUEZ_ADAPTER_IFACE, "Powered", out); }
 
-bool btstack_set_discoverable(bool on) {
-	return set_bool_property(BLUEZ_ADAPTER_PATH, BLUEZ_ADAPTER_IFACE, "Discoverable", on);
-}
+bool btstack_set_discoverable(bool on) { return set_bool_property(BLUEZ_ADAPTER_PATH, BLUEZ_ADAPTER_IFACE, "Discoverable", on); }
 
 // Seconds, and 0 means "until told otherwise". bluez defaults to 180 and turns
 // visibility off by itself when they run out, which from the outside looks like
 // the player disappearing in the middle of a search.
-bool btstack_set_discoverable_timeout(unsigned seconds) {
-	return set_u32_property(BLUEZ_ADAPTER_PATH, BLUEZ_ADAPTER_IFACE, "DiscoverableTimeout", seconds);
-}
+bool btstack_set_discoverable_timeout(unsigned seconds) { return set_u32_property(BLUEZ_ADAPTER_PATH, BLUEZ_ADAPTER_IFACE, "DiscoverableTimeout", seconds); }
 
-bool btstack_set_pairable(bool on) {
-	return set_bool_property(BLUEZ_ADAPTER_PATH, BLUEZ_ADAPTER_IFACE, "Pairable", on);
-}
+bool btstack_set_pairable(bool on) { return set_bool_property(BLUEZ_ADAPTER_PATH, BLUEZ_ADAPTER_IFACE, "Pairable", on); }
 
 bool btstack_set_alias(const char *alias) {
 	pthread_mutex_lock(&lock);
@@ -1148,8 +1121,7 @@ bool btstack_discovery(bool on) {
 	if (!c) {
 		return false;
 	}
-	dbus_call_begin(c, BLUEZ_SERVICE, BLUEZ_ADAPTER_PATH, BLUEZ_ADAPTER_IFACE, on ? "StartDiscovery" : "StopDiscovery",
-					"");
+	dbus_call_begin(c, BLUEZ_SERVICE, BLUEZ_ADAPTER_PATH, BLUEZ_ADAPTER_IFACE, on ? "StartDiscovery" : "StopDiscovery", "");
 	char err[DBUS_NAME_MAX];
 	if (dbus_call_send(c, CALL_MS, err, sizeof(err))) {
 		return true;
@@ -1242,8 +1214,7 @@ int btstack_devices(btstack_device_t *out, int max) {
 	return count;
 }
 
-static bool device_call_why(const char *address, const char *member, int timeout_ms, char *err_out,
-							size_t err_size) {
+static bool device_call_why(const char *address, const char *member, int timeout_ms, char *err_out, size_t err_size) {
 	if (err_out && err_size) {
 		err_out[0] = '\0';
 	}
@@ -1255,15 +1226,11 @@ static bool device_call_why(const char *address, const char *member, int timeout
 	return call_ok_why(BLUEZ_SERVICE, path, BLUEZ_DEVICE_IFACE, member, timeout_ms, err_out, err_size);
 }
 
-static bool device_call(const char *address, const char *member, int timeout_ms) {
-	return device_call_why(address, member, timeout_ms, NULL, 0);
-}
+static bool device_call(const char *address, const char *member, int timeout_ms) { return device_call_why(address, member, timeout_ms, NULL, 0); }
 
 bool btstack_pair(const char *address, int timeout_ms) { return device_call(address, "Pair", timeout_ms); }
 
-bool btstack_connect(const char *address, int timeout_ms, char *err_out, size_t err_size) {
-	return device_call_why(address, "Connect", timeout_ms, err_out, err_size);
-}
+bool btstack_connect(const char *address, int timeout_ms, char *err_out, size_t err_size) { return device_call_why(address, "Connect", timeout_ms, err_out, err_size); }
 
 bool btstack_disconnect(const char *address) { return device_call(address, "Disconnect", CALL_MS); }
 
@@ -1401,8 +1368,7 @@ void btstack_refresh_audio(void) {
 			char address[BT_ADDR_MAX];
 			if (path_is_a2dp_sink(path) && address_from_path(path, address, sizeof(address)) && count < MAX_PCMS) {
 				snprintf(found[count++], BT_ADDR_MAX, "%s", address);
-			} else if (path_is_a2dp_source(path) && address_from_path(path, address, sizeof(address)) &&
-					   count_rx < MAX_PCMS) {
+			} else if (path_is_a2dp_source(path) && address_from_path(path, address, sizeof(address)) && count_rx < MAX_PCMS) {
 				snprintf(found_rx[count_rx++], BT_ADDR_MAX, "%s", address);
 			}
 		}
@@ -1422,8 +1388,7 @@ void btstack_refresh_audio(void) {
 	pthread_mutex_unlock(&lock);
 }
 
-int btstack_codecs_dir(const char *address, bool receiving, char out[][BT_CODEC_NAME_MAX], int max, char *selected,
-					   size_t selected_size) {
+int btstack_codecs_dir(const char *address, bool receiving, char out[][BT_CODEC_NAME_MAX], int max, char *selected, size_t selected_size) {
 	if (selected && selected_size) {
 		selected[0] = '\0';
 	}
@@ -1543,7 +1508,7 @@ bool btstack_audio_info(const char *address, char *out, size_t size) {
 		}
 		if (strcmp(key, "Codec") == 0 && strcmp(sig, "s") == 0) {
 			dbus_r_string(&r, codec, sizeof(codec));
-		} else if (strcmp(key, "Sampling") == 0 && strcmp(sig, "u") == 0) {
+		} else if ((strcmp(key, "Sampling") == 0 || strcmp(key, "Rate") == 0) && strcmp(sig, "u") == 0) {
 			dbus_r_u32(&r, &rate);
 		} else if (strcmp(key, "Channels") == 0 && strcmp(sig, "y") == 0) {
 			dbus_r_byte(&r, &channels);
@@ -1604,7 +1569,7 @@ bool btstack_stream_info(const char *address, bool receiving, btstack_stream_t *
 		}
 		if (strcmp(key, "Codec") == 0 && strcmp(sig, "s") == 0) {
 			dbus_r_string(&r, out->codec, sizeof(out->codec));
-		} else if (strcmp(key, "Sampling") == 0 && strcmp(sig, "u") == 0) {
+		} else if ((strcmp(key, "Sampling") == 0 || strcmp(key, "Rate") == 0) && strcmp(sig, "u") == 0) {
 			dbus_r_u32(&r, &rate);
 		} else if (strcmp(key, "Channels") == 0 && strcmp(sig, "y") == 0) {
 			dbus_r_byte(&r, &channels);
@@ -1712,8 +1677,7 @@ bool btstack_media_status(char *out, size_t size) {
 static char media_player_path[OBJECT_PATH_MAX];
 static char media_player_address[BT_ADDR_MAX];
 
-static bool player_property(dbus_conn_t *c, const char *path, const char *name, const char *expect,
-							dbus_reader_t *out) {
+static bool player_property(dbus_conn_t *c, const char *path, const char *name, const char *expect, dbus_reader_t *out) {
 	dbus_writer_t *w = dbus_call_begin(c, BLUEZ_SERVICE, path, PROPS_IFACE, "Get", "ss");
 	dbus_w_string(w, BLUEZ_MEDIA_PLAYER_IFACE);
 	dbus_w_string(w, name);
@@ -2018,8 +1982,7 @@ bool btstack_select_codec_dir(const char *address, bool receiving, const char *c
 	// Renegotiating the codec tears the stream down and builds it again, which
 	// the headphones take a moment to follow.
 	bool ok = dbus_call_send(c, 15000, err, sizeof(err));
-	fprintf(stderr, "btstack: codec %s on %s (%s) -> %s\n", codec, address, receiving ? "sink" : "source",
-			ok ? "ok" : (err[0] ? err : "no reply"));
+	fprintf(stderr, "btstack: codec %s on %s (%s) -> %s\n", codec, address, receiving ? "sink" : "source", ok ? "ok" : (err[0] ? err : "no reply"));
 	return ok;
 }
 
@@ -2071,7 +2034,7 @@ int btstack_codec_rates(const char *address, const char *codec, unsigned *out, i
 			if (!dbus_r_string(&r, key, sizeof(key)) || !dbus_r_signature(&r, sig, sizeof(sig))) {
 				return count;
 			}
-			if (strcmp(key, "SupportedSampling") == 0 && strcmp(sig, "au") == 0) {
+			if ((strcmp(key, "SupportedSampling") == 0 || strcmp(key, "Rates") == 0) && strcmp(sig, "au") == 0) {
 				dbus_array_iter_t rates;
 				if (!dbus_r_array_begin(&r, "u", &rates)) {
 					return count;
@@ -2122,6 +2085,9 @@ bool btstack_select_codec_rate(const char *address, const char *codec, unsigned 
 	dbus_w_array_begin(w, "{sv}", &props);
 	dbus_w_dict_variant_begin(w, "Sampling", "u");
 	dbus_w_u32(w, (uint32_t)rate);
+	// BlueALSA 5 renamed Sampling to Rate; each version ignores the other key.
+	dbus_w_dict_variant_begin(w, "Rate", "u");
+	dbus_w_u32(w, (uint32_t)rate);
 	if (blob_size) {
 		dbus_w_dict_variant_begin(w, "Configuration", "ay");
 		dbus_array_t bytes;
@@ -2137,8 +2103,7 @@ bool btstack_select_codec_rate(const char *address, const char *codec, unsigned 
 	// The same teardown and rebuild as any codec change; a little less time
 	// is given than there, because a track is waiting on the answer.
 	bool ok = dbus_call_send(c, 10000, err, sizeof(err));
-	fprintf(stderr, "btstack: codec %s at %u Hz on %s%s -> %s\n", codec, rate, address,
-			blob_size ? " (with an LDAC configuration)" : "", ok ? "ok" : (err[0] ? err : "no reply"));
+	fprintf(stderr, "btstack: codec %s at %u Hz on %s%s -> %s\n", codec, rate, address, blob_size ? " (with an LDAC configuration)" : "", ok ? "ok" : (err[0] ? err : "no reply"));
 	return ok;
 }
 
@@ -2149,68 +2114,54 @@ bool btstack_select_codec_rate(const char *address, const char *codec, unsigned 
 // PCM, and the new one starts at bluealsa's default: the phone does not resend
 // what it had already set, so without carrying the level across, the phone's
 // volume keys appear to stop working after a codec change.
-bool btstack_pcm_volume_get(const char *address, bool receiving, int *out) {
-	pthread_mutex_lock(&lock);
-	dbus_conn_t *c = conn;
-	pthread_mutex_unlock(&lock);
-
-	char path[OBJECT_PATH_MAX];
-	if (!c || !out || !pcm_path_dir(address, receiving, path, sizeof(path))) {
-		return false;
-	}
-
+static bool pcm_volume_read(dbus_conn_t *c, const char *path, bapcm_volume_t *out) {
 	dbus_writer_t *w = dbus_call_begin(c, BALSA_SERVICE, path, PROPS_IFACE, "Get", "ss");
 	dbus_w_string(w, BALSA_PCM_IFACE);
 	dbus_w_string(w, "Volume");
-
 	char err[DBUS_NAME_MAX];
-	if (!dbus_call_send(c, CALL_MS, err, sizeof(err))) {
+	if (!dbus_call_send(c, CALL_MS, err, sizeof(err)))
 		return false;
-	}
-
 	dbus_reader_t r;
 	dbus_reply_reader(c, &r);
 	char sig[16];
-	uint16_t both = 0;
-	if (!dbus_r_signature(&r, sig, sizeof(sig)) || sig[0] != 'q' || !dbus_r_u16(&r, &both)) {
-		return false;
-	}
-	// Two channels in one word, and the top bit of each byte is its mute
-	// switch. The word is carried whole rather than taken apart: writing back
-	// exactly what was read cannot get the mute or the balance wrong.
-	*out = (int)both;
-	return true;
+	return dbus_r_signature(&r, sig, sizeof(sig)) && bapcm_volume_read(&r, sig, out);
 }
 
-bool btstack_pcm_volume_set(const char *address, bool receiving, int volume) {
+bool btstack_pcm_volume_get(const char *address, bool receiving, bapcm_volume_t *out) {
 	pthread_mutex_lock(&lock);
 	dbus_conn_t *c = conn;
 	pthread_mutex_unlock(&lock);
-
 	char path[OBJECT_PATH_MAX];
-	if (!c || volume < 0 || !pcm_path_dir(address, receiving, path, sizeof(path))) {
-		return false;
-	}
+	return c && out && pcm_path_dir(address, receiving, path, sizeof(path)) && pcm_volume_read(c, path, out);
+}
 
+bool btstack_pcm_volume_set(const char *address, bool receiving, const bapcm_volume_t *volume) {
+	pthread_mutex_lock(&lock);
+	dbus_conn_t *c = conn;
+	pthread_mutex_unlock(&lock);
+	char path[OBJECT_PATH_MAX];
+	bapcm_volume_t current;
+	if (!c || !volume || !pcm_path_dir(address, receiving, path, sizeof(path)) || !pcm_volume_read(c, path, &current))
+		return false;
+	// Discover the NEW endpoint after a codec change. Retain raw mute/balance
+	// bytes, but encode them with the format that this endpoint actually uses.
+	if (current.count != volume->count)
+		return false;
+	bapcm_volume_t restored = *volume;
+	restored.array = current.array;
 	dbus_writer_t *w = dbus_call_begin(c, BALSA_SERVICE, path, PROPS_IFACE, "Set", "ssv");
 	dbus_w_string(w, BALSA_PCM_IFACE);
 	dbus_w_string(w, "Volume");
-	dbus_w_variant_u16(w, (uint16_t)volume);
-
+	bapcm_volume_write(w, &restored);
 	char err[DBUS_NAME_MAX];
 	bool ok = dbus_call_send(c, CALL_MS, err, sizeof(err));
-	if (!ok) {
+	if (!ok)
 		fprintf(stderr, "btstack: volume not restored on %s: %s\n", path, err[0] ? err : "no reply");
-	}
 	return ok;
 }
 
 // The headphone direction, which is what everything but the receiver page asks
 // about.
-int btstack_codecs(const char *address, char out[][BT_CODEC_NAME_MAX], int max, char *selected, size_t selected_size) {
-	return btstack_codecs_dir(address, false, out, max, selected, selected_size);
-}
+int btstack_codecs(const char *address, char out[][BT_CODEC_NAME_MAX], int max, char *selected, size_t selected_size) { return btstack_codecs_dir(address, false, out, max, selected, selected_size); }
 
-bool btstack_select_codec(const char *address, const char *codec) {
-	return btstack_select_codec_dir(address, false, codec);
-}
+bool btstack_select_codec(const char *address, const char *codec) { return btstack_select_codec_dir(address, false, codec); }

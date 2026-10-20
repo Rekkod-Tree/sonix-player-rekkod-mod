@@ -462,7 +462,41 @@ build_one() {
 		else
 			R1_KERNEL_SHA="$(shasum -a 256 "$KERNEL_DIR/xImage-R1" | cut -d ' ' -f 1)"
 		fi
-		[ "$R1_KERNEL_SHA" = 9222276c59d7bc9ffb8594106475b986bf66066c4f8f4db99c6fb34cb4fc64f6 ] || die "R1 kernel/module compatibility must be reviewed."
+		case "$R1_KERNEL_SHA" in
+			9222276c59d7bc9ffb8594106475b986bf66066c4f8f4db99c6fb34cb4fc64f6) ;;
+			bc7885debffc78219c3603c973785a5e3452e37406db1f9e4e2608e02a854885)
+				[ -f "$KERNEL_DIR/r1-stock2-modules.sha256" ] || die "Missing R1 stock2 module manifest."
+				if command -v sha256sum >/dev/null 2>&1; then
+					( cd "$SQUASH_DIR" && sha256sum -c "$KERNEL_DIR/r1-stock2-modules.sha256" ) || die "R1 stock2 module set mismatch."
+				else
+					( cd "$SQUASH_DIR" && shasum -a 256 -c "$KERNEL_DIR/r1-stock2-modules.sha256" ) || die "R1 stock2 module set mismatch."
+				fi
+				# This kernel/DTB targets the BCM R1, not the AIC/R1 Pro boards.
+				for module in "$SQUASH_DIR"/module_driver/*.ko; do
+					name="$(basename "$module")"
+					if ! grep -Fq "module_driver/$name" "$KERNEL_DIR/r1-stock2-modules.sha256"; then
+						rm -f "$module"
+					fi
+				done
+				rm -rf "$SQUASH_DIR/lib/firmware/aic8800d40_sdio_fw"
+				# Sonix owns BlueZ/HCI directly. These unused legacy wrappers
+				# are replaced by its GUI; bluetoothctl and btmon remain.
+				for tool in bsa_server bt-adapter bt-device bt-agent bt-media bt-network bt-obex \
+					gatttool hcidump rctest l2test ciptool bccmd pcretest dbus-binding-tool; do
+					rm -f "$SQUASH_DIR/usr/bin/$tool"
+				done
+				;;
+			*) die "R1 kernel/module compatibility must be reviewed." ;;
+		 esac
+		# New loaders are retained, but require modules implementing their API.
+		if grep -q 'dcdc4_auto_x1600e_en_hn=' "$SQUASH_DIR/module_driver/axp2101.sh" &&
+		   ! grep -aq 'dcdc4_auto_x1600e_en_hn' "$SQUASH_DIR/module_driver/axp2101.ko"; then
+			die "R1 power loader/module mismatch."
+		fi
+		if grep -q 'shared_pwr_gpio=' "$SQUASH_DIR/module_driver/soc_msc.sh" &&
+		   ! grep -aq 'shared_pwr_gpio' "$SQUASH_DIR/module_driver/soc_msc.ko"; then
+			die "R1 SDIO loader/module mismatch."
+		fi
 		RECOVERY_HELPER="${R1_RECOVERY_HELPER:-$SCRIPT_DIR/sonix_recovery_r1}"
 		RECOVERY_BLOCK="${R1_RECOVERY_BLOCK:-$SCRIPT_DIR/r1-recovery-ro.bin}"
 		[ -f "$RECOVERY_HELPER" ] && [ -f "$RECOVERY_BLOCK" ] || die "R1 requires the recovery wizard helper and reviewed private eraseblock."
@@ -563,6 +597,16 @@ build_one() {
 			say "    $rel is 755"
 		fi
 	done
+
+	# Prune the obsolete generation after applying permissions to overlay files.
+	if [ -f "$SQUASH_DIR/usr/bin/bluealsad" ] && [ -f "$SQUASH_DIR/usr/bin/bluealsactl" ]; then
+		rm -f "$SQUASH_DIR/usr/bin/bluealsa" "$SQUASH_DIR/usr/bin/bluealsa-cli"
+		rm -f "$SQUASH_DIR/usr/bin/bluealsa-aplay" "$SQUASH_DIR/usr/bin/bluealsa-rfcomm"
+		if [ -f "$SQUASH_DIR/usr/share/dbus-1/system.d/org.bluealsa.conf" ]; then
+			rm -f "$SQUASH_DIR/usr/share/dbus-1/system.d/bluealsa.conf"
+		fi
+		say "    BlueALSA daemon and client use the new matched generation"
+	fi
 
 	# Anything else the overlay put in a directory of executables, the
 	# libraries, the kernel-module scripts and the init scripts with it.
@@ -688,6 +732,9 @@ build_one() {
 
 	ORIGINAL_SUM="$(get_md5 "$ROOTFS_NEW")"
 	SIZE="$(get_size "$ROOTFS_NEW")"
+	if [ "$MODEL_DIR" = R1 ] && [ "$SIZE" -gt 46661632 ]; then
+		die "R1 rootfs is $SIZE bytes: exceeds its 45 MiB partition with four reserved eraseblocks."
+	fi
 	say "    rootfs.squashfs: $SIZE bytes, md5 $ORIGINAL_SUM"
 
 	step "[$MODEL_NAME] updating ota_update.in"

@@ -10,10 +10,9 @@
 //
 // libcrypto is opened with dlopen() for the same reason tls.c does it (the
 // cross toolchain has no headers and nothing to link against, see tls.h), but
-// independently of TLS: a decryption must not depend on a CA bundle being
-// present, and tls.c only declares itself loaded once it has found one. The
-// two dlopen()s of the same library return the same handle, so the library is
-// mapped once whichever side asks first.
+// independently of CA loading: a decryption must not depend on a CA bundle
+// being present. openssl_runtime selects one matching SSL/crypto pair for
+// both consumers; each library is mapped once whichever side asks first.
 //
 // Nothing here runs until the first call: an untouched API costs one static
 // struct and no I/O. The first call resolves the EVP_* functions and checks

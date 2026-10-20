@@ -3,11 +3,11 @@
 
 #include <dirent.h>
 #include <errno.h>
+#include <malloc.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <malloc.h>
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
@@ -16,15 +16,16 @@
 
 #include <pthread.h>
 
-#include "src/gui/nowplaying/cover.h"
-#include "src/gui/nowplaying/coverloader.h"
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/library/listacts.h"
+#include "src/gui/library/playlistpage.h"
+#include "src/gui/nowplaying/cover.h"
+#include "src/gui/nowplaying/coverloader.h"
+#include "src/gui/nowplaying/player.h"
+#include "src/gui/nowplaying/trackmenu.h"
+#include "src/gui/settings/musicsettings.h"
 #include "src/gui/shell/gui.h"
 #include "src/gui/shell/icons.h"
-#include "src/gui/settings/musicsettings.h"
-#include "src/gui/library/playlistpage.h"
-#include "src/gui/nowplaying/player.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/sx_palette.h"
@@ -33,15 +34,14 @@
 #include "src/gui/shell/sx_styles.h"
 #include "src/gui/shell/sx_tokens.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/toast.h"
+#include "src/gui/shell/touch.h"
+#include "src/system/core/lang.h"
+#include "src/system/core/utils.h"
 #include "src/system/library/cue.h"
 #include "src/system/library/folderorder.h"
 #include "src/system/playback/device_state.h"
-#include "src/gui/shell/toast.h"
-#include "src/gui/shell/touch.h"
 #include "src/system/playback/playlist.h"
-#include "src/gui/nowplaying/trackmenu.h"
-#include "src/system/core/lang.h"
-#include "src/system/core/utils.h"
 
 // ---------------------------------------------------------------------------
 // A windowed list.
@@ -530,9 +530,7 @@ static bool is_playable_file(const char *name) {
 	// -- opening every container to find out would be one extra read per row
 	// of every folder. An audio-only .mp4 is still found by the library scan,
 	// which opens the container anyway (see is_video_file in library.c).
-	static const char *const playable_exts[] = {".wav",  ".mp3",  ".flac", ".ogg", ".m4b", ".m4a",
-												 ".alac", ".aac",  ".dsf",  ".dff", ".aif", ".aiff",
-												 ".aifc", ".caf",  ".opus", ".wv",   ".ape"};
+	static const char *const playable_exts[] = {".wav", ".mp3", ".flac", ".ogg", ".m4b", ".m4a", ".alac", ".aac", ".dsf", ".dff", ".aif", ".aiff", ".aifc", ".caf", ".opus", ".wv", ".ape"};
 
 	if (playlist_is_junk_name(name)) {
 		return false; // a macOS resource fork with a .flac on the end is not a track
@@ -755,8 +753,7 @@ static void gather_done_cb(void *arg) {
 		// Written down at once, inside: the mirror on disk is otherwise
 		// refreshed only when a track is loaded, and a power-off before that
 		// loses the addition.
-		listacts_queue((const char *const *)g->paths, g->count,
-					   g->to == SEND_QUEUE ? PLAYLIST_QUEUE_NEXT : PLAYLIST_QUEUE_END, g->label[0] ? g->label : NULL);
+		listacts_queue((const char *const *)g->paths, g->count, g->to == SEND_QUEUE ? PLAYLIST_QUEUE_NEXT : PLAYLIST_QUEUE_END, g->label[0] ? g->label : NULL);
 		break;
 	case SEND_FAVOURITES:
 		playlistpage_add_favourites((const char *const *)g->paths, g->count);
@@ -775,7 +772,8 @@ static void *gather_worker(void *arg) {
 	for (int i = 0; i < g->root_count && more; i++) {
 		more = g->root_is_dir[i] ? gather_walk(g, g->roots[i], 0) : gather_add(g, g->roots[i]);
 	}
-	gui_post(gather_done_cb, g);
+	if (!gui_post(gather_done_cb, g))
+		gather_free(g);
 	return NULL;
 }
 
@@ -1013,12 +1011,7 @@ static void row_hold_cb(lv_obj_t *obj, void *user) {
 		return;
 	}
 	sx_sheet_item_t items[] = {
-		{tr("queue_play_next"), &icon_list_start, false, false, sheet_send_cb, (void *)(intptr_t)SEND_QUEUE},
-		{tr("queue_add_to_end"), &icon_list_plus_small, false, false, sheet_send_cb, (void *)(intptr_t)SEND_QUEUE_END},
-		{tr("add_to_playlist"), &icon_list_music, false, false, sheet_send_cb, (void *)(intptr_t)SEND_PLAYLIST},
-		{tr("medialist_add_to_favourites"), &icon_star, false, false, sheet_send_cb,
-		 (void *)(intptr_t)SEND_FAVOURITES},
-		select,
+		{tr("queue_play_next"), &icon_list_start, false, false, sheet_send_cb, (void *)(intptr_t)SEND_QUEUE}, {tr("queue_add_to_end"), &icon_list_plus_small, false, false, sheet_send_cb, (void *)(intptr_t)SEND_QUEUE_END}, {tr("add_to_playlist"), &icon_list_music, false, false, sheet_send_cb, (void *)(intptr_t)SEND_PLAYLIST}, {tr("medialist_add_to_favourites"), &icon_star, false, false, sheet_send_cb, (void *)(intptr_t)SEND_FAVOURITES}, select,
 	};
 	sx_sheet_menu(sheet_name, NULL, items, (int)(sizeof(items) / sizeof(items[0])));
 }
@@ -1368,8 +1361,7 @@ static bool list_directory(const char *path, listing_t *out, cue_sheet_t *sheets
 	// Telling them apart matters: a truncated listing otherwise just looks like
 	// a folder with fewer files in it.
 	if (errno != 0) {
-		fprintf(stderr, "browser: readdir stopped after %zu entries in '%s': %s\n", out->count, path,
-				strerror(errno));
+		fprintf(stderr, "browser: readdir stopped after %zu entries in '%s': %s\n", out->count, path, strerror(errno));
 	}
 
 	closedir(dir);
@@ -1599,8 +1591,7 @@ static void adopt_listing(void) {
 
 	update_corner_buttons();
 
-	fprintf(stderr, "browser: '%s': %zu entries, %d row widgets, %zu KB of names\n", current_path, shown.count,
-			ROW_POOL, shown.pool_used / 1024);
+	fprintf(stderr, "browser: '%s': %zu entries, %d row widgets, %zu KB of names\n", current_path, shown.count, ROW_POOL, shown.pool_used / 1024);
 }
 
 // ---------------------------------------------------------------------------

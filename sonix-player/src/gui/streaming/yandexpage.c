@@ -748,7 +748,6 @@ static void row_texts(const row_t *r, char *name, size_t ns, char *detail, size_
 	}
 }
 
-
 // How many entries the list on screen has, and entry `index` as a row: from
 // the answer's rows, or from its list of tracks. False for a track whose
 // details have not come yet: `out` then carries its ids only, and the row
@@ -1068,7 +1067,8 @@ static void clear_list(void) {
 static void error_sign_in(void) {
 	if (yandex_logged_in())
 		retry_list();
-	else switch_screen(yandex_screen);
+	else
+		switch_screen(yandex_screen);
 }
 
 static void list_returned_cb(lv_event_t *e) {
@@ -1364,7 +1364,7 @@ static void like_failed_async(void *user) {
 static void like_done(bool ok, const char *error, void *user) {
 	(void)user;
 	if (!ok) {
-		gui_post(like_failed_async, strdup(error ? error : ""));
+		gui_post_or_free(like_failed_async, strdup(error ? error : ""));
 	}
 }
 
@@ -1393,7 +1393,7 @@ static void row_like_done_async(void *user) {
 
 static void row_like_done(bool ok, const char *error, void *user) {
 	(void)user;
-	gui_post(row_like_done_async, ok ? NULL : strdup(error ? error : ""));
+	gui_post_or_free(row_like_done_async, ok ? NULL : strdup(error ? error : ""));
 }
 
 // The like of a track, from its star or its sheet: the mirror flips at once
@@ -1728,9 +1728,7 @@ static lv_obj_t *bar_button(lv_obj_t *parent, const char *key, lv_event_cb_t cb,
 	return btn;
 }
 
-static lv_obj_t *wave_button(lv_obj_t *parent, const char *key, bool like) {
-	return bar_button(parent, key, wave_rate_cb, like ? (void *)1 : NULL, NULL);
-}
+static lv_obj_t *wave_button(lv_obj_t *parent, const char *key, bool like) { return bar_button(parent, key, wave_rate_cb, like ? (void *)1 : NULL, NULL); }
 
 static void album_save_cb(lv_event_t *e) {
 	(void)e;
@@ -2364,7 +2362,7 @@ static void save_listener(yandexdl_event_t event, int count, const char *text) {
 	note->event = event;
 	note->count = count;
 	snprintf(note->text, sizeof(note->text), "%s", text ? text : "");
-	gui_post(save_note_async, note);
+	gui_post_or_free(save_note_async, note);
 }
 
 static void paint_home(void) {

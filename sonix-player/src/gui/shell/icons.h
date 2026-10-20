@@ -265,6 +265,7 @@ extern const lv_image_dsc_t icon_menu_tidal;
 extern const lv_image_dsc_t icon_menu_qobuz;
 extern const lv_image_dsc_t icon_menu_subsonic;
 extern const lv_image_dsc_t icon_menu_yandex;
+extern const lv_image_dsc_t icon_menu_spotify;
 extern const lv_image_dsc_t icon_quality_lossy;
 extern const lv_image_dsc_t icon_quality_cd;
 extern const lv_image_dsc_t icon_quality_hifi;

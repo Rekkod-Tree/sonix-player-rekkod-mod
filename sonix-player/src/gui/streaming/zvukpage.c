@@ -107,8 +107,8 @@ typedef struct {
 	unsigned generation;
 	int page;
 	int n;
-	int item;				// JOB_LIKE: the kind liked
-	char id[ZVUK_ID_MAX];	// and which
+	int item;			  // JOB_LIKE: the kind liked
+	char id[ZVUK_ID_MAX]; // and which
 	char error[512];
 	stream_err_t error_class;
 	zvuklist_t *list;
@@ -144,9 +144,7 @@ static zvuk_spoken_t result_spoken;
 
 static void job_done_async(void *user);
 
-static bool is_event(job_kind_t kind) {
-	return kind == JOB_LIKE || kind == JOB_QUEUE_ALBUM || kind == JOB_PROFILE || kind == JOB_CHECK;
-}
+static bool is_event(job_kind_t kind) { return kind == JOB_LIKE || kind == JOB_QUEUE_ALBUM || kind == JOB_PROFILE || kind == JOB_CHECK; }
 
 static void submit(const job_t *job) {
 	pthread_mutex_lock(&job_lock);
@@ -434,8 +432,7 @@ static void *worker_main(void *arg) {
 			zvuk_track_t *tmp = calloc(MAX_ROWS, sizeof(*tmp));
 			int got = tmp ? zvuk_album_tracks(job.a, tmp, MAX_ROWS, NULL) : -1;
 			if (got < 0) {
-				result_class = streamerr_describe("zvuk", tmp ? zvuk_last_error() : tr("out_of_memory"),
-												  result_error, sizeof(result_error));
+				result_class = streamerr_describe("zvuk", tmp ? zvuk_last_error() : tr("out_of_memory"), result_error, sizeof(result_error));
 			}
 			for (int i = 0; i < got; i++) {
 				add_row(ROW_TRACK, &tmp[i]);
@@ -781,8 +778,7 @@ static void update_album_bar(void) {
 
 static void artist_bar_refresh(void) {
 	if (artist_like_label) {
-		lv_label_set_text(artist_like_label,
-						  tr(zvuk_is_liked(ZVUK_ITEM_ARTIST, list_artist_id) ? "zvuk_unlike" : "zvuk_like"));
+		lv_label_set_text(artist_like_label, tr(zvuk_is_liked(ZVUK_ITEM_ARTIST, list_artist_id) ? "zvuk_unlike" : "zvuk_like"));
 	}
 }
 
@@ -958,7 +954,8 @@ static void retry_list(void) {
 static void error_sign_in(void) {
 	if (zvuk_logged_in())
 		retry_list();
-	else switch_screen(zvuk_screen);
+	else
+		switch_screen(zvuk_screen);
 }
 
 static void fill_list(void) {
@@ -1021,8 +1018,7 @@ static void play_rows(int tapped) {
 	int start = -1;
 	int count = view_count();
 	for (int i = 0; tracks && i < count; i++) {
-		if (view_row(i, &r) && r.kind == ROW_TRACK && r.u.track.available && zvuklist_add_track(tracks, &r.u.track) &&
-			i == tapped) {
+		if (view_row(i, &r) && r.kind == ROW_TRACK && r.u.track.available && zvuklist_add_track(tracks, &r.u.track) && i == tapped) {
 			start = zvuklist_count(tracks) - 1;
 		}
 	}
@@ -1107,7 +1103,7 @@ static void row_like_done_async(void *user) {
 
 static void row_like_done(bool ok, const char *error, void *user) {
 	(void)user;
-	gui_post(row_like_done_async, ok ? NULL : strdup(error ? error : ""));
+	gui_post_or_free(row_like_done_async, ok ? NULL : strdup(error ? error : ""));
 }
 
 static zvuk_track_t star_track;
@@ -1180,10 +1176,8 @@ static void artist_like_cb(lv_event_t *e) {
 }
 
 static void like_object_done(const job_result_t *r, zvuk_item_t kind, const char *id) {
-	static const char *const ON[ZVUK_ITEM_KINDS] = {"svc_liked", "zvuk_album_liked", "zvuk_artist_liked",
-													"zvuk_playlist_liked"};
-	static const char *const OFF[ZVUK_ITEM_KINDS] = {"svc_unliked", "zvuk_album_unliked", "zvuk_artist_unliked",
-													 "zvuk_playlist_unliked"};
+	static const char *const ON[ZVUK_ITEM_KINDS] = {"svc_liked", "zvuk_album_liked", "zvuk_artist_liked", "zvuk_playlist_liked"};
+	static const char *const OFF[ZVUK_ITEM_KINDS] = {"svc_unliked", "zvuk_album_unliked", "zvuk_artist_unliked", "zvuk_playlist_unliked"};
 	if (r->error[0]) {
 		zvuk_liked_mark(kind, id, r->n == 0); // put back
 		toast_error(r->error);
@@ -1322,8 +1316,7 @@ static void delete_confirmed(void *user) {
 static void do_row_delete(void *user) {
 	(void)user;
 	const char *name = menu_row.kind == ROW_ALBUM ? menu_row.u.album.title : menu_row.u.track.title;
-	confirm_show(menu_row.kind == ROW_ALBUM ? "zvuk_delete_album_question" : "zvuk_delete_track_question", name,
-				 "delete", delete_confirmed, NULL);
+	confirm_show(menu_row.kind == ROW_ALBUM ? "zvuk_delete_album_question" : "zvuk_delete_track_question", name, "delete", delete_confirmed, NULL);
 }
 
 static void list_hold(lv_obj_t *row, void *user) {
@@ -1351,14 +1344,8 @@ static void list_hold(lv_obj_t *row, void *user) {
 	bool some = !spoken && (saved || (menu_row.kind == ROW_ALBUM && zvukdl_album_saved_count(menu_row.u.album.id) > 0));
 	bool queueable = (menu_row.kind == ROW_TRACK && menu_row.u.track.available) || menu_row.kind == ROW_ALBUM;
 	if (queueable) {
-		items[n++] = (sx_sheet_item_t){.label = tr("queue_play_next"),
-									   .icon = &icon_list_start,
-									   .action = do_row_queue,
-									   .user = (void *)(intptr_t)PLAYLIST_QUEUE_NEXT};
-		items[n++] = (sx_sheet_item_t){.label = tr("queue_add_to_end"),
-									   .icon = &icon_list_plus_small,
-									   .action = do_row_queue,
-									   .user = (void *)(intptr_t)PLAYLIST_QUEUE_END};
+		items[n++] = (sx_sheet_item_t){.label = tr("queue_play_next"), .icon = &icon_list_start, .action = do_row_queue, .user = (void *)(intptr_t)PLAYLIST_QUEUE_NEXT};
+		items[n++] = (sx_sheet_item_t){.label = tr("queue_add_to_end"), .icon = &icon_list_plus_small, .action = do_row_queue, .user = (void *)(intptr_t)PLAYLIST_QUEUE_END};
 	}
 	bool liked = false;
 	switch (menu_row.kind) {
@@ -1366,10 +1353,7 @@ static void list_hold(lv_obj_t *row, void *user) {
 		if (menu_row.u.track.content != ZVUK_CONTENT_TRACK)
 			break;
 		liked = zvuk_is_liked(ZVUK_ITEM_TRACK, menu_row.u.track.id);
-		items[n++] = (sx_sheet_item_t){.label = tr(liked ? "zvuk_unlike" : "zvuk_like"),
-									   .icon = liked ? &icon_star_filled : &icon_star,
-									   .action = do_row_like,
-									   .user = liked ? NULL : (void *)1};
+		items[n++] = (sx_sheet_item_t){.label = tr(liked ? "zvuk_unlike" : "zvuk_like"), .icon = liked ? &icon_star_filled : &icon_star, .action = do_row_like, .user = liked ? NULL : (void *)1};
 		break;
 	case ROW_ALBUM:
 		liked = zvuk_is_liked(ZVUK_ITEM_RELEASE, menu_row.u.album.id);
@@ -1386,10 +1370,7 @@ static void list_hold(lv_obj_t *row, void *user) {
 		break;
 	}
 	if (menu_row.kind != ROW_TRACK) {
-		items[n++] = (sx_sheet_item_t){.label = tr(liked ? "zvuk_unlike" : "zvuk_like"),
-									   .icon = liked ? &icon_star_filled : &icon_star,
-									   .action = do_object_like,
-									   .user = liked ? NULL : (void *)1};
+		items[n++] = (sx_sheet_item_t){.label = tr(liked ? "zvuk_unlike" : "zvuk_like"), .icon = liked ? &icon_star_filled : &icon_star, .action = do_object_like, .user = liked ? NULL : (void *)1};
 	}
 	if (menu_row.kind == ROW_TRACK || menu_row.kind == ROW_ALBUM) {
 		if (saved) {
@@ -1400,8 +1381,7 @@ static void list_hold(lv_obj_t *row, void *user) {
 		}
 	}
 	if (some) {
-		items[n++] = (sx_sheet_item_t){
-			.label = tr("zvuk_delete_from_card"), .icon = &icon_trash, .destructive = true, .action = do_row_delete};
+		items[n++] = (sx_sheet_item_t){.label = tr("zvuk_delete_from_card"), .icon = &icon_trash, .destructive = true, .action = do_row_delete};
 	}
 	static char title[ZVUK_TITLE_MAX], subtitle[ZVUK_TITLE_MAX + 32];
 	row_texts(&menu_row, title, sizeof(title), subtitle, sizeof(subtitle));
@@ -1816,7 +1796,7 @@ static void save_listener(zvukdl_event_t event, int count, const char *text) {
 	note->event = event;
 	note->count = count;
 	snprintf(note->text, sizeof(note->text), "%s", text ? text : "");
-	gui_post(save_note_async, note);
+	gui_post_or_free(save_note_async, note);
 }
 
 // What became of the token file, under the instructions: the expired
@@ -2013,9 +1993,7 @@ bool zvukpage_open_album(const char *album_id, const char *title) {
 	return true;
 }
 
-static void *provider_open_album(const char *album_id, const char *title) {
-	return zvukpage_open_album(album_id, title) ? list_screen : NULL;
-}
+static void *provider_open_album(const char *album_id, const char *title) { return zvukpage_open_album(album_id, title) ? list_screen : NULL; }
 
 void zvukpage_check_connection_cb(lv_event_t *e) {
 	(void)e;
@@ -2023,8 +2001,7 @@ void zvukpage_check_connection_cb(lv_event_t *e) {
 		return;
 	}
 	if (!zvuk_logged_in()) {
-		sx_sheet_t sheet = {.title = tr("zvuk_check_title"), .subtitle = tr("zvuk_check_no_token"),
-							.action_label = tr("ok")};
+		sx_sheet_t sheet = {.title = tr("zvuk_check_title"), .subtitle = tr("zvuk_check_no_token"), .action_label = tr("ok")};
 		sx_sheet_open(&sheet);
 		return;
 	}
@@ -2071,8 +2048,7 @@ void zvukpage_init(gui_config_t *cfg) {
 	lv_obj_t *quality_card = sx_card_create(home_in);
 	sx_card_title(quality_card, tr("audio_quality"));
 	lv_obj_t *pills = sx_card_pills(quality_card);
-	static const char *const QUALITY_KEYS[ZVUK_QUALITY_COUNT] = {"zvuk_quality_flac", "zvuk_quality_high",
-																 "zvuk_quality_mid"};
+	static const char *const QUALITY_KEYS[ZVUK_QUALITY_COUNT] = {"zvuk_quality_flac", "zvuk_quality_high", "zvuk_quality_mid"};
 	for (int i = 0; i < ZVUK_QUALITY_COUNT; i++) {
 		quality_pills[i] = sx_pill(pills, tr(QUALITY_KEYS[i]), i, quality_pick_cb);
 	}

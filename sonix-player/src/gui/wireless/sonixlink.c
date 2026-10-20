@@ -7,32 +7,39 @@
 
 #include "lvgl/lvgl.h"
 
+#include "src/gui/bluetooth/btsettings.h"
 #include "src/gui/fonts/fonts.h"
-#include "src/gui/shell/gui.h"
-#include "src/gui/shell/icons.h"
 #include "src/gui/library/medialist.h"
 #include "src/gui/library/playlistpage.h"
-#include "src/gui/settings/musicsettings.h"
-#include "src/gui/shell/toast.h"
 #include "src/gui/nowplaying/player.h"
+#include "src/gui/settings/musicsettings.h"
+#include "src/gui/shell/gui.h"
+#include "src/gui/shell/icons.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/toast.h"
 #include "src/gui/wireless/wifisettings.h"
-#include "src/gui/bluetooth/btsettings.h"
 #include "src/system/audio/alsa-controls.h"
 #include "src/system/audio/audio.h"
 #include "src/system/bluetooth/bluetooth.h"
-#include "src/system/device/power.h"
-#include "src/system/playback/device_state.h"
 #include "src/system/core/lang.h"
+#include "src/system/device/power.h"
 #include "src/system/library/library.h"
 #include "src/system/library/playlists.h"
+#include "src/system/net/wifi.h"
+#include "src/system/playback/device_state.h"
 #include "src/system/playback/playlist.h"
 #include "src/system/remote/sonixlink.h"
-#include "src/system/net/wifi.h"
+#include "src/system/streaming/provider.h"
 
 lv_obj_t *sonixlink_screen;
+
+static void remote_favourite_done(bool ok, const char *error, void *user) {
+	const stream_provider_t *provider = user;
+	if (!ok)
+		gui_notify_popup(error && error[0] ? error : tr(provider->fav_failed_key));
+}
 
 // The pump is not the page's timer: commands arrive while the page is closed,
 // and that is when a remote control has to work at all.
@@ -355,8 +362,7 @@ static void play_all(const sonixlink_command_t *cmd) {
 	bool shuffled = cmd->arg == SONIXLINK_PLAY_SHUFFLE;
 	// Mode first, as on the player: with shuffle on, the queue deals its random
 	// order as it is loaded.
-	playback_mode_t shuffle_mode =
-		musicsettings_endless_shuffle() ? PLAYBACK_MODE_SHUFFLE_REPEAT : PLAYBACK_MODE_SHUFFLE;
+	playback_mode_t shuffle_mode = musicsettings_endless_shuffle() ? PLAYBACK_MODE_SHUFFLE_REPEAT : PLAYBACK_MODE_SHUFFLE;
 	playlist_set_mode(shuffled ? shuffle_mode : PLAYBACK_MODE_NORMAL);
 	playlist_set_album("");
 	int start = shuffled && count > 1 ? (int)lv_rand(0, (uint32_t)(count - 1)) : 0;
@@ -575,7 +581,7 @@ static void apply_command(const sonixlink_command_t *cmd) {
 		if (!cmd->path[0]) {
 			break;
 		}
-		bool starred = library_fav_contains(cmd->path);
+		bool starred = track_favourite_get(cmd->path);
 		bool want = cmd->arg < 0 ? !starred : (cmd->arg != 0);
 		if (want != starred) {
 			// The name and artist are stored at star time so the favourites
@@ -589,7 +595,13 @@ static void apply_command(const sonixlink_command_t *cmd) {
 				name = d.metadata.title;
 				artist = d.metadata.artist;
 			}
-			library_fav_toggle(cmd->path, name, artist);
+			const stream_provider_t *owner = stream_provider_for_path(cmd->path);
+			if (!track_favourite_set(cmd->path, name, artist, want, owner ? remote_favourite_done : NULL, (void *)owner)) {
+				const stream_provider_t *p = stream_provider_for_path(cmd->path);
+				if (p && p->fav_failed_key)
+					gui_notify_popup(tr(p->fav_failed_key));
+				break;
+			}
 			forget_favourite_memory();
 			player_refresh_now_playing();
 		}

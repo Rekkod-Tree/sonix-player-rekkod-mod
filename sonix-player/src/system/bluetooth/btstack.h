@@ -1,6 +1,7 @@
 #ifndef BTSTACK_H
 #define BTSTACK_H
 
+#include "bapcm.h"
 #include <stdbool.h>
 #include <stddef.h>
 
@@ -45,7 +46,7 @@ typedef struct {
 	char name[BT_DEV_NAME_MAX];
 	bool paired;
 	bool trusted;
-	bool connected; // the ACL link, not the audio profile
+	bool connected;	 // the ACL link, not the audio profile
 	bool audio_sink; // advertises the A2DP sink UUID: headphones, not a phone
 	unsigned cod;	 // class of device, 0 when bluez has none (every LE-only device)
 	int rssi;		 // 0 when bluez does not have one
@@ -278,15 +279,14 @@ int btstack_codecs(const char *address, char out[][BT_CODEC_NAME_MAX], int max, 
 
 // The same two, either way round. `receiving` picks the a2dpsnk/source PCM --
 // what a phone is sending to this player -- instead of the a2dpsrc/sink one.
-int btstack_codecs_dir(const char *address, bool receiving, char out[][BT_CODEC_NAME_MAX], int max, char *selected,
-					   size_t selected_size);
+int btstack_codecs_dir(const char *address, bool receiving, char out[][BT_CODEC_NAME_MAX], int max, char *selected, size_t selected_size);
 bool btstack_select_codec_dir(const char *address, bool receiving, const char *codec);
 
-// The PCM's volume word, both channels and their mute bits together. Carried
+// The PCM's channel levels and their mute bits together. Carried
 // whole across a codec change: the new PCM starts at bluealsa's default and
 // nothing resends what the other end had already set.
-bool btstack_pcm_volume_get(const char *address, bool receiving, int *out);
-bool btstack_pcm_volume_set(const char *address, bool receiving, int volume);
+bool btstack_pcm_volume_get(const char *address, bool receiving, bapcm_volume_t *out);
+bool btstack_pcm_volume_set(const char *address, bool receiving, const bapcm_volume_t *volume);
 bool btstack_select_codec(const char *address, const char *codec);
 
 // The sampling rates `codec` can run at between this player and the

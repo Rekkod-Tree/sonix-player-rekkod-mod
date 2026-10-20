@@ -1,9 +1,9 @@
 #ifndef STREAM_PROVIDER_H
 #define STREAM_PROVIDER_H
 
+#include "src/system/library/metadata.h"
 #include <stdbool.h>
 #include <stddef.h>
-#include "src/system/library/metadata.h"
 
 // The streaming services that play by downloading into a cache on the card
 // (Qobuz, Tidal, Subsonic), seen from the rest of the program.
@@ -65,6 +65,8 @@ typedef struct {
 typedef struct stream_provider {
 	// "qobuz": the log, and the "Source" row of the track details.
 	const char *id;
+	// Account writes are unavailable; do not offer a favourite control.
+	bool read_only;
 
 	// --- the cache --------------------------------------------------------
 
@@ -165,6 +167,11 @@ const stream_provider_t *stream_provider_for_path(const char *path);
 // Like stream_provider_for_path, but only for an actual track of the service
 // (is_track): the one the star and "Add to playlist" should write to.
 const stream_provider_t *stream_provider_for_track(const char *path);
+
+// GUI-thread track action shared by local UI and remote commands. A cache path
+// never falls through to the local library, including read-only providers.
+bool track_favourite_get(const char *path);
+bool track_favourite_set(const char *path, const char *title, const char *artist, bool want, stream_provider_done_cb done, void *user);
 
 // --- the loops every caller used to write by hand -------------------------
 

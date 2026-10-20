@@ -15,10 +15,11 @@
 #include "src/gui/shell/gui.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/sx_palette.h"
-#include "src/gui/shell/sx_tokens.h"
 #include "src/gui/shell/sx_toast.h"
+#include "src/gui/shell/sx_tokens.h"
 #include "src/system/core/lang.h"
 #include "src/system/playback/device_state.h"
+#include "src/system/streaming/provider.h"
 
 // How many tracks a record or a selection may put into the queue at once: the
 // same ceiling the selection had (a library queued whole is a library copied
@@ -118,8 +119,7 @@ library_index_t *listacts_album_tracks(const char *album_value) {
 	if (!album_value || !album_value[0]) {
 		return NULL;
 	}
-	library_index_t *ix =
-		library_index_open(LIBRARY_LIST_TRACKS, LIBRARY_FILTER_ALBUM, album_value, LIBRARY_ORDER_DEFAULT, false);
+	library_index_t *ix = library_index_open(LIBRARY_LIST_TRACKS, LIBRARY_FILTER_ALBUM, album_value, LIBRARY_ORDER_DEFAULT, false);
 	if (ix && library_index_count(ix) > 0) {
 		return ix;
 	}
@@ -168,6 +168,12 @@ static char star_path[512];
 static char star_name[256];
 static char star_artist[256];
 
+static void service_star_done(bool ok, const char *error, void *user) {
+	const stream_provider_t *service = user;
+	if (!ok)
+		gui_notify_popup(error && error[0] ? error : tr(service->fav_failed_key));
+}
+
 static void star_undo_cb(void *user) {
 	(void)user;
 	if (star_path[0]) {
@@ -179,6 +185,17 @@ static void star_undo_cb(void *user) {
 bool listacts_star(const char *path, const char *name, const char *artist) {
 	if (!path || !path[0]) {
 		return false;
+	}
+	const stream_provider_t *service = stream_provider_for_path(path);
+	if (service) {
+		bool want = !track_favourite_get(path);
+		if (!track_favourite_set(path, name, artist, want, service_star_done, (void *)service)) {
+			if (service->fav_failed_key)
+				gui_notify_popup(tr(service->fav_failed_key));
+			return false;
+		}
+		changed();
+		return want;
 	}
 	snprintf(star_path, sizeof(star_path), "%s", path);
 	snprintf(star_name, sizeof(star_name), "%s", name ? name : "");
@@ -201,8 +218,7 @@ static void set_shuffle(bool shuffled) {
 	// Mode first: with shuffle already on, the queue deals its random order as
 	// it is loaded, so it comes out shuffled in one step. Which of the two
 	// shuffles is the "Continuous shuffle" option.
-	playback_mode_t shuffle_mode =
-		musicsettings_endless_shuffle() ? PLAYBACK_MODE_SHUFFLE_REPEAT : PLAYBACK_MODE_SHUFFLE;
+	playback_mode_t shuffle_mode = musicsettings_endless_shuffle() ? PLAYBACK_MODE_SHUFFLE_REPEAT : PLAYBACK_MODE_SHUFFLE;
 	playlist_set_mode(shuffled ? shuffle_mode : PLAYBACK_MODE_NORMAL);
 }
 
@@ -312,9 +328,7 @@ static int add_extra(sx_sheet_item_t *items, int n, const sx_sheet_item_t *extra
 	return n;
 }
 
-void listacts_track_sheet(const char *path, const char *title, const char *artist, const char *subtitle,
-						  const char *here_album, const char *here_artist, const sx_sheet_item_t *extra,
-						  int extra_count) {
+void listacts_track_sheet(const char *path, const char *title, const char *artist, const char *subtitle, const char *here_album, const char *here_artist, const sx_sheet_item_t *extra, int extra_count) {
 	if (!path || !path[0]) {
 		return;
 	}
@@ -332,12 +346,9 @@ void listacts_track_sheet(const char *path, const char *title, const char *artis
 	sx_sheet_item_t items[SHEET_ITEMS_MAX];
 	int n = 0;
 	bool fav = library_fav_contains(sheet_path);
-	items[n++] = (sx_sheet_item_t){tr(fav ? "remove_from_favourites" : "medialist_add_to_favourites"),
-								   fav ? &icon_star_filled : &icon_star, false, false, track_star_cb, NULL};
-	items[n++] = (sx_sheet_item_t){tr("queue_play_next"), &icon_list_start, false, false, track_queue_cb,
-								   (void *)(intptr_t)PLAYLIST_QUEUE_NEXT};
-	items[n++] = (sx_sheet_item_t){tr("queue_add_to_end"), &icon_list_plus_small, false, false, track_queue_cb,
-								   (void *)(intptr_t)PLAYLIST_QUEUE_END};
+	items[n++] = (sx_sheet_item_t){tr(fav ? "remove_from_favourites" : "medialist_add_to_favourites"), fav ? &icon_star_filled : &icon_star, false, false, track_star_cb, NULL};
+	items[n++] = (sx_sheet_item_t){tr("queue_play_next"), &icon_list_start, false, false, track_queue_cb, (void *)(intptr_t)PLAYLIST_QUEUE_NEXT};
+	items[n++] = (sx_sheet_item_t){tr("queue_add_to_end"), &icon_list_plus_small, false, false, track_queue_cb, (void *)(intptr_t)PLAYLIST_QUEUE_END};
 	items[n++] = (sx_sheet_item_t){tr("add_to_playlist"), &icon_list_music, false, false, track_playlist_cb, NULL};
 	// Not the page already on screen: offering to open it is noise.
 	if (sheet_album[0] && !(here_album && here_album[0] && library_album_same(here_album, sheet_album))) {
@@ -389,8 +400,7 @@ static void album_artist_cb(void *user) {
 	medialist_open_artist(sheet_artist);
 }
 
-void listacts_album_sheet(const char *album_value, const char *artist, const char *subtitle,
-						  const sx_sheet_item_t *extra, int extra_count) {
+void listacts_album_sheet(const char *album_value, const char *artist, const char *subtitle, const sx_sheet_item_t *extra, int extra_count) {
 	if (!album_value || !album_value[0]) {
 		return;
 	}
@@ -402,12 +412,9 @@ void listacts_album_sheet(const char *album_value, const char *artist, const cha
 	sx_sheet_item_t items[SHEET_ITEMS_MAX];
 	int n = 0;
 	items[n++] = (sx_sheet_item_t){tr("medialist_play"), &icon_play_status, false, false, album_play_cb, NULL};
-	items[n++] = (sx_sheet_item_t){tr("lists_shuffle"), &icon_shuffle, false, false, album_play_cb,
-								   (void *)(intptr_t)1};
-	items[n++] = (sx_sheet_item_t){tr("queue_play_next"), &icon_list_start, false, false, album_queue_cb,
-								   (void *)(intptr_t)PLAYLIST_QUEUE_NEXT};
-	items[n++] = (sx_sheet_item_t){tr("queue_add_to_end"), &icon_list_plus_small, false, false, album_queue_cb,
-								   (void *)(intptr_t)PLAYLIST_QUEUE_END};
+	items[n++] = (sx_sheet_item_t){tr("lists_shuffle"), &icon_shuffle, false, false, album_play_cb, (void *)(intptr_t)1};
+	items[n++] = (sx_sheet_item_t){tr("queue_play_next"), &icon_list_start, false, false, album_queue_cb, (void *)(intptr_t)PLAYLIST_QUEUE_NEXT};
+	items[n++] = (sx_sheet_item_t){tr("queue_add_to_end"), &icon_list_plus_small, false, false, album_queue_cb, (void *)(intptr_t)PLAYLIST_QUEUE_END};
 	items[n++] = (sx_sheet_item_t){tr("add_to_playlist"), &icon_list_music, false, false, album_playlist_cb, NULL};
 	items[n++] = (sx_sheet_item_t){tr("medialist_add_to_favourites"), &icon_star, false, false, album_fav_cb, NULL};
 	if (sheet_artist[0]) {
@@ -443,8 +450,7 @@ void listacts_track_badge(const char *path, char *badge, size_t badge_size, char
 			snprintf(length, length_size, "%u:%02u", seconds / 60, seconds % 60);
 		}
 	}
-	bool wanted = quality == LIBRARY_QUALITY_HIFI || quality == LIBRARY_QUALITY_DSD ||
-				  (medialist_quality_badges() && (quality == LIBRARY_QUALITY_CD || quality == LIBRARY_QUALITY_LOSSY));
+	bool wanted = quality == LIBRARY_QUALITY_HIFI || quality == LIBRARY_QUALITY_DSD || (medialist_quality_badges() && (quality == LIBRARY_QUALITY_CD || quality == LIBRARY_QUALITY_LOSSY));
 	if (!wanted) {
 		return;
 	}

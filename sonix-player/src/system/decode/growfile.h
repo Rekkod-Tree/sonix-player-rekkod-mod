@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 // Reading a file while someone else is still writing it.
 //
@@ -36,6 +37,7 @@
 
 // `total` is the final size when the server stated it, 0 when it did not.
 void growfile_announce(const char *path, long total);
+void growfile_set_duration(const char *path, uint32_t duration_ms);
 void growfile_progress(const char *path, long done);
 
 // End of the download: `ok` false means it died halfway, and waiting readers
@@ -96,6 +98,10 @@ long growfile_wait_path(const char *path, long need);
 
 // The current position, for decoders that ask for it.
 long growfile_tell(growfile_t *g);
+
+// Contiguous bytes present now, including after the writer has finished.
+long growfile_available(growfile_t *g);
+uint32_t growfile_duration(growfile_t *g);
 
 // True (once: reading clears it) if since the last call a read had to wait for
 // a piece not yet downloaded. This is how playback discovers it has reached the

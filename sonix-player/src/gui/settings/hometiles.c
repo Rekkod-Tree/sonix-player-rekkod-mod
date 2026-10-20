@@ -285,7 +285,7 @@ static bool in_category(home_item_t item, int category) {
 		return item <= HOME_CONTINUE_BOOK;
 	if (category == 1)
 		return item >= HOME_MUSIC_ALL && item <= HOME_FILES;
-	return (item >= HOME_TIDAL && item <= HOME_ZVUK) || item == HOME_YANDEX_WAVE || item == HOME_YANDEX_LIKED;
+	return (item >= HOME_TIDAL && item <= HOME_ZVUK) || item == HOME_YANDEX_WAVE || item == HOME_YANDEX_LIKED || item == HOME_SPOTIFY;
 }
 
 static void add_item(void *user) {

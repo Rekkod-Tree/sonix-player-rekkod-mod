@@ -1,5 +1,12 @@
 # Sonix Player — rekkod-mod: что изменилось относительно оригинала
 
+**Актуальная сборка на 20.10.2026: [alpha21](ALPHA21_RELEASE.md).**
+Кандидат базы HiBy 2.0, обновлённые SQLite/OpenSSL/ALSA/BlueALSA,
+исправления очереди событий и владения данными; LTO без PGO.
+Spotify в этот образ не включён. Ниже сохранён исторический перечень
+ранних отличий; текущие возможности описаны в [README](README.md)
+и [FEATURES](FEATURES.md).
+
 Форк [Jepl4r/sonix-player](https://github.com/Jepl4r/sonix-player) для HiBy R1, ветка `sonix-r1` в [Rekkod-Tree/sonix-player-rekkod-mod](https://github.com/Rekkod-Tree/sonix-player-rekkod-mod).
 
 | | |

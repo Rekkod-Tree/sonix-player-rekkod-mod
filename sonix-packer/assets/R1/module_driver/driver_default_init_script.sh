@@ -1,5 +1,10 @@
 #!/bin/sh
 
+# This overlay supports the BCM R1 board. HiBy 2.0's AIC MAC setup must not
+# wait for another board's radio or change the MAC owned by Sonix.
+mkdir -p /run
+printf 'bcm\n' > /run/r1_wireless_type
+
 sh utils.sh
 sh rmem_manager.sh
 sh soc_utils.sh

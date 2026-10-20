@@ -1,6 +1,7 @@
 #define _GNU_SOURCE 1
 
 #include "crypto.h"
+#include "openssl_runtime.h"
 
 #include <dlfcn.h>
 #include <pthread.h>
@@ -131,11 +132,7 @@ static bool cbc_raw(const uint8_t *key, const uint8_t *iv, const uint8_t *in, ui
 	} while (0)
 
 static bool load_symbols(void) {
-	static const char *names[] = {"libcrypto.so.1.1", "libcrypto.so.3", "libcrypto.so", NULL};
-	for (int i = 0; names[i] && !lib_crypto; i++) {
-		lib_crypto = dlopen(names[i], RTLD_NOW | RTLD_GLOBAL);
-	}
-	if (!lib_crypto) {
+	if (!openssl_runtime_get(NULL, &lib_crypto)) {
 		fprintf(stderr, "crypto: libcrypto not loadable (%s); AES unavailable\n", dlerror());
 		return false;
 	}

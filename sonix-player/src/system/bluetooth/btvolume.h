@@ -11,9 +11,9 @@
 //     /org/bluealsa/hci0/dev_AA_BB_CC_DD_EE_FF/a2dpsrc/sink
 //
 // with two writable properties on org.bluealsa.PCM1 that decide everything
-// here. Volume is a 16-bit word -- the left channel in the upper byte, the
-// right in the lower, the top bit of each a mute switch and the remaining seven
-// a level from 0 to 127. SoftVolume says who applies it:
+// here. BlueALSA 4 packs stereo Volume into a 16-bit word; BlueALSA 5 uses one
+// byte per channel. In both formats the high bit mutes and the remaining seven
+// bits hold a level from 0 to 127. SoftVolume says who applies it:
 //
 //   SoftVolume = false  bluealsa passes the level on as an AVRCP absolute
 //                       volume, so it lands on the headphones themselves and

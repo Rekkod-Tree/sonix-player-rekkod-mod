@@ -1,4 +1,5 @@
 #include "provider.h"
+#include "src/system/library/library.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -38,9 +39,7 @@ void stream_provider_attach_gui(const char *id, const stream_provider_gui_t *gui
 
 int stream_provider_count(void) { return provider_count; }
 
-const stream_provider_t *stream_provider_at(int index) {
-	return index >= 0 && index < provider_count ? providers[index] : NULL;
-}
+const stream_provider_t *stream_provider_at(int index) { return index >= 0 && index < provider_count ? providers[index] : NULL; }
 
 const stream_provider_t *stream_provider_for_path(const char *path) {
 	if (!path || !path[0]) {
@@ -61,6 +60,28 @@ const stream_provider_t *stream_provider_for_track(const char *path) {
 
 bool stream_provider_owns(const char *path) { return stream_provider_for_path(path) != NULL; }
 
+bool track_favourite_get(const char *path) {
+	const stream_provider_t *p = stream_provider_for_path(path);
+	if (p)
+		return !p->read_only && p->is_track && p->is_track(path) && p->fav_get && p->fav_get(path);
+	return path && path[0] && library_fav_contains(path);
+}
+
+bool track_favourite_set(const char *path, const char *title, const char *artist, bool want, stream_provider_done_cb done, void *user) {
+	if (!path || !path[0])
+		return false;
+	const stream_provider_t *p = stream_provider_for_path(path);
+	if (p) {
+		if (p->read_only || !p->is_track || !p->is_track(path) || !p->fav_toggle)
+			return false;
+		p->fav_toggle(path, want, done, user);
+		return true;
+	}
+	if (library_fav_contains(path) != want)
+		library_fav_toggle(path, title ? title : "", artist ? artist : "");
+	return library_fav_contains(path) == want;
+}
+
 bool stream_provider_fill_metadata(const char *path, song_metadata_t *out) {
 	const stream_provider_t *p = stream_provider_for_track(path);
 	song_metadata_t extra = {0};
@@ -68,10 +89,10 @@ bool stream_provider_fill_metadata(const char *path, song_metadata_t *out) {
 		return false;
 	}
 	bool changed = false;
-#define FILL_DISPLAY(field) \
-	if (!out->field[0] && extra.field[0]) { \
-		snprintf(out->field, sizeof(out->field), "%s", extra.field); \
-		changed = true; \
+#define FILL_DISPLAY(field)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            \
+	if (!out->field[0] && extra.field[0]) {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            \
+		snprintf(out->field, sizeof(out->field), "%s", extra.field);                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   \
+		changed = true;                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                \
 	}
 	FILL_DISPLAY(title)
 	FILL_DISPLAY(artist)
@@ -94,8 +115,7 @@ bool stream_provider_any_downloading(void) {
 
 bool stream_provider_any_network_wanted(void) {
 	for (int i = 0; i < provider_count; i++) {
-		if ((providers[i]->downloading && providers[i]->downloading()) ||
-			(providers[i]->network_wanted && providers[i]->network_wanted())) {
+		if ((providers[i]->downloading && providers[i]->downloading()) || (providers[i]->network_wanted && providers[i]->network_wanted())) {
 			return true;
 		}
 	}

@@ -67,6 +67,11 @@ void gui_page_ensure(lv_obj_t *screen);
 // False when the queue was full and the message dropped -- a caller that
 // passed heap memory owns it again and has to free it.
 bool gui_post(void (*cb)(void *), void *user);
+// Consumes a plain malloc payload: callback owns it on success, free on refusal.
+bool gui_post_or_free(void (*cb)(void *), void *user);
+// Reserved, bounded latest-state slots; no owned payloads. Repeated posts to
+// the same callback replace its argument. For completion and volume only.
+bool gui_post_latest(void (*cb)(void *), void *user);
 
 // The descriptor the main loop waits on instead of sleeping on a timer: it
 // becomes readable as soon as something is posted. -1 when it could not be

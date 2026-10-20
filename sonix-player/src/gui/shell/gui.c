@@ -3,11 +3,11 @@
 
 #include <pthread.h>
 #include <stdint.h>
-#include <sys/eventfd.h>
-#include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/eventfd.h>
+#include <unistd.h>
 
 #include "src/gui/audio/dacpage.h"
 #include "src/gui/audio/eqsettings.h"
@@ -110,7 +110,6 @@ typedef struct {
 	lv_color_t icon_color;
 } popup_event_t;
 
-
 // ---------------------------------------------------------------------------
 // gui_post: the bridge from any thread onto the GUI thread.
 //
@@ -126,7 +125,6 @@ typedef struct {
 
 #define GUI_POST_MAX 32
 
-
 typedef struct {
 	void (*cb)(void *);
 	void *user;
@@ -136,6 +134,8 @@ static pthread_mutex_t post_lock = PTHREAD_MUTEX_INITIALIZER;
 static gui_post_t post_ring[GUI_POST_MAX];
 static int post_head;
 static int post_count;
+#define GUI_LATEST_MAX 4
+static gui_post_t post_latest[GUI_LATEST_MAX];
 static lv_timer_t *post_timer;
 
 // ---------------------------------------------------------------------------
@@ -204,6 +204,37 @@ bool gui_post(void (*cb)(void *), void *user) {
 	return queued;
 }
 
+bool gui_post_or_free(void (*cb)(void *), void *user) {
+	bool queued = gui_post(cb, user);
+	if (!queued)
+		free(user);
+	return queued;
+}
+
+bool gui_post_latest(void (*cb)(void *), void *user) {
+	if (!cb)
+		return false;
+	pthread_mutex_lock(&post_lock);
+	int slot = -1;
+	for (int i = 0; i < GUI_LATEST_MAX; i++) {
+		if (post_latest[i].cb == cb) {
+			slot = i;
+			break;
+		}
+		if (!post_latest[i].cb && slot < 0)
+			slot = i;
+	}
+	if (slot >= 0)
+		post_latest[slot] = (gui_post_t){cb, user};
+	pthread_mutex_unlock(&post_lock);
+	if (slot >= 0 && post_wake_fd >= 0) {
+		uint64_t one = 1;
+		ssize_t ignored = write(post_wake_fd, &one, sizeof(one));
+		(void)ignored;
+	}
+	return slot >= 0;
+}
+
 static void clock_changed_async(void *user) {
 	(void)user;
 	clock_poll();
@@ -229,6 +260,19 @@ static void post_drain_cb(lv_timer_t *timer) {
 
 	for (;;) {
 		pthread_mutex_lock(&post_lock);
+		gui_post_t latest = {0};
+		for (int i = 0; i < GUI_LATEST_MAX; i++) {
+			if (post_latest[i].cb) {
+				latest = post_latest[i];
+				post_latest[i] = (gui_post_t){0};
+				break;
+			}
+		}
+		if (latest.cb) {
+			pthread_mutex_unlock(&post_lock);
+			latest.cb(latest.user);
+			continue;
+		}
 		if (post_count == 0) {
 			pthread_mutex_unlock(&post_lock);
 			return;
@@ -301,7 +345,7 @@ static void popup_notify(const char *text, const lv_image_dsc_t *icon, lv_color_
 	// gui_post rather than lv_async_call: popups arrive from any thread
 	// (bluetooth, usb, Qobuz downloads), and lv_async_call from off the GUI
 	// thread corrupts the timer list. See gui_post.
-	gui_post(popup_async_cb, ev);
+	gui_post_or_free(popup_async_cb, ev);
 }
 
 void gui_notify_popup(const char *text) { popup_notify(text, NULL, lv_color_black()); }
@@ -317,9 +361,7 @@ bool gui_card_available(void) {
 
 void gui_notify_no_card(void) { gui_notify_popup(usb_storage_active() ? "usb_storage_shared" : "sd_card_missing"); }
 
-void gui_notify_popup_icon(const char *text, const lv_image_dsc_t *icon, lv_color_t color) {
-	popup_notify(text, icon, color);
-}
+void gui_notify_popup_icon(const char *text, const lv_image_dsc_t *icon, lv_color_t color) { popup_notify(text, icon, color); }
 
 // ---------------------------------------------------------------------------
 // The modal: a notice that stays until whatever it is about is over
@@ -390,9 +432,7 @@ void gui_modal_hide(void) {
 	}
 }
 
-bool gui_modal_visible(void) {
-	return modal_backdrop && !lv_obj_is_hidden(modal_backdrop);
-}
+bool gui_modal_visible(void) { return modal_backdrop && !lv_obj_is_hidden(modal_backdrop); }
 
 static bool tree_holds(const lv_obj_t *parent, const lv_obj_t *obj) {
 	uint32_t count = lv_obj_get_child_count(parent);
@@ -557,7 +597,7 @@ static void volume_async_cb(void *user_data) {
 
 // From the AVRCP reader thread and from btvolume when the headphones move the
 // level themselves, so across the bridge like the key above.
-void gui_notify_volume(int percent) { gui_post(volume_async_cb, (void *)(intptr_t)percent); }
+void gui_notify_volume(int percent) { gui_post_latest(volume_async_cb, (void *)(intptr_t)percent); }
 
 static void power_menu_async_cb(void *unused) {
 	(void)unused;
@@ -565,7 +605,6 @@ static void power_menu_async_cb(void *unused) {
 }
 
 void gui_notify_power_menu(void) { gui_post(power_menu_async_cb, NULL); }
-
 
 static void build_rest(gui_config_t *cfg, bool final);
 
@@ -765,7 +804,7 @@ static void build_rest(gui_config_t *cfg, bool final) {
 	radiopage_init(cfg);
 	dacpage_init(cfg);
 	// After dacpage: the More section points at its pages.
-	gearboyplay_init(cfg);  // before the list: one of its rows leads here
+	gearboyplay_init(cfg);	   // before the list: one of its rows leads here
 	gearboysettings_init(cfg); // before the page: its gear opens this
 	gearboypage_init(cfg);
 	flappybird_init(cfg);
@@ -806,8 +845,8 @@ static void build_rest(gui_config_t *cfg, bool final) {
 	libraryscan_init(cfg);
 	msebsettings_init(cfg); // before musicsettings: the MSEB page hangs its gear off it
 	eqsettings_init(cfg);	// and the equalizer page hangs its own off this
-	peqsettings_init(cfg); // the parametric page hangs its preset screen off the gear
-	peqautoeq_init(cfg);  // the waveform entry on that page searches AutoEq profiles
+	peqsettings_init(cfg);	// the parametric page hangs its preset screen off the gear
+	peqautoeq_init(cfg);	// the waveform entry on that page searches AutoEq profiles
 	musicsettings_init(cfg);
 	search_init(cfg);
 	medialist_init(cfg);
@@ -823,13 +862,22 @@ static void build_rest(gui_config_t *cfg, bool final) {
 	// nor on the queue: there a stray horizontal drag would yank the player
 	// over what is being adjusted or read.
 	lv_obj_t *const player_swipe_screens[] = {
-		main_menu_screen,		 music_screen,		browser_screen,		medialist_screen,
+		main_menu_screen,
+		music_screen,
+		browser_screen,
+		medialist_screen,
 		// details_screen is deliberately absent: its page is reached FROM the
 		// player, so dragging it sideways to go back into the player would be
 		// one gesture doing two contradictory things. The back swipe is the
 		// only way out of it.
-		medialist_tracks_screen, medialist_albums_screen, audiobooks_screen, wireless_screen,
-		streaming_screen,		 radiopage_screen,	radiolist_screen,	radiosearch_screen,
+		medialist_tracks_screen,
+		medialist_albums_screen,
+		audiobooks_screen,
+		wireless_screen,
+		streaming_screen,
+		radiopage_screen,
+		radiolist_screen,
+		radiosearch_screen,
 		morepage_screen,
 	};
 	for (size_t i = 0; i < sizeof(player_swipe_screens) / sizeof(player_swipe_screens[0]); i++) {
@@ -841,23 +889,14 @@ static void build_rest(gui_config_t *cfg, bool final) {
 	// exits are their own buttons -- and the handler itself skips the main
 	// menu.
 	lv_obj_t *const back_swipe_screens[] = {
-		main_menu_screen, music_screen,			browser_screen,	  settings_screen,
-		devoptions_screen, processespage_screen, musicsettings_screen, powersettings_screen, appearance_screen,
-		language_screen,
-		medialist_screen,  medialist_tracks_screen, medialist_albums_screen, audiobooks_screen, audiobooksettings_screen,
-		queue_screen,	  chapters_screen,		 details_screen,   audiobookcontrols_screen,
-		wireless_screen,
-		wifisettings_screen,
-		btsettings_screen, btaudio_screen,	 airpodspage_screen, airplay_screen,   streaming_screen,
-		radiopage_screen,  radiolist_screen, radiosearch_screen,
-		dlna_screen,	   sonixlink_screen,	 morepage_screen,	  gearboypage_screen,
+		main_menu_screen, music_screen, browser_screen, settings_screen, devoptions_screen, processespage_screen, musicsettings_screen, powersettings_screen, appearance_screen, language_screen, medialist_screen, medialist_tracks_screen, medialist_albums_screen, audiobooks_screen, audiobooksettings_screen, queue_screen, chapters_screen, details_screen, audiobookcontrols_screen, wireless_screen, wifisettings_screen, btsettings_screen, btaudio_screen, airpodspage_screen, airplay_screen, streaming_screen, radiopage_screen, radiolist_screen, radiosearch_screen, dlna_screen, sonixlink_screen, morepage_screen, gearboypage_screen,
 	};
 	for (size_t i = 0; i < sizeof(back_swipe_screens) / sizeof(back_swipe_screens[0]); i++) {
 		switcher_attach_back_gesture(back_swipe_screens[i]);
 	}
 
 	quickpanel_init(cfg); // above the pages, under the popover/power menu
-	popover_init(); // last: its veil must sit above the other top-layer chrome
+	popover_init();		  // last: its veil must sit above the other top-layer chrome
 	powersettings_init(cfg);
 	confirm_init(cfg);
 	toast_init(cfg);

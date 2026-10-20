@@ -1,6 +1,7 @@
 #define _GNU_SOURCE 1
 
 #include "tls.h"
+#include "openssl_runtime.h"
 
 #include "src/system/core/config.h"
 
@@ -126,18 +127,7 @@ static bool bind_symbol(void *lib, const char *name, void *slot) {
 	}
 
 static bool load_symbols(void) {
-	// The target has 1.1; a development host may have 3. The subset used here
-	// is identical in both, so take whichever answers.
-	static const char *ssl_names[] = {"libssl.so.1.1", "libssl.so.3", "libssl.so", NULL};
-	static const char *crypto_names[] = {"libcrypto.so.1.1", "libcrypto.so.3", "libcrypto.so", NULL};
-
-	for (int i = 0; ssl_names[i] && !lib_ssl; i++) {
-		lib_ssl = dlopen(ssl_names[i], RTLD_NOW | RTLD_GLOBAL);
-	}
-	for (int i = 0; crypto_names[i] && !lib_crypto; i++) {
-		lib_crypto = dlopen(crypto_names[i], RTLD_NOW | RTLD_GLOBAL);
-	}
-	if (!lib_ssl || !lib_crypto) {
+	if (!openssl_runtime_get(&lib_ssl, &lib_crypto)) {
 		fprintf(stderr, "tls: OpenSSL not loadable (%s); https will be unavailable\n", dlerror());
 		return false;
 	}

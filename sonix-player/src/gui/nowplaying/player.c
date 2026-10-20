@@ -75,11 +75,12 @@
 #include "src/system/streaming/qobuzcache.h"
 #include "src/system/streaming/qobuzsync.h"
 #include "src/system/streaming/radio.h"
+#include "src/system/streaming/spotify.h"
 #include "src/system/streaming/tidalcache.h"
 #include "src/system/streaming/tidalsync.h"
 
-#include "lvgl/src/core/lv_obj_event_private.h"
 #include "lvgl/lvgl.h"
+#include "lvgl/src/core/lv_obj_event_private.h"
 
 lv_obj_t *player_screen;
 
@@ -99,9 +100,9 @@ static void update_format_label(const device_state_t *state);
 static void update_repeat_button(void);
 
 // Sonix UI 2.0 (see the section of that name further down).
-static int np_panel_h;			 // SX_NP_PANEL_H: the panel at the bottom
+static int np_panel_h;			  // SX_NP_PANEL_H: the panel at the bottom
 static lv_obj_t *cover_thumb_img; // the album's 240 px thumbnail, stretched, until the picture lands
-static lv_obj_t *pause_badge;	 // the play glyph over the artwork while paused
+static lv_obj_t *pause_badge;	  // the play glyph over the artwork while paused
 static void cover_gesture_cb(lv_event_t *e);
 static void np_chain_build(lv_obj_t *parent);
 static void np_chain_refresh(const device_state_t *state);
@@ -130,7 +131,7 @@ static bool np_outside(void);
 // one thing that still belonged to some other page.
 static lv_color_t chrome_accent(void);
 static lv_obj_t *progress_slider;
-static lv_obj_t *elapsed_label; // start of the track, under the left end of the bar
+static lv_obj_t *elapsed_label;	  // start of the track, under the left end of the bar
 static lv_obj_t *remaining_label; // end of the track, under the right end
 // Where this track sits in the queue, between the two clocks: the row under the
 // bar had an empty middle and the question -- how much of this is left -- is the
@@ -240,7 +241,7 @@ static lv_obj_t *next_btn_obj;
 static lv_obj_t *more_btn_obj;
 static lv_obj_t *more_btn_icon; // ellipsis on a track, chapters on a book
 static lv_obj_t *repeat_btn_obj;
-static lv_obj_t *speed_btn_obj;	 // stands in the repeat button's place on a book
+static lv_obj_t *speed_btn_obj; // stands in the repeat button's place on a book
 static lv_obj_t *speed_btn_icon;
 static lv_obj_t *below_slider_obj; // the two clocks under the bar
 // How far the four source marks keep from the corner of the artwork they
@@ -255,9 +256,9 @@ static lv_obj_t *below_slider_obj; // the two clocks under the bar
 static int badge_y(void);
 static int badge_top(void) { return badge_y(); }
 
-static lv_obj_t *live_badge;	   // live indicator, top right over the artwork
-static lv_obj_t *service_badge;	   // the streaming service's mark (Qobuz, Tidal...), same corner
-static lv_obj_t *podcast_badge;	   // and the podcast one, third in the same place
+static lv_obj_t *live_badge;	// live indicator, top right over the artwork
+static lv_obj_t *service_badge; // the streaming service's mark (Qobuz, Tidal...), same corner
+static lv_obj_t *podcast_badge; // and the podcast one, third in the same place
 static bool live_mode;
 static bool live_transport_hidden; // prev/next taken away on a stream
 static bool live_custom_nav;	   // on a station from a list, where they change station
@@ -277,12 +278,12 @@ static bool podcast_mode;
 static bool audiobook_has_chapters;		 // whether the loaded book is marked up
 static int audiobook_skip_shown_back;	 // the two jump sizes the buttons are drawn
 static int audiobook_skip_shown_forward; // for, so changing the setting repaints
-static bool audiobook_mode_valid;   // false until the first apply, so it paints once
+static bool audiobook_mode_valid;		 // false until the first apply, so it paints once
 
 static cover_image_t current_cover;	   // pixels currently referenced by cover_img
 static cover_image_t current_backdrop; // upside-down blurred copy behind the controls
 static lv_obj_t *cover_art;
-static int cover_box_w, cover_box_h;   // the artwork spans the full screen width
+static int cover_box_w, cover_box_h; // the artwork spans the full screen width
 
 // ---------------------------------------------------------------------------
 // The two arrangements
@@ -305,9 +306,9 @@ static int cover_box_w, cover_box_h;   // the artwork spans the full screen widt
 // smaller circle of the accent colour. The ring is a wide white border over an
 // accent-coloured body rather than a second object, so it costs nothing and
 // follows the knob on its own.
-#define PROGRESS_TRACK_HEIGHT 6	 // as thick as every other slider
-#define PROGRESS_KNOB_GROW 7	 // how far the knob grows past the track
-#define PROGRESS_TOUCH_REACH 18	 // how far past the track a press still seeks
+#define PROGRESS_TRACK_HEIGHT 6 // as thick as every other slider
+#define PROGRESS_KNOB_GROW 7	// how far the knob grows past the track
+#define PROGRESS_TOUCH_REACH 18 // how far past the track a press still seeks
 #define PROGRESS_KNOB_RING 0
 
 // How the shape of the track is drawn, and how much room it gets. The bars are
@@ -360,8 +361,8 @@ static int cover_box_w, cover_box_h;   // the artwork spans the full screen widt
 // says what the user wants for their music, and `layout_alt_now` says whether
 // what is playing is music of that kind. Everything that draws asks the second.
 static player_layout_t layout_choice; // the setting, saved in the config
-static bool layout_alt_now;		// and whether the current source can use it
-static bool layout_studio_now;	// likewise for the third arrangement
+static bool layout_alt_now;			  // and whether the current source can use it
+static bool layout_studio_now;		  // likewise for the third arrangement
 // The shape of the track and the sleeve's colour: up with the alternative
 // layout, and kept when the words are shown over it.
 static bool layout_wave_now;
@@ -374,7 +375,7 @@ static bool cover_accent;
 static lv_obj_t *song_text_obj; // the title and artist, wherever they live now
 static lv_obj_t *song_side_obj; // the star and the format, likewise
 static void align_title_with_star(void);
-static lv_obj_t *alt_text_col;	// the two pills, stacked at the foot of the sleeve
+static lv_obj_t *alt_text_col; // the two pills, stacked at the foot of the sleeve
 static lv_obj_t *alt_title_pill;
 static lv_obj_t *alt_artist_pill;
 static lv_obj_t *alt_fav_circle;
@@ -389,7 +390,7 @@ static uint8_t wave_bars[WAVEFORM_BARS];
 static int wave_ready;
 static int wave_drawn = -1; // where the playhead was, in pixels, when it was drawn
 static uint32_t wave_drawn_tone = 1;
-static int backdrop_w, backdrop_h;	   // size of the controls block it sits behind
+static int backdrop_w, backdrop_h; // size of the controls block it sits behind
 // Studio shows the same blurred copy behind the whole screen, so there it is
 // asked for at that shape instead: a picture made for the block behind the
 // controls is a third of the height and stretching it up is both distorted and
@@ -453,8 +454,7 @@ static void apply_live_mode(bool live) {
 	// to go back to (player_screen_next/prev, live_step()).
 	bool transport_hidden = live && !custom_nav && playlist_count() <= 0;
 
-	if (live == live_mode && transport_hidden == live_transport_hidden && custom_nav == live_custom_nav &&
-		cover_placeholder_icon) {
+	if (live == live_mode && transport_hidden == live_transport_hidden && custom_nav == live_custom_nav && cover_placeholder_icon) {
 		return;
 	}
 	live_mode = live;
@@ -538,8 +538,7 @@ static void apply_live_mode(bool live) {
 	// gets the radio. Coming back off a stream has to restore whichever of the
 	// first two is right, not assume the note.
 	if (cover_placeholder_icon) {
-		lv_image_set_src(cover_placeholder_icon, live ? &icon_radio_player
-									: (audiobook_mode ? &icon_book_headphones : &icon_music_note));
+		lv_image_set_src(cover_placeholder_icon, live ? &icon_radio_player : (audiobook_mode ? &icon_book_headphones : &icon_music_note));
 	}
 }
 
@@ -563,9 +562,7 @@ static void apply_audiobook_mode(bool book, bool podcast) {
 	int back = podcast && !book ? podcast_skip_back() : audiobook_skip_back();
 	int forward = podcast && !book ? podcast_skip_forward() : audiobook_skip_forward();
 
-	if (audiobook_mode_valid && book == audiobook_mode && podcast == podcast_mode &&
-		chapters == audiobook_has_chapters && back == audiobook_skip_shown_back &&
-		forward == audiobook_skip_shown_forward) {
+	if (audiobook_mode_valid && book == audiobook_mode && podcast == podcast_mode && chapters == audiobook_has_chapters && back == audiobook_skip_shown_back && forward == audiobook_skip_shown_forward) {
 		return;
 	}
 	audiobook_mode = book;
@@ -576,16 +573,10 @@ static void apply_audiobook_mode(bool book, bool podcast) {
 	audiobook_mode_valid = true;
 
 	if (prev_icon) {
-		lv_image_set_src(prev_icon, !skips                            ? &icon_skip_back
-									: back == AUDIOBOOK_SKIP_HUGE ? &icon_prev_60
-									: back == AUDIOBOOK_SKIP_LONG ? &icon_prev_30
-																  : &icon_prev_10);
+		lv_image_set_src(prev_icon, !skips ? &icon_skip_back : back == AUDIOBOOK_SKIP_HUGE ? &icon_prev_60 : back == AUDIOBOOK_SKIP_LONG ? &icon_prev_30 : &icon_prev_10);
 	}
 	if (next_icon) {
-		lv_image_set_src(next_icon, !skips                               ? &icon_skip_forward
-									: forward == AUDIOBOOK_SKIP_HUGE ? &icon_next_60
-									: forward == AUDIOBOOK_SKIP_LONG ? &icon_next_30
-																	 : &icon_next_10);
+		lv_image_set_src(next_icon, !skips ? &icon_skip_forward : forward == AUDIOBOOK_SKIP_HUGE ? &icon_next_60 : forward == AUDIOBOOK_SKIP_LONG ? &icon_next_30 : &icon_next_10);
 	}
 	// A book has a menu of its own behind the usual glyph: chapters,
 	// bookmarks, summary. On a podcast the same button goes straight to the
@@ -607,11 +598,7 @@ static void apply_audiobook_mode(bool book, bool podcast) {
 	// goes: a queue of episodes is not an album, and looping the last twenty
 	// instalments is nothing anybody asks for.
 	if (fav_btn_obj) {
-		if (book) {
-			lv_obj_set_hidden(fav_btn_obj, true);
-		} else {
-			lv_obj_set_hidden(fav_btn_obj, false);
-		}
+		update_fav_button();
 	}
 	if (repeat_btn_obj) {
 		if (book || podcast) {
@@ -1011,7 +998,7 @@ static uint64_t cover_incoming_id;
 static enum {
 	COVER_ID_IDLE,
 	COVER_ID_NEW_TRACK, // is the next track's picture the one already up?
-	COVER_ID_MEASURE,   // what is the picture that just went up?
+	COVER_ID_MEASURE,	// what is the picture that just went up?
 } cover_id_state;
 
 // How often the loader's answers are looked for while one is outstanding. The
@@ -1364,8 +1351,7 @@ static bool playing_local_file(const device_state_t *state) {
 		return false;
 	}
 	const char *f = state->current_file;
-	return !stream_provider_owns(f) && !podcastcache_is_episode(f) && !dlna_owns_path(f) &&
-		   !dlna_owns_playback();
+	return !stream_provider_owns(f) && !podcastcache_is_episode(f) && !dlna_owns_path(f) && !dlna_owns_playback();
 }
 
 // Puts the progress slider over the waveform, or back where it belongs.
@@ -1442,9 +1428,9 @@ static lv_obj_t *studio_box;	  // what everything else is laid out on
 static lv_obj_t *studio_head;	  // title and artist across the top
 static lv_obj_t *studio_text_col; // the two of them, stacked and centred
 static lv_obj_t *studio_cover;
-static lv_obj_t *studio_empty;		  // the square shown where a track has no artwork
+static lv_obj_t *studio_empty; // the square shown where a track has no artwork
 static lv_obj_t *studio_empty_icon;
-static lv_obj_t *studio_quality;	  // the icon and the format line under the sleeve
+static lv_obj_t *studio_quality; // the icon and the format line under the sleeve
 static lv_obj_t *studio_quality_icon;
 static bool studio_up;
 static int studio_box_w, studio_box_h; // the panel this arrangement is laid out on
@@ -1489,9 +1475,9 @@ static int studio_cover_size;
 // the words are white.
 #define LYRICS_FULL 1000 // lyrics_progress with the page all the way in
 
-static bool lyrics_wanted;  // pulled in by a swipe
-static bool lyrics_allowed; // wanted, and a file on the card playing
-static bool lyrics_now;		// on screen: allowed, and the file has words
+static bool lyrics_wanted;	  // pulled in by a swipe
+static bool lyrics_allowed;	  // wanted, and a file on the card playing
+static bool lyrics_now;		  // on screen: allowed, and the file has words
 static lv_obj_t *lyrics_pane; // the page: the column and the note
 static lv_obj_t *lyrics_head; // the title and artist at the top while the words are up
 static lv_obj_t *lyrics_head_col;
@@ -1505,7 +1491,7 @@ static int32_t lyrics_progress; // 0 the sleeve, LYRICS_FULL the words
 static int32_t lyrics_tap_ms = -1;
 static uint32_t lyrics_tap_until;
 #define LYRICS_TAP_WAIT_MS 2000
-static int lyrics_pane_x;		// where the page rests
+static int lyrics_pane_x; // where the page rests
 static lv_obj_t *lyrics_view;
 static lv_obj_t *lyrics_note; // "no lyrics", in the middle of the column
 static lyrics_t lyrics_cur;
@@ -1771,8 +1757,7 @@ static void lyrics_follow(double seconds) {
 	if (lyrics_centred) {
 		return;
 	}
-	if (lyrics_user_until &&
-		((int32_t)(lv_tick_get() - lyrics_user_until) < 0 || audio_get_status() != AUDIO_STATUS_PLAYING)) {
+	if (lyrics_user_until && ((int32_t)(lv_tick_get() - lyrics_user_until) < 0 || audio_get_status() != AUDIO_STATUS_PLAYING)) {
 		return;
 	}
 	lyrics_user_until = 0;
@@ -2544,10 +2529,10 @@ static void lyrics_build(void) {
 	lv_obj_set_scrollbar_mode(lyrics_view, LV_SCROLLBAR_MODE_OFF);
 	lv_obj_add_event_cb(lyrics_view, lyrics_scroll_cb, LV_EVENT_SCROLL_BEGIN, NULL);
 	lv_obj_add_event_cb(lyrics_view, lyrics_tap_cb, LV_EVENT_CLICKED, NULL);
-	lv_obj_add_event_cb(lyrics_view, lyrics_drag_cb, LV_EVENT_PRESSED, (void *)(uintptr_t) false);
-	lv_obj_add_event_cb(lyrics_view, lyrics_drag_cb, LV_EVENT_PRESSING, (void *)(uintptr_t) false);
-	lv_obj_add_event_cb(lyrics_view, lyrics_drag_cb, LV_EVENT_RELEASED, (void *)(uintptr_t) false);
-	lv_obj_add_event_cb(lyrics_view, lyrics_drag_cb, LV_EVENT_PRESS_LOST, (void *)(uintptr_t) false);
+	lv_obj_add_event_cb(lyrics_view, lyrics_drag_cb, LV_EVENT_PRESSED, (void *)(uintptr_t)false);
+	lv_obj_add_event_cb(lyrics_view, lyrics_drag_cb, LV_EVENT_PRESSING, (void *)(uintptr_t)false);
+	lv_obj_add_event_cb(lyrics_view, lyrics_drag_cb, LV_EVENT_RELEASED, (void *)(uintptr_t)false);
+	lv_obj_add_event_cb(lyrics_view, lyrics_drag_cb, LV_EVENT_PRESS_LOST, (void *)(uintptr_t)false);
 
 	lyrics_note = lv_label_create(lyrics_pane);
 	lv_obj_set_ignore_layout(lyrics_note, true);
@@ -2877,9 +2862,7 @@ static void align_title_with_star(void) {
 		return;
 	}
 	int32_t shift = 0;
-	if (song_text_obj && song_side_obj && fav_btn_obj && lv_obj_get_parent(song_title_label) == song_text_obj &&
-		lv_obj_get_parent(fav_btn_obj) == song_side_obj && !lv_obj_is_hidden(fav_btn_obj) &&
-		!lv_obj_is_hidden(song_side_obj)) {
+	if (song_text_obj && song_side_obj && fav_btn_obj && lv_obj_get_parent(song_title_label) == song_text_obj && lv_obj_get_parent(fav_btn_obj) == song_side_obj && !lv_obj_is_hidden(fav_btn_obj) && !lv_obj_is_hidden(song_side_obj)) {
 		const lv_font_t *font = lv_obj_get_style_text_font(song_title_label, 0);
 		int32_t line = lv_font_get_line_height(font);
 		int32_t title_mid = line / 2;
@@ -2894,8 +2877,7 @@ static void align_title_with_star(void) {
 		lv_area_t title, star;
 		lv_obj_get_coords(song_title_label, &title);
 		lv_obj_get_coords(fav_btn_obj, &star);
-		int32_t title_top = title.y1 - lv_obj_get_style_translate_y(song_title_label, 0) +
-							lv_obj_get_style_pad_top(song_title_label, 0);
+		int32_t title_top = title.y1 - lv_obj_get_style_translate_y(song_title_label, 0) + lv_obj_get_style_pad_top(song_title_label, 0);
 		shift = (star.y1 + star.y2) / 2 - (title_top + title_mid);
 	}
 	// Only when it changes: a new translation lays the column out again, and
@@ -3196,8 +3178,7 @@ static void update_layout(const device_state_t *state) {
 	bool wave = layout_choice == PLAYER_LAYOUT_ALTERNATIVE && local;
 	bool alt = wave;
 
-	if (studio == layout_studio_now && alt == layout_alt_now && wave == layout_wave_now && lyrics == lyrics_allowed &&
-		alt_title_pill) {
+	if (studio == layout_studio_now && alt == layout_alt_now && wave == layout_wave_now && lyrics == lyrics_allowed && alt_title_pill) {
 		return;
 	}
 	bool cover_shape_changed = studio != layout_studio_now || alt != layout_alt_now;
@@ -3471,8 +3452,7 @@ static void reload_cover(const char *filepath) {
 		// being spent again and again on an answer that never changes.
 		int cover_w, cover_h;
 		cover_request_size(&cover_w, &cover_h);
-		coverloader_request_player(filepath, cover_w, cover_h, backdrop_w,
-								   backdrop_is_studio ? backdrop_studio_h : backdrop_h);
+		coverloader_request_player(filepath, cover_w, cover_h, backdrop_w, backdrop_is_studio ? backdrop_studio_h : backdrop_h);
 		cover_request_outstanding = true;
 		// Until it lands, the album's 240 px thumbnail stretched over its place.
 		np_thumb240_request();
@@ -3670,9 +3650,7 @@ static void cover_poll_start(void) {
 // refresh_cover() zeroes both before the buffers are freed.
 const lv_image_dsc_t *player_cover_image(void) { return current_cover.pixels ? &current_cover.dsc : NULL; }
 
-const lv_image_dsc_t *player_backdrop_image(void) {
-	return current_backdrop.pixels ? &current_backdrop.dsc : NULL;
-}
+const lv_image_dsc_t *player_backdrop_image(void) { return current_backdrop.pixels ? &current_backdrop.dsc : NULL; }
 
 static void update_repeat_button(void);
 
@@ -3746,8 +3724,7 @@ static void refresh_now_playing(void) {
 		sx_palette_track_changed(NULL, state.metadata.title);
 		sx_mini_set_track(state.metadata.title, NULL, state.metadata.artist, true);
 	} else {
-		sx_palette_track_changed(state.current_file[0] ? state.current_file : NULL,
-								 state.metadata.album[0] ? state.metadata.album : NULL);
+		sx_palette_track_changed(state.current_file[0] ? state.current_file : NULL, state.metadata.album[0] ? state.metadata.album : NULL);
 		// The mini player on every page says the same as this one.
 		const char *base = strrchr(state.current_file, '/');
 		const char *shown = state.metadata.title[0] ? state.metadata.title : (base ? base + 1 : state.current_file);
@@ -3772,8 +3749,7 @@ static void refresh_now_playing(void) {
 	// would have to be cleared on every route by which the track can change,
 	// and the first one forgotten leaves the player dressed as a podcast over
 	// a song.
-	apply_audiobook_mode(!state.live && audiobook_is_playing(),
-						 !state.live && podcastcache_is_episode(state.current_file));
+	apply_audiobook_mode(!state.live && audiobook_is_playing(), !state.live && podcastcache_is_episode(state.current_file));
 
 	if (state.live) {
 		// The station on top, what it says is on air underneath -- the same
@@ -3881,8 +3857,7 @@ static bool podcast_current_feed(long long *id_out, podcast_feed_t *feed_out) {
 		// The podcast name is also the episode's album tag: see
 		// podcastcache_write_sidecars(), which writes it to both places on
 		// purpose.
-		snprintf(feed_out->title, sizeof(feed_out->title), "%.*s", (int)sizeof(feed_out->title) - 1,
-				 state.metadata.album);
+		snprintf(feed_out->title, sizeof(feed_out->title), "%.*s", (int)sizeof(feed_out->title) - 1, state.metadata.album);
 		podcastcache_tag(state.current_file, "feed_author", feed_out->author, sizeof(feed_out->author));
 		podcastcache_tag(state.current_file, "feed_image", feed_out->image, sizeof(feed_out->image));
 	}
@@ -3898,9 +3873,7 @@ static bool current_podcast_episode(void) {
 // The playing episode's podcast, for callers outside the player (the control
 // centre): the same lookup the player uses for its own star, exposed so both
 // stars say the same thing.
-bool player_current_podcast_feed(long long *id_out, podcast_feed_t *feed_out) {
-	return podcast_current_feed(id_out, feed_out);
-}
+bool player_current_podcast_feed(long long *id_out, podcast_feed_t *feed_out) { return podcast_current_feed(id_out, feed_out); }
 
 // The service's mark, top right, when what is playing comes from Qobuz, Tidal
 // or another streaming service. Same place and same purpose as the live badge
@@ -3982,6 +3955,9 @@ static void update_fav_button(void) {
 	if (!fav_btn_icon) {
 		return;
 	}
+	char account_path[512];
+	const stream_provider_t *account = current_service(account_path, sizeof(account_path));
+	lv_obj_set_hidden(fav_btn_obj, audiobook_mode || (account && account->read_only));
 	bool starred = fav_current_starred();
 
 	// The star's colour is decided here and nowhere else. This function runs
@@ -4019,8 +3995,7 @@ static void fav_error_async(void *user) {
 // service, so a failed Tidal star does not send the user looking at Qobuz.
 static void service_fav_done(bool ok, const char *error, void *user) {
 	const stream_provider_t *service = user;
-	snprintf(fav_error, sizeof(fav_error), "%s",
-			 ok ? "" : (error && error[0] ? error : tr(service->fav_failed_key)));
+	snprintf(fav_error, sizeof(fav_error), "%s", ok ? "" : (error && error[0] ? error : tr(service->fav_failed_key)));
 	gui_post(fav_error_async, NULL);
 }
 
@@ -4063,15 +4038,15 @@ static void fav_btn_event_cb(lv_event_t *e) {
 	// gone twenty tracks from now, and invisible from any other device.
 	const stream_provider_t *service = stream_provider_for_track(state.current_file);
 	if (service) {
-		bool want = !service->fav_get(state.current_file);
-		service->fav_toggle(state.current_file, want, service_fav_done, (void *)service);
+		bool want = !track_favourite_get(state.current_file);
+		track_favourite_set(state.current_file, state.metadata.title, state.metadata.artist, want, service_fav_done, (void *)service);
 		update_fav_button(); // the mirror has already flipped: shows at once
 		return;
 	}
 
 	const char *title = state.metadata.title[0] ? state.metadata.title : strrchr(state.current_file, '/') + 1;
 	// No notification popup: the star filling in is the whole feedback.
-	library_fav_toggle(state.current_file, title, state.metadata.artist);
+	track_favourite_set(state.current_file, title, state.metadata.artist, !track_favourite_get(state.current_file), NULL, NULL);
 	update_fav_button();
 }
 
@@ -4173,8 +4148,7 @@ static void update_format_label(const device_state_t *state) {
 		// AAC) the real average stands in -- but only once the download has
 		// finished, for the reason just given.
 		struct stat st;
-		if (kbps <= 0 && !stream_provider_owns(state->current_file) &&
-			state->progress_total_secs > 0.5 && stat(state->current_file, &st) == 0 && st.st_size > 0) {
+		if (kbps <= 0 && !stream_provider_owns(state->current_file) && state->progress_total_secs > 0.5 && stat(state->current_file, &st) == 0 && st.st_size > 0) {
 			kbps = (int)((double)st.st_size * 8.0 / state->progress_total_secs / 1000.0 + 0.5);
 		}
 
@@ -4196,9 +4170,7 @@ static void update_format_label(const device_state_t *state) {
 // books'.
 static bool speed_is_podcast(void) { return podcast_mode && !audiobook_mode; }
 
-static int speed_current_permille(void) {
-	return speed_is_podcast() ? podcast_speed_permille() : audiobook_speed_permille();
-}
+static int speed_current_permille(void) { return speed_is_podcast() ? podcast_speed_permille() : audiobook_speed_permille(); }
 
 // The gauge wears the accent colour whenever the book or episode is not at
 // normal speed, the way the repeat glyph it stands in for marks a mode that is
@@ -4332,7 +4304,7 @@ static void track_end_async(void *user) {
 }
 
 // Playback thread.
-static void track_end_hook(void) { gui_post(track_end_async, NULL); }
+static void track_end_hook(void) { gui_post_latest(track_end_async, NULL); }
 
 // Reads the current device state and reconciles the UI against it. This is the
 // single point that keeps the play/pause button and the progress bar from
@@ -4406,8 +4378,7 @@ static void update_progress(void) {
 	// from the top (device_state_toggle_play_pause), so that is what the bar
 	// says -- the handoff's "the end of the queue is a pause".
 	double shown = state.progress_current_secs;
-	if (state.status == AUDIO_STATUS_STOPPED && !state.live && current_total_length > 2.0 &&
-		shown >= current_total_length - 1.0) {
+	if (state.status == AUDIO_STATUS_STOPPED && !state.live && current_total_length > 2.0 && shown >= current_total_length - 1.0) {
 		shown = 0;
 	}
 	set_progress_label(shown, current_total_length);
@@ -4425,17 +4396,14 @@ static void update_progress(void) {
 	// time -- a flag raised at start would have to be cleared on every route
 	// by which the track can change, and the first one forgotten leaves the
 	// player dressed as a podcast over a song.
-	apply_audiobook_mode(!state.live && audiobook_is_playing(),
-						 !state.live && podcastcache_is_episode(state.current_file));
+	apply_audiobook_mode(!state.live && audiobook_is_playing(), !state.live && podcastcache_is_episode(state.current_file));
 	update_format_label(&state); // the rate/bits settle shortly after the start
 	np_poll(&state);			 // 2.0: "Up next", the chain, sources outside the queue
 
 	// The status LED follows playback promptly from here (the battery poll
 	// only comes round once a minute). Only writes when the colour changes.
 	// A podcast lights purple instead of the sample-rate colour.
-	led_update_playback(state.status == AUDIO_STATUS_PLAYING, state.stream_sample_rate,
-						!state.live && podcastcache_is_episode(state.current_file),
-						!state.live && audio_get_dsd_multiple() > 0);
+	led_update_playback(state.status == AUDIO_STATUS_PLAYING, state.stream_sample_rate, !state.live && podcastcache_is_episode(state.current_file), !state.live && audio_get_dsd_multiple() > 0);
 
 	// Where the book got to. Not the same thing as "remember track" below and
 	// not subject to its switch: that setting is about which track comes back
@@ -4453,8 +4421,7 @@ static void update_progress(void) {
 		// Not when it has just stopped itself: that path already wrote the
 		// position it stopped at, and this snapshot is from before the seek.
 		if (!stopped_itself) {
-			audiobook_note_position(state.progress_current_secs, state.progress_total_secs,
-									changed || state.status != AUDIO_STATUS_PLAYING);
+			audiobook_note_position(state.progress_current_secs, state.progress_total_secs, changed || state.status != AUDIO_STATUS_PLAYING);
 		}
 	}
 
@@ -4465,8 +4432,7 @@ static void update_progress(void) {
 		static audio_status_t episode_last_status = AUDIO_STATUS_STOPPED;
 		bool episode_changed = state.status != episode_last_status;
 		episode_last_status = state.status;
-		podcaststate_note(state.current_file, state.progress_current_secs, state.progress_total_secs,
-						  episode_changed);
+		podcaststate_note(state.current_file, state.progress_current_secs, state.progress_total_secs, episode_changed);
 	}
 
 	// "Remember track". The decision, and the writing, live in device_state.c:
@@ -4599,9 +4565,7 @@ static void next_btn_event_cb(lv_event_t *e) {
 // the player does not have to be open for the keys on the side of the device
 // to work.
 
-void player_key_play_pause(void) {
-	apply_playback_status(device_state_toggle_play_pause());
-}
+void player_key_play_pause(void) { apply_playback_status(device_state_toggle_play_pause()); }
 
 void player_key_next(void) {
 	if (live_step(1)) {
@@ -4712,18 +4676,10 @@ void player_key_cycle_mode(void) {
 		return; // the button is hidden there: these queues carry their own order
 	}
 	static const char *const NAMES[] = {
-		[PLAYBACK_MODE_NORMAL] = "player_mode_normal",
-		[PLAYBACK_MODE_REPEAT_ALL] = "player_mode_repeat_all",
-		[PLAYBACK_MODE_REPEAT_ONE] = "player_mode_repeat_one",
-		[PLAYBACK_MODE_SHUFFLE] = "player_mode_shuffle",
-		[PLAYBACK_MODE_SHUFFLE_REPEAT] = "player_mode_shuffle_repeat",
+		[PLAYBACK_MODE_NORMAL] = "player_mode_normal", [PLAYBACK_MODE_REPEAT_ALL] = "player_mode_repeat_all", [PLAYBACK_MODE_REPEAT_ONE] = "player_mode_repeat_one", [PLAYBACK_MODE_SHUFFLE] = "player_mode_shuffle", [PLAYBACK_MODE_SHUFFLE_REPEAT] = "player_mode_shuffle_repeat",
 	};
 	static const lv_image_dsc_t *const GLYPHS[] = {
-		[PLAYBACK_MODE_NORMAL] = &icon_repeat_off,
-		[PLAYBACK_MODE_REPEAT_ALL] = &icon_repeat_all,
-		[PLAYBACK_MODE_REPEAT_ONE] = &icon_repeat_one,
-		[PLAYBACK_MODE_SHUFFLE] = &icon_shuffle,
-		[PLAYBACK_MODE_SHUFFLE_REPEAT] = &icon_shuffle_repeat,
+		[PLAYBACK_MODE_NORMAL] = &icon_repeat_off, [PLAYBACK_MODE_REPEAT_ALL] = &icon_repeat_all, [PLAYBACK_MODE_REPEAT_ONE] = &icon_repeat_one, [PLAYBACK_MODE_SHUFFLE] = &icon_shuffle, [PLAYBACK_MODE_SHUFFLE_REPEAT] = &icon_shuffle_repeat,
 	};
 	playback_mode_t mode = playlist_cycle_mode();
 	update_repeat_button();
@@ -4770,11 +4726,7 @@ static void book_sleep_action(void *user) {
 static void more_btn_event_cb(lv_event_t *e) {
 	if (audiobook_mode) {
 		static const popover_item_t BOOK_ITEMS[] = {
-			{"chapters", book_chapters_action, NULL},
-			{"audiobook_add_bookmark", book_add_bookmark_action, NULL},
-			{"bookmarks", book_bookmarks_action, NULL},
-			{"audiobook_summary", book_summary_action, NULL},
-			{"np_sleep", book_sleep_action, NULL},
+			{"chapters", book_chapters_action, NULL}, {"audiobook_add_bookmark", book_add_bookmark_action, NULL}, {"bookmarks", book_bookmarks_action, NULL}, {"audiobook_summary", book_summary_action, NULL}, {"np_sleep", book_sleep_action, NULL},
 		};
 		popover_show(lv_event_get_current_target(e), BOOK_ITEMS, (int)(sizeof(BOOK_ITEMS) / sizeof(BOOK_ITEMS[0])));
 		return;
@@ -4915,14 +4867,12 @@ void player_restore_track(const char *filepath, double position) {
 }
 
 // The same, with the queue that was saved alongside it.
-void player_restore_index(library_index_t *ix, int start_index, const char *const *extra, const int *extra_slots,
-						  int extra_count, const char *filepath, double position) {
+void player_restore_index(library_index_t *ix, int start_index, const char *const *extra, const int *extra_slots, int extra_count, const char *filepath, double position) {
 	device_state_restore_index(ix, start_index, extra, extra_slots, extra_count, filepath, position);
 	player_refresh_now_playing();
 }
 
-void player_restore_list(const char *const *list, int count, int start_index, bool custom, const char *filepath,
-						 double position) {
+void player_restore_list(const char *const *list, int count, int start_index, bool custom, const char *filepath, double position) {
 	device_state_restore_list(list, count, start_index, custom, filepath, position);
 	player_refresh_now_playing();
 }
@@ -4985,6 +4935,8 @@ void player_output_unplugged(const char *what) {
 static void sleep_timer_cb(lv_timer_t *timer) {
 	(void)timer;
 	bool expired = sleeptimer_expired(SLEEPTIMER_MUSIC);
+	if (expired)
+		spotify_sleep();
 	// A station has no pause: its stop, as the button does it.
 	if (expired && radio_is_active()) {
 		if (radio_is_playing() || radio_is_connecting()) {
@@ -5047,7 +4999,6 @@ void player_refresh_now_playing(void) {
 	device_state_get(&state);
 	apply_playback_status(state.status);
 }
-
 
 // ---------------------------------------------------------------------------
 // the sheet: the player comes up from the bottom and goes back down
@@ -5544,9 +5495,7 @@ static void menu_style_for_layout(void) {
 	lv_obj_set_style_pad_top(player_menu, layout_studio_now ? 0 : NP_PANEL_PAD_TOP, 0);
 	lv_obj_set_style_pad_bottom(player_menu, SX_NP_PANEL_R + NP_PANEL_PAD_BOTTOM, 0);
 	lv_obj_set_style_pad_row(player_menu, 0, 0);
-	lv_flex_align_t main = layout_studio_now ? LV_FLEX_ALIGN_END
-						   : layout_alt_now	 ? LV_FLEX_ALIGN_CENTER
-											 : LV_FLEX_ALIGN_START;
+	lv_flex_align_t main = layout_studio_now ? LV_FLEX_ALIGN_END : layout_alt_now ? LV_FLEX_ALIGN_CENTER : LV_FLEX_ALIGN_START;
 	lv_obj_set_flex_align(player_menu, main, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	if (controls_row) {
 		bool standard = !layout_studio_now && !layout_alt_now;
@@ -6109,8 +6058,7 @@ static void np_chain_compose(const device_state_t *state, char *out, size_t size
 		snprintf(link, sizeof(link), "USB");
 	} else {
 		int device = audio_get_device_rate();
-		if (!state->live && state->stream_sample_rate > 0 && device > 0 && device != state->stream_sample_rate &&
-			audio_get_dsd_multiple() <= 0) {
+		if (!state->live && state->stream_sample_rate > 0 && device > 0 && device != state->stream_sample_rate && audio_get_dsd_multiple() <= 0) {
 			char khz[12];
 			np_khz(khz, sizeof(khz), device);
 			snprintf(link, sizeof(link), "%s kHz", khz);
@@ -6187,10 +6135,7 @@ static void np_chain_build(lv_obj_t *parent) {
 	lv_label_set_long_mode(chain_text, LV_LABEL_LONG_DOT);
 	lv_obj_set_style_text_font(chain_text, &font_ui_20, 0);
 	lv_obj_set_height(chain_text, lv_font_get_line_height(&font_ui_20));
-	lv_obj_set_style_max_width(chain_text,
-							   (int32_t)lv_obj_get_style_width(player_screen, 0) - 2 * NP_PANEL_PAD_H - NP_CHAIN_DOT -
-								   16 - (int32_t)npicon_chevron_up_sm.header.w,
-							   0);
+	lv_obj_set_style_max_width(chain_text, (int32_t)lv_obj_get_style_width(player_screen, 0) - 2 * NP_PANEL_PAD_H - NP_CHAIN_DOT - 16 - (int32_t)npicon_chevron_up_sm.header.w, 0);
 	lv_obj_set_clickable(chain_text, false);
 
 	chain_mark = lv_image_create(chain_row);
@@ -6321,8 +6266,7 @@ static void chain_block_fill(void) {
 	// ПЛЕЕР: what the player does to it on the way.
 	line[0] = '\0';
 	int device = audio_get_device_rate();
-	if (!state.live && state.stream_sample_rate > 0 && device > 0 && device != state.stream_sample_rate &&
-		audio_get_dsd_multiple() <= 0) {
+	if (!state.live && state.stream_sample_rate > 0 && device > 0 && device != state.stream_sample_rate && audio_get_dsd_multiple() <= 0) {
 		char from[12], to[12];
 		np_khz(from, sizeof(from), state.stream_sample_rate);
 		np_khz(to, sizeof(to), device);
@@ -6512,9 +6456,7 @@ bool player_outside_title(char *out, size_t size) {
 	if (state.live || book || dlna_owns_playback()) {
 		const char *base = strrchr(state.current_file, '/');
 		// A book by its name, not by the part or chapter playing.
-		const char *name = book && state.metadata.album[0] ? state.metadata.album
-						   : state.metadata.title[0]		   ? state.metadata.title
-															   : (base ? base + 1 : state.current_file);
+		const char *name = book && state.metadata.album[0] ? state.metadata.album : state.metadata.title[0] ? state.metadata.title : (base ? base + 1 : state.current_file);
 		snprintf(out, size, "%s", name);
 		return true;
 	}
@@ -6527,18 +6469,10 @@ bool player_outside_title(char *out, size_t size) {
 
 static void mode_toast(playback_mode_t mode) {
 	static const char *const NAMES[] = {
-		[PLAYBACK_MODE_NORMAL] = "player_mode_normal",
-		[PLAYBACK_MODE_REPEAT_ALL] = "player_mode_repeat_all",
-		[PLAYBACK_MODE_REPEAT_ONE] = "player_mode_repeat_one",
-		[PLAYBACK_MODE_SHUFFLE] = "player_mode_shuffle",
-		[PLAYBACK_MODE_SHUFFLE_REPEAT] = "player_mode_shuffle_repeat",
+		[PLAYBACK_MODE_NORMAL] = "player_mode_normal", [PLAYBACK_MODE_REPEAT_ALL] = "player_mode_repeat_all", [PLAYBACK_MODE_REPEAT_ONE] = "player_mode_repeat_one", [PLAYBACK_MODE_SHUFFLE] = "player_mode_shuffle", [PLAYBACK_MODE_SHUFFLE_REPEAT] = "player_mode_shuffle_repeat",
 	};
 	static const lv_image_dsc_t *const GLYPHS[] = {
-		[PLAYBACK_MODE_NORMAL] = &icon_repeat_off,
-		[PLAYBACK_MODE_REPEAT_ALL] = &icon_repeat_all,
-		[PLAYBACK_MODE_REPEAT_ONE] = &icon_repeat_one,
-		[PLAYBACK_MODE_SHUFFLE] = &icon_shuffle,
-		[PLAYBACK_MODE_SHUFFLE_REPEAT] = &icon_shuffle_repeat,
+		[PLAYBACK_MODE_NORMAL] = &icon_repeat_off, [PLAYBACK_MODE_REPEAT_ALL] = &icon_repeat_all, [PLAYBACK_MODE_REPEAT_ONE] = &icon_repeat_one, [PLAYBACK_MODE_SHUFFLE] = &icon_shuffle, [PLAYBACK_MODE_SHUFFLE_REPEAT] = &icon_shuffle_repeat,
 	};
 	if ((size_t)mode < sizeof(NAMES) / sizeof(NAMES[0])) {
 		toast_glyph(GLYPHS[mode], tr(NAMES[mode]));
@@ -6681,8 +6615,7 @@ static void sleep_pick(void *user) {
 		bool album = choice == SLEEP_PICK_ALBUM;
 		sleeptimer_set_enabled(kind, false);
 		device_state_set_stop_after(album ? DEVICE_STATE_STOP_AFTER_ALBUM : DEVICE_STATE_STOP_AFTER_TRACK);
-		snprintf(text, sizeof(text), "%s",
-				 tr(album ? "trackmenu_stop_after_album_set" : "trackmenu_stop_after_track_set"));
+		snprintf(text, sizeof(text), "%s", tr(album ? "trackmenu_stop_after_album_set" : "trackmenu_stop_after_track_set"));
 	} else {
 		sleeptimer_set_enabled(kind, false);
 		device_state_set_stop_after(DEVICE_STATE_STOP_AFTER_NONE);
@@ -6705,8 +6638,7 @@ void player_sleep_sheet_open(void) {
 	snprintf(m30, sizeof(m30), tr("np_sleep_minutes"), 30);
 	snprintf(m60, sizeof(m60), tr("np_sleep_minutes"), 60);
 	sx_sheet_item_t items[7] = {
-		{tr("np_sleep_off"), NULL, now == 0 && stop == DEVICE_STATE_STOP_AFTER_NONE && !audiobook_stop_at_chapter_end(), false, sleep_pick,
-		 (void *)(intptr_t)0},
+		{tr("np_sleep_off"), NULL, now == 0 && stop == DEVICE_STATE_STOP_AFTER_NONE && !audiobook_stop_at_chapter_end(), false, sleep_pick, (void *)(intptr_t)0},
 		{m15, NULL, now == 15, false, sleep_pick, (void *)(intptr_t)15},
 		{m30, NULL, now == 30, false, sleep_pick, (void *)(intptr_t)30},
 		{m60, NULL, now == 60, false, sleep_pick, (void *)(intptr_t)60},
@@ -6718,12 +6650,9 @@ void player_sleep_sheet_open(void) {
 	device_state_t state;
 	device_state_get(&state);
 	if (!state.live) {
-		items[n++] = (sx_sheet_item_t){tr(audiobook_mode ? "np_sleep_chapter" : "np_sleep_end"), NULL,
-			audiobook_mode ? audiobook_stop_at_chapter_end() : stop == DEVICE_STATE_STOP_AFTER_TRACK, false,
-			sleep_pick, (void *)(intptr_t)(audiobook_mode ? SLEEP_PICK_CHAPTER : SLEEP_PICK_TRACK)};
+		items[n++] = (sx_sheet_item_t){tr(audiobook_mode ? "np_sleep_chapter" : "np_sleep_end"), NULL, audiobook_mode ? audiobook_stop_at_chapter_end() : stop == DEVICE_STATE_STOP_AFTER_TRACK, false, sleep_pick, (void *)(intptr_t)(audiobook_mode ? SLEEP_PICK_CHAPTER : SLEEP_PICK_TRACK)};
 		if (!audiobook_mode && !podcast_mode) {
-			items[n++] = (sx_sheet_item_t){tr("np_sleep_end_album"), NULL, stop == DEVICE_STATE_STOP_AFTER_ALBUM,
-										   false, sleep_pick, (void *)(intptr_t)SLEEP_PICK_ALBUM};
+			items[n++] = (sx_sheet_item_t){tr("np_sleep_end_album"), NULL, stop == DEVICE_STATE_STOP_AFTER_ALBUM, false, sleep_pick, (void *)(intptr_t)SLEEP_PICK_ALBUM};
 		}
 	}
 	// A length set elsewhere (the settings' wheel: 45 minutes) is not one of
@@ -6759,7 +6688,6 @@ void player_init(gui_config_t *cfg) {
 	lv_obj_set_scrollable(player_screen, false);
 	lv_obj_set_pos(player_screen, 0, sheet_height);
 	lv_obj_set_hidden(player_screen, true);
-
 
 	// Geometry first, because everything else hangs off it (2.0, the handoff's
 	// "Воспроизведение"): the artwork fills the width of the screen and its
@@ -7439,9 +7367,7 @@ void player_init(gui_config_t *cfg) {
 	// Whichever arrangement was left selected, now that every widget it moves
 	// exists.
 	int saved = (int)config_get_int("screen", "player_layout_alt", 0);
-	layout_choice = (saved == (int)PLAYER_LAYOUT_ALTERNATIVE)	? PLAYER_LAYOUT_ALTERNATIVE
-					: (saved == (int)PLAYER_LAYOUT_STUDIO)		? PLAYER_LAYOUT_STUDIO
-																: PLAYER_LAYOUT_STANDARD;
+	layout_choice = (saved == (int)PLAYER_LAYOUT_ALTERNATIVE) ? PLAYER_LAYOUT_ALTERNATIVE : (saved == (int)PLAYER_LAYOUT_STUDIO) ? PLAYER_LAYOUT_STUDIO : PLAYER_LAYOUT_STANDARD;
 	cover_accent = config_get_bool("screen", "cover_accent", false);
 	layout_alt_now = false; // apply_layout() below puts the standard one up first
 	layout_studio_now = false;
@@ -7455,5 +7381,3 @@ void player_init(gui_config_t *cfg) {
 
 	theme_register_refresh(player_refresh_theme);
 }
-
-

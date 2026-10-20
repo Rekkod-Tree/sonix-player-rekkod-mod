@@ -6,13 +6,13 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <poll.h>
 #include <strings.h>
-#include <signal.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -23,8 +23,8 @@
 #include <unistd.h>
 
 #include "src/gui/shell/gui.h"
-#include "src/system/bluetooth/airpods.h"
 #include "src/system/audio/audio.h"
+#include "src/system/bluetooth/airpods.h"
 #include "src/system/bluetooth/btlog.h"
 #include "src/system/bluetooth/btrate.h"
 #include "src/system/bluetooth/btreceiver.h"
@@ -33,12 +33,12 @@
 #include "src/system/core/config.h"
 #include "src/system/core/lang.h"
 #include "src/system/core/logging.h"
+#include "src/system/core/utils.h"
 #include "src/system/device/power.h"
 #include "src/system/device/sysserver.h" // only for the notification socket now
 #include "src/system/net/wifitransfer.h"
 #include "src/system/remote/sonixlink_bt.h"
 #include "src/system/streaming/radio.h"
-#include "src/system/core/utils.h"
 
 // The pieces of the firmware this player uses, and nothing else. The bluez-tools
 // (bt-adapter, bt-device, bt-agent), hciconfig, bluealsa-cli and the
@@ -53,7 +53,25 @@
 #define BT_RFKILL "/sys/class/rfkill/rfkill0/state"
 
 #define BLUETOOTHD_BIN "/usr/libexec/bluetooth/bluetoothd"
-#define BLUEALSA_BIN "/usr/bin/bluealsa"
+static pthread_once_t bluealsa_binary_once = PTHREAD_ONCE_INIT;
+static const char *bluealsa_binary;
+static const char *bluealsa_process;
+
+static void select_bluealsa_binary(void) {
+	const char *override = getenv("SONIX_BLUEALSA_BIN");
+	bluealsa_binary = override && override[0] == '/' ? override : access("/usr/bin/bluealsad", X_OK) == 0 ? "/usr/bin/bluealsad" : "/usr/bin/bluealsa";
+	bluealsa_process = strrchr(bluealsa_binary, '/') + 1;
+}
+
+static const char *bluealsa_bin(void) {
+	pthread_once(&bluealsa_binary_once, select_bluealsa_binary);
+	return bluealsa_binary;
+}
+
+static const char *bluealsa_name(void) {
+	(void)bluealsa_bin();
+	return bluealsa_process;
+}
 
 #define DBUS_DAEMON_BIN "/usr/bin/dbus-daemon"
 #define DBUS_SYSTEM_CONF "/usr/share/dbus-1/system.conf"
@@ -101,9 +119,9 @@
 // one of them is a wait on a condition, never a sleep: the numbers here are
 // deadlines, not delays, and a healthy device passes them in a fraction of the
 // time.
-#define WAIT_TRANSPORT_MS 12000	 // the chip's firmware over a 3 Mbaud UART
-#define WAIT_BLUETOOTHD_MS 8000	 // to claim org.bluez and find the controller
-#define WAIT_BLUEALSA_MS 6000	 // to claim org.bluealsa
+#define WAIT_TRANSPORT_MS 12000		// the chip's firmware over a 3 Mbaud UART
+#define WAIT_BLUETOOTHD_MS 8000		// to claim org.bluez and find the controller
+#define WAIT_BLUEALSA_MS 6000		// to claim org.bluealsa
 #define WAIT_STOCK_BRINGUP_MS 20000 // if the firmware's own is still in flight
 
 // How long a daemon is given to take its SIGTERM before it is killed.
@@ -161,8 +179,8 @@ static bool g_enabled;
 static bool g_busy;
 static bool g_scanning;
 static bool g_discoverable; // what the Bluetooth list page asked for, last
-static int g_seen_count;   // device objects bluez held at the last refresh
-static int g_hidden_count; // ...of which nameless and not audio gear
+static int g_seen_count;	// device objects bluez held at the last refresh
+static int g_hidden_count;	// ...of which nameless and not audio gear
 static bt_state_t g_state = BT_STATE_OFF;
 static uint32_t g_serial;
 
@@ -194,8 +212,8 @@ static struct {
 // A2DP. There is deliberately no on/off switch here, as in the stock player:
 // connected headphones are the output, and a switch that could send the music
 // back to the jack while they are still worn causes confusion, not choice.
-static bool g_volume_sync;	  // the player's volume drives the headphones'
-static bool g_a2dp_connected; // a bluealsa PCM exists: the only truthful source
+static bool g_volume_sync;			 // the player's volume drives the headphones'
+static bool g_a2dp_connected;		 // a bluealsa PCM exists: the only truthful source
 static unsigned g_output_generation; // see bluetooth_output_generation()
 static bool g_bluealsa_restarted;	 // worker only: the next sink is a new daemon's
 
@@ -229,7 +247,7 @@ static bool g_link_forced;		   // the link is at a rate asked for here, not blue
 static unsigned g_link_refused;	   // a rate asked for on this connection and refused: not asked again
 static unsigned g_link_track_rate; // the last track's rate, for "Follow the music" at a connection
 static bool g_link_track_dsd;
-static unsigned g_link_done;	   // moves when a JOB_LINK_RATE has been answered
+static unsigned g_link_done; // moves when a JOB_LINK_RATE has been answered
 static pthread_cond_t link_done_cond = PTHREAD_COND_INITIALIZER;
 
 // What bluealsa says the stream arriving from a device on the other side is
@@ -478,6 +496,11 @@ static bool stop_process(const char *name) {
 	return !process_running(name);
 }
 
+static void stop_bluealsa(void) {
+	stop_process("bluealsa");
+	stop_process("bluealsad");
+}
+
 // Starts a daemon and lets go of it. The double fork is what keeps it out of
 // this process's children: the player must never have to reap a daemon it is
 // not watching, and a daemon must never die because the player restarted.
@@ -662,8 +685,7 @@ static hci_probe_t hci_probe(void) {
 		uint16_t opcode;
 	} filter = {1u << BT_HCI_EVENT_PKT, {1u << BT_EVT_CMD_COMPLETE, 0}, 0};
 
-	if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0 ||
-		setsockopt(fd, BT_SOL_HCI, BT_HCI_FILTER, &filter, sizeof(filter)) != 0) {
+	if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0 || setsockopt(fd, BT_SOL_HCI, BT_HCI_FILTER, &filter, sizeof(filter)) != 0) {
 		close(fd);
 		return HCI_PROBE_UNKNOWN;
 	}
@@ -700,16 +722,14 @@ static hci_probe_t hci_probe(void) {
 		}
 		// 04 0e <len> <ncmd> <opcode lo> <opcode hi> <status> ...: the answer
 		// to this question, and not to one bluetoothd asked at the same moment.
-		if (got >= 7 && event[0] == BT_HCI_EVENT_PKT && event[1] == BT_EVT_CMD_COMPLETE &&
-			(event[4] | (event[5] << 8)) == BT_OP_READ_LOCAL_VERSION) {
+		if (got >= 7 && event[0] == BT_HCI_EVENT_PKT && event[1] == BT_EVT_CMD_COMPLETE && (event[4] | (event[5] << 8)) == BT_OP_READ_LOCAL_VERSION) {
 			result = HCI_PROBE_ALIVE;
 			break;
 		}
 	}
 	close(fd);
 	if (result != HCI_PROBE_UNKNOWN) {
-		fprintf(stderr, "bluetooth: controller %s after %u ms\n", result == HCI_PROBE_ALIVE ? "answers" : "SILENT",
-				now_ms() - began);
+		fprintf(stderr, "bluetooth: controller %s after %u ms\n", result == HCI_PROBE_ALIVE ? "answers" : "SILENT", now_ms() - began);
 	}
 	return result;
 }
@@ -855,9 +875,7 @@ static bool address_is_shaped(const char *text) {
 	return true;
 }
 
-static void format_address(const unsigned char *bytes, char *out, size_t size) {
-	snprintf(out, size, "%02X:%02X:%02X:%02X:%02X:%02X", bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5]);
-}
+static void format_address(const unsigned char *bytes, char *out, size_t size) { snprintf(out, size, "%02X:%02X:%02X:%02X:%02X:%02X", bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5]); }
 
 // How long the Wi-Fi interface is given to appear before the address is made
 // out of nothing instead. It is the difference between an address this device
@@ -1000,20 +1018,7 @@ static bool ensure_transport(void) {
 	firmware_name(firmware, sizeof(firmware));
 
 	char *argv[] = {
-		(char *)"brcm_patchram_plus",
-		(char *)"--enable_hci",
-		(char *)"--baudrate",
-		(char *)"3000000",
-		(char *)"--no2bytes",
-		(char *)"--patchram",
-		firmware,
-		(char *)BT_TRANSPORT_TTY,
-		(char *)"--tosleep=50000",
-		(char *)"--use_baudrate_for_download",
-		(char *)"--enable_lpm",
-		(char *)"--bd_addr",
-		address,
-		NULL,
+		(char *)"brcm_patchram_plus", (char *)"--enable_hci", (char *)"--baudrate", (char *)"3000000", (char *)"--no2bytes", (char *)"--patchram", firmware, (char *)BT_TRANSPORT_TTY, (char *)"--tosleep=50000", (char *)"--use_baudrate_for_download", (char *)"--enable_lpm", (char *)"--bd_addr", address, NULL,
 	};
 	fprintf(stderr, "bluetooth: loading %s over %s\n", firmware, BT_TRANSPORT_TTY);
 	if (!spawn_daemon(BT_TRANSPORT_BIN, argv)) {
@@ -1088,21 +1093,21 @@ static const char *bluealsa_help(void) {
 		asked = true;
 		int fds[2];
 		if (pipe(fds) != 0) {
-			return false;
+			return help;
 		}
 		pid_t pid = fork();
 		if (pid < 0) {
 			close(fds[0]);
 			close(fds[1]);
-			return false;
+			return help;
 		}
 		if (pid == 0) {
 			dup2(fds[1], STDOUT_FILENO);
 			dup2(fds[1], STDERR_FILENO);
 			close(fds[0]);
 			close(fds[1]);
-			char *argv[3] = {(char *)"bluealsa", (char *)"-h", NULL};
-			execv(BLUEALSA_BIN, argv);
+			char *argv[3] = {(char *)bluealsa_name(), (char *)"-h", NULL};
+			execv(bluealsa_bin(), argv);
 			_exit(127);
 		}
 		close(fds[1]);
@@ -1309,7 +1314,7 @@ static void arg_in_cmdline(pid_t pid, void *user) {
 // command line: "a2dp-sink" for the receiver, "hfp-ag" for the headset battery.
 static bool bluealsa_has_profile(const char *profile) {
 	cmdline_probe_t probe = {.arg = profile, .found = false};
-	for_each_process("bluealsa", arg_in_cmdline, &probe);
+	for_each_process(bluealsa_name(), arg_in_cmdline, &probe);
 	return probe.found;
 }
 
@@ -1343,9 +1348,9 @@ static bool bluealsa_has_sink(void) { return bluealsa_has_profile("a2dp-sink"); 
 // at start. That is a patch to bluealsa, not something this player can do.
 // ---------------------------------------------------------------------------
 
-static bool g_wifi_heavy;		  // under `lock`: the Wi-Fi transfer server is on
-static char g_ldac_started[16];	  // under `lock`: what the running bluealsa was given, "" if unknown
-static bool g_hfp_started;		  // under `lock`: the running bluealsa is a hands-free gateway too
+static bool g_wifi_heavy;		// under `lock`: the Wi-Fi transfer server is on
+static char g_ldac_started[16]; // under `lock`: what the running bluealsa was given, "" if unknown
+static bool g_hfp_started;		// under `lock`: the running bluealsa is a hands-free gateway too
 
 // A change of the daemon's options that waits for the music to stop (see
 // daemon_options_check()), and since when nothing has been playing. Worker only.
@@ -1382,6 +1387,12 @@ static const char *ldac_quality_effective(void) {
 }
 
 static bool ensure_bluealsa(void) {
+	// A daemon from the other generation must release org.bluealsa first.
+	const char *previous = strcmp(bluealsa_name(), "bluealsad") == 0 ? "bluealsa" : "bluealsad";
+	if (!stop_process(previous)) {
+		fprintf(stderr, "bluetooth: previous %s did not stop\n", previous);
+		return false;
+	}
 	// Before the daemon, not after: the help text comes from running the binary
 	// with -h, not from the bus, and the -c arguments below are built out of it.
 	static bool codecs_read;
@@ -1393,27 +1404,25 @@ static bool ensure_bluealsa(void) {
 	// A daemon left from before -- the stock bring-up, or a run of this player
 	// with the receiver open -- may carry the other set of profiles.
 	bool want_sink = receiver_profile_wanted();
-	if (process_running("bluealsa") && bluealsa_has_sink() != want_sink) {
-		fprintf(stderr, "bluetooth: bluealsa is running %s the A2DP sink; starting it again\n",
-				want_sink ? "without" : "with");
-		stop_process("bluealsa");
+	if (process_running(bluealsa_name()) && bluealsa_has_sink() != want_sink) {
+		fprintf(stderr, "bluetooth: bluealsa is running %s the A2DP sink; starting it again\n", want_sink ? "without" : "with");
+		stop_bluealsa();
 		sleep_ms(300);
 	}
 	// The same for the hands-free gateway behind the headset battery: a
 	// daemon left from a run with the other setting is replaced here, before
 	// anything connects to it, rather than later under music.
 	bool want_hfp = bluetooth_headset_battery_enabled() && bluealsa_knows_option("hfp-ag");
-	if (process_running("bluealsa") && bluealsa_has_profile("hfp-ag") != want_hfp) {
-		fprintf(stderr, "bluetooth: bluealsa is running %s the hands-free gateway; starting it again\n",
-				want_hfp ? "without" : "with");
-		stop_process("bluealsa");
+	if (process_running(bluealsa_name()) && bluealsa_has_profile("hfp-ag") != want_hfp) {
+		fprintf(stderr, "bluetooth: bluealsa is running %s the hands-free gateway; starting it again\n", want_hfp ? "without" : "with");
+		stop_bluealsa();
 		sleep_ms(300);
 	}
 	pthread_mutex_lock(&lock);
 	g_hfp_started = want_hfp;
 	pthread_mutex_unlock(&lock);
 
-	if (!process_running("bluealsa")) {
+	if (!process_running(bluealsa_name())) {
 		wifi_heavy_sync(); // before ldac_quality_effective() below reads it
 		// The source half of A2DP always, the sink half only while the receiver
 		// page is open, as on the stock firmware.
@@ -1537,7 +1546,7 @@ static bool ensure_bluealsa(void) {
 
 		char *argv[15 + BT_MAX_CODECS * 2];
 		int at = 0;
-		argv[at++] = (char *)"bluealsa";
+		argv[at++] = (char *)bluealsa_name();
 		argv[at++] = (char *)"-p";
 		argv[at++] = (char *)"a2dp-source";
 		if (want_sink) {
@@ -1568,9 +1577,11 @@ static bool ensure_bluealsa(void) {
 			argv[at++] = (char *)"-p";
 			argv[at++] = (char *)"hfp-ag";
 		}
-		fprintf(stderr, "bluetooth: bluealsa with the A2DP source%s%s\n", want_sink ? " and sink" : " only",
-				want_hfp ? ", and the hands-free gateway for the headset battery" : "");
-		argv[at++] = (char *)"--a2dp-volume";
+		fprintf(stderr, "bluetooth: bluealsa with the A2DP source%s%s\n", want_sink ? " and sink" : " only", want_hfp ? ", and the hands-free gateway for the headset battery" : "");
+		// BlueALSA 5 uses native volume by default and removed this option.
+		if (bluealsa_knows_option("--a2dp-volume")) {
+			argv[at++] = (char *)"--a2dp-volume";
+		}
 		argv[at++] = keepalive;
 		if (rt) {
 			argv[at++] = rtprio;
@@ -1608,7 +1619,7 @@ static bool ensure_bluealsa(void) {
 			fprintf(stderr, "bluetooth: offering %s on top of SBC and AAC\n", line);
 		}
 		fprintf(stderr, "bluetooth: the A2DP transport stays up %d s after the last client\n", keep_alive);
-		spawn_daemon(BLUEALSA_BIN, argv);
+		spawn_daemon(bluealsa_bin(), argv);
 	}
 	if (!btstack_wait_service("org.bluealsa", WAIT_BLUEALSA_MS)) {
 		fprintf(stderr, "bluetooth: bluealsa did not claim org.bluealsa\n");
@@ -1652,8 +1663,7 @@ static void read_local_name(void) {
 bool bluetooth_available(void) {
 	// A device with Bluetooth has the radio switch, or a controller already
 	// attached, or the loader that attaches one. A device without has none.
-	return access("/sys/class/rfkill/rfkill0", F_OK) == 0 || access("/sys/class/bluetooth", F_OK) == 0 ||
-		   access(BT_TRANSPORT_BIN, F_OK) == 0;
+	return access("/sys/class/rfkill/rfkill0", F_OK) == 0 || access("/sys/class/bluetooth", F_OK) == 0 || access(BT_TRANSPORT_BIN, F_OK) == 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -1867,8 +1877,7 @@ static void refresh_audio_state(void) {
 			if ((uint32_t)(now_ms() - a2dp_missing_since) < A2DP_GRACE_MS) {
 				return; // nothing has changed yet as far as anything else is concerned
 			}
-			fprintf(stderr, "bluetooth: the PCM on %s has been gone for %d ms; back to the jack\n", last,
-					A2DP_GRACE_MS);
+			fprintf(stderr, "bluetooth: the PCM on %s has been gone for %d ms; back to the jack\n", last, A2DP_GRACE_MS);
 		}
 		a2dp_missing_since = 0;
 	}
@@ -1937,7 +1946,7 @@ static void refresh_audio_state(void) {
 			btstack_read_headset_battery(mac);
 		}
 	} else {
-		codec_auto_done[0] = '\0'; // the next connection chooses again
+		codec_auto_done[0] = '\0';		 // the next connection chooses again
 		g_codec_reapply_pending = false; // ...and that is the asking again
 		read_sink_rate(NULL);
 		pthread_mutex_lock(&lock);
@@ -1961,8 +1970,7 @@ static void refresh_audio_state(void) {
 		bool other_rate = g_ldac_started[0] && strcmp(g_ldac_started, own) != 0;
 		pthread_mutex_unlock(&lock);
 		if (on_ldac && other_rate) {
-			fprintf(stderr, "bluetooth: %s has its own LDAC rate (%s); bluealsa follows when nothing plays\n", mac,
-					own);
+			fprintf(stderr, "bluetooth: %s has its own LDAC rate (%s); bluealsa follows when nothing plays\n", mac, own);
 			job_t job = {.type = JOB_DAEMON_CHECK};
 			post_job(&job);
 		}
@@ -1983,9 +1991,7 @@ static void refresh_audio_state(void) {
 // and the A2DP sink UUID comes with the advert when it comes at all. Either
 // says this is something to listen through rather than a tag on a keyring.
 #define COD_MAJOR_AUDIO 0x04
-static bool anonymous_is_audio(const btstack_device_t *dev) {
-	return dev->audio_sink || ((dev->cod >> 8) & 0x1f) == COD_MAJOR_AUDIO;
-}
+static bool anonymous_is_audio(const btstack_device_t *dev) { return dev->audio_sink || ((dev->cod >> 8) & 0x1f) == COD_MAJOR_AUDIO; }
 
 // Re-reads everything bluez knows and splits it into the two lists the
 // interface shows.
@@ -2156,8 +2162,7 @@ static void do_scan(void) {
 	// answer: this says whether bluez saw anything at all and how much of it the
 	// list decided not to show.
 	pthread_mutex_lock(&lock);
-	fprintf(stderr, "bluetooth: scan over, bluez holds %d devices, %d paired, %d in the list, %d nameless and dropped\n",
-			g_seen_count, g_paired_count, g_found_count, g_hidden_count);
+	fprintf(stderr, "bluetooth: scan over, bluez holds %d devices, %d paired, %d in the list, %d nameless and dropped\n", g_seen_count, g_paired_count, g_found_count, g_hidden_count);
 	pthread_mutex_unlock(&lock);
 }
 
@@ -2340,9 +2345,7 @@ static bool second_connect_allowed(const char *mac) {
 // off or out of range, where asking again only repeats the five seconds. No
 // answer at all (an empty `why`) is a timeout of this side's own and does not
 // qualify either.
-static bool connect_was_refused(const char *why) {
-	return strstr(why, "org.bluez.Error.Failed") != NULL && strstr(why, "Host is down") == NULL;
-}
+static bool connect_was_refused(const char *why) { return strstr(why, "org.bluez.Error.Failed") != NULL && strstr(why, "Host is down") == NULL; }
 
 static bool connect_device(const char *mac) {
 	// Never on top of a link that is already up.
@@ -2595,8 +2598,7 @@ static void reconnect_last(void) {
 	// come back, and when they do it is the difference between a working link
 	// and a link torn down by a command from this side.
 	int grace_ms = link_was_recent() ? SELF_RECONNECT_GRACE_RECENT_MS : SELF_RECONNECT_GRACE_MS;
-	fprintf(stderr, "bluetooth: giving %s %d ms to come back by itself%s\n", mac, grace_ms,
-			grace_ms == SELF_RECONNECT_GRACE_MS ? "" : " (it was connected a few minutes ago)");
+	fprintf(stderr, "bluetooth: giving %s %d ms to come back by itself%s\n", mac, grace_ms, grace_ms == SELF_RECONNECT_GRACE_MS ? "" : " (it was connected a few minutes ago)");
 	for (int waited = 0; waited < grace_ms; waited += 250) {
 		if (btstack_audio_sink(sink, sizeof(sink)) && strcasecmp(sink, mac) == 0) {
 			fprintf(stderr, "bluetooth: %s came back on its own after %d ms\n", mac, waited);
@@ -2768,9 +2770,9 @@ static void bring_stack_down(bool deliberate) {
 		fprintf(stderr, "bluetooth: the device was still busy; stopping bluealsa under it\n");
 	}
 
-	long freed = process_rss_kb("bluealsa") + process_rss_kb("bluetoothd") + process_rss_kb("bt-agent");
+	long freed = (process_rss_kb("bluealsa") + process_rss_kb("bluealsad")) + process_rss_kb("bluetoothd") + process_rss_kb("bt-agent");
 
-	stop_process("bluealsa");
+	stop_bluealsa();
 
 	// The adapter is powered down while bluetoothd is still there to do it --
 	// which is what tells the controller to stop advertising and to close its
@@ -2805,15 +2807,14 @@ static void bring_stack_down(bool deliberate) {
 }
 
 void bluetooth_power_down_stack(void) {
-	if (!process_running("bluetoothd") && !process_running("bluealsa") &&
-		!process_running("brcm_patchram_plus")) {
+	if (!process_running("bluetoothd") && !process_running("bluealsa") && !process_running("bluealsad") && !process_running("brcm_patchram_plus")) {
 		return; // nothing was started: nothing to put down
 	}
-	long freed = process_rss_kb("bluealsa") + process_rss_kb("bluetoothd") + process_rss_kb("bt-agent");
+	long freed = (process_rss_kb("bluealsa") + process_rss_kb("bluealsad")) + process_rss_kb("bluetoothd") + process_rss_kb("bt-agent");
 
 	// The same order as bring_stack_down(), minus everything that needs the bus:
 	// with the switch off there is no connection open and nothing connected.
-	stop_process("bluealsa");
+	stop_bluealsa();
 	stop_process("bluetoothd");
 	stop_process("bt-agent");
 	hci_down();
@@ -3005,10 +3006,7 @@ static void codec_choice_set(const char *mac, const char *codec) {
 // music stops for a while or the headphones go -- never under the music.
 // ---------------------------------------------------------------------------
 
-static bool ldac_quality_known(const char *mode) {
-	return strcmp(mode, "abr") == 0 || strcmp(mode, "high") == 0 || strcmp(mode, "standard") == 0 ||
-		   strcmp(mode, "mobile") == 0;
-}
+static bool ldac_quality_known(const char *mode) { return strcmp(mode, "abr") == 0 || strcmp(mode, "high") == 0 || strcmp(mode, "standard") == 0 || strcmp(mode, "mobile") == 0; }
 
 static const char *ldac_quality_default(void) {
 	const char *mode = config_get("wireless", "bt_ldac_quality", "abr");
@@ -3133,8 +3131,7 @@ static void do_auto_codec(const char *mac) {
 			return; // nothing better left on offer: what bluealsa chose stands
 		}
 
-		fprintf(stderr, "bluetooth: %s offers %s; asking for it instead of %s\n", mac, codecs[best],
-				selected[0] ? selected : "what it chose");
+		fprintf(stderr, "bluetooth: %s offers %s; asking for it instead of %s\n", mac, codecs[best], selected[0] ? selected : "what it chose");
 		if (btstack_select_codec(mac, codecs[best])) {
 			do_read_codecs();
 			return;
@@ -3242,8 +3239,7 @@ static void codec_drift_check(const char *mac) {
 		return; // already said
 	}
 	snprintf(g_drift_announced, sizeof(g_drift_announced), "%s", selected);
-	fprintf(stderr, "bluetooth: codec changed: %s -> %s on %s (%s was chosen by hand)\n", pinned, selected, mac,
-			pinned);
+	fprintf(stderr, "bluetooth: codec changed: %s -> %s on %s (%s was chosen by hand)\n", pinned, selected, mac, pinned);
 
 	codec_change_t *change = malloc(sizeof(*change));
 	if (!change) {
@@ -3277,14 +3273,14 @@ static void stream_rebuilt(const char *mac) {
 	if (off_choice) {
 		bool recent = g_codec_reapply_at != 0 && (uint32_t)(now_ms() - g_codec_reapply_at) < CODEC_REAPPLY_MIN_MS;
 		if (music_playing_out()) {
-			fprintf(stderr, "bluetooth: %s is on %s, not %s as chosen; asked for again once the music has stopped "
-							"for a while\n",
+			fprintf(stderr,
+					"bluetooth: %s is on %s, not %s as chosen; asked for again once the music has stopped "
+					"for a while\n",
 					mac, selected, pinned);
 			g_codec_reapply_pending = true;
 			g_codec_idle_since = 0;
 		} else if (recent) {
-			fprintf(stderr, "bluetooth: %s is on %s, not %s as chosen; asked a moment ago, not again yet\n", mac,
-					selected, pinned);
+			fprintf(stderr, "bluetooth: %s is on %s, not %s as chosen; asked a moment ago, not again yet\n", mac, selected, pinned);
 		} else {
 			g_codec_reapply_at = now_ms() | 1;
 			codec_auto_done[0] = '\0';
@@ -3336,10 +3332,7 @@ static void stream_rebuilt(const char *mac) {
 // How long the worker waits for the rebuilt stream to report the new rate.
 #define LINK_RATE_SETTLE_MS 4000
 
-static bool link_rate_enabled(void) {
-	return config_get_int("bluetooth", "link_rate_select", 1) != 0 &&
-		   !config_get_int("bluetooth", "follow_track_rate", 0);
-}
+static bool link_rate_enabled(void) { return config_get_int("bluetooth", "link_rate_select", 1) != 0 && !config_get_int("bluetooth", "follow_track_rate", 0); }
 
 // The rate to move the link to, 0 for none, BT_LINK_RATE_DEFAULT for back to
 // bluealsa's own choice. Under `lock`.
@@ -3564,20 +3557,18 @@ static void do_set_receiver_codec(const char *codec) {
 	// renegotiation builds is a new object at bluealsa's default volume, and the
 	// phone does not send its level again, so without this its volume keys stop
 	// reaching the player after a codec change.
-	int volume = -1;
-	if (!btstack_pcm_volume_get(mac, true, &volume)) {
-		volume = -1;
-	}
+	bapcm_volume_t volume = {0};
+	bool have_volume = btstack_pcm_volume_get(mac, true, &volume);
 
 	bool done = btstack_select_codec_dir(mac, true, codec);
 	sleep_ms(600);
 
-	if (done && volume >= 0) {
+	if (done && have_volume) {
 		// The PCM comes back a moment after the transport does, so one retry
 		// covers the case where it is not there yet on the first try.
-		if (!btstack_pcm_volume_set(mac, true, volume)) {
+		if (!btstack_pcm_volume_set(mac, true, &volume)) {
 			sleep_ms(400);
-			btstack_pcm_volume_set(mac, true, volume);
+			btstack_pcm_volume_set(mac, true, &volume);
 		}
 	}
 
@@ -3838,7 +3829,7 @@ static void restart_bluealsa(const char *why) {
 
 	fprintf(stderr, "bluetooth: restarting bluealsa: %s\n", why);
 	g_bluealsa_restarted = playing[0] != '\0';
-	stop_process("bluealsa");
+	stop_bluealsa();
 	sleep_ms(300);
 	codec_auto_done[0] = '\0'; // the new daemon negotiates again
 	if (ensure_bluealsa() && playing[0]) {
@@ -3864,8 +3855,7 @@ static bool music_playing_out(void) {
 	pthread_mutex_unlock(&lock);
 	// The radio has its own pipeline and its own idea of playing, and a phone
 	// streaming in (receiver mode) runs through bluealsa too: either counts.
-	return (sink && (audio_get_status() == AUDIO_STATUS_PLAYING || radio_is_playing())) ||
-		   btreceiver_is_streaming();
+	return (sink && (audio_get_status() == AUDIO_STATUS_PLAYING || radio_is_playing())) || btreceiver_is_streaming();
 }
 
 // Worker. Brings the running bluealsa in line with the options it should have
@@ -3884,7 +3874,7 @@ static bool music_playing_out(void) {
 #define DAEMON_IDLE_MS 30000
 
 static void daemon_options_check(void) {
-	if (!process_running("bluealsa")) {
+	if (!process_running(bluealsa_name())) {
 		g_daemon_pending = false;
 		return; // the next start reads the right options by itself
 	}
@@ -3907,13 +3897,10 @@ static void daemon_options_check(void) {
 		return;
 	}
 	char why[96];
-	snprintf(why, sizeof(why), "%s%s%s%s", ldac_due ? "LDAC " : "", ldac_due ? wanted : "",
-			 ldac_due && hfp_due ? ", " : "",
-			 hfp_due ? (want_hfp ? "hands-free gateway on" : "hands-free gateway off") : "");
+	snprintf(why, sizeof(why), "%s%s%s%s", ldac_due ? "LDAC " : "", ldac_due ? wanted : "", ldac_due && hfp_due ? ", " : "", hfp_due ? (want_hfp ? "hands-free gateway on" : "hands-free gateway off") : "");
 	if (music_playing_out()) {
 		if (!g_daemon_pending) {
-			fprintf(stderr, "bluetooth: %s is due; kept back until the music stops, so it does not stop now\n",
-					why);
+			fprintf(stderr, "bluetooth: %s is due; kept back until the music stops, so it does not stop now\n", why);
 		}
 		g_daemon_pending = true;
 		g_daemon_idle_since = 0;
@@ -3963,8 +3950,7 @@ static void *bluetooth_worker(void *arg) {
 			// The deadline goes through deadline_in_ms(): computing tv_nsec by
 			// hand overflows on this 32-bit platform, which makes the wait return
 			// EINVAL at once and spins this thread.
-			uint32_t wait_ms =
-				!g_enabled ? BT_IDLE_WAIT_MS : (power_screen_is_on() ? BT_POLL_MS : BT_POLL_STANDBY_MS);
+			uint32_t wait_ms = !g_enabled ? BT_IDLE_WAIT_MS : (power_screen_is_on() ? BT_POLL_MS : BT_POLL_STANDBY_MS);
 			// While a sink is missing but its link is still up, the answer is
 			// due within the grace above: the usual poll is far too slow to
 			// give it.
@@ -4120,7 +4106,7 @@ static void *bluetooth_worker(void *arg) {
 				pthread_mutex_lock(&lock);
 				bool differs = strcmp(g_ldac_started, wanted) != 0;
 				pthread_mutex_unlock(&lock);
-				if (process_running("bluealsa") && differs) {
+				if (process_running(bluealsa_name()) && differs) {
 					char why[48];
 					snprintf(why, sizeof(why), "LDAC %s", wanted);
 					restart_bluealsa(why);
@@ -4130,14 +4116,14 @@ static void *bluetooth_worker(void *arg) {
 			}
 
 			case JOB_DAEMON_OPTION:
-				if (process_running("bluealsa")) {
+				if (process_running(bluealsa_name())) {
 					restart_bluealsa(job.text);
 				}
 				break;
 
 			case JOB_RECEIVER_PROFILE: {
 				bool want = receiver_profile_wanted();
-				if (process_running("bluealsa") && bluealsa_has_sink() != want) {
+				if (process_running(bluealsa_name()) && bluealsa_has_sink() != want) {
 					restart_bluealsa(want ? "receiver open" : "receiver closed");
 					if (want) {
 						invite_sources();
@@ -4702,8 +4688,7 @@ void bluetooth_set_wifi_busy(bool transfer_server_on) {
 	if (!changed) {
 		return;
 	}
-	fprintf(stderr, "bluetooth: Wi-Fi transfer server %s%s\n", transfer_server_on ? "on" : "off",
-			strcmp(bluetooth_ldac_quality(), "high") == 0 ? "; LDAC 990 follows it at the next connection" : "");
+	fprintf(stderr, "bluetooth: Wi-Fi transfer server %s%s\n", transfer_server_on ? "on" : "off", strcmp(bluetooth_ldac_quality(), "high") == 0 ? "; LDAC 990 follows it at the next connection" : "");
 	if (running) {
 		job_t job = {.type = JOB_DAEMON_CHECK};
 		post_job(&job);
@@ -4820,8 +4805,7 @@ bool bluetooth_link_rate_set(unsigned target) {
 	unsigned now = g_sink_rate;
 	pthread_mutex_unlock(&lock);
 	if (!answered) {
-		fprintf(stderr, "bluetooth: the link rate change took more than %d ms; the track starts anyway\n",
-				LINK_RATE_WAIT_MS);
+		fprintf(stderr, "bluetooth: the link rate change took more than %d ms; the track starts anyway\n", LINK_RATE_WAIT_MS);
 		return false;
 	}
 	return target == BT_LINK_RATE_DEFAULT ? true : now == target;

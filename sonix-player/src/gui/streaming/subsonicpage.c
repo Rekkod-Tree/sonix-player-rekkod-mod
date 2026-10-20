@@ -1,54 +1,53 @@
 #include "subsonicpage.h"
 #include "src/system/playback/sleeptimer.h"
 
-
-#include <stdatomic.h>
-#include <pthread.h>
-#include <stdio.h>
-#include <string.h>
 #include <malloc.h>
+#include <pthread.h>
+#include <stdatomic.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
-#include "src/gui/shell/confirm.h"
 #include "src/gui/fonts/fonts.h"
+#include "src/gui/nowplaying/player.h"
+#include "src/gui/shell/confirm.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/keyboard.h"
-#include "src/gui/nowplaying/player.h"
 #include "src/gui/shell/popover.h"
-#include "src/gui/streaming/qobuzart.h"
+#include "src/gui/shell/settingsrow.h"
+#include "src/gui/shell/spinner.h"
+#include "src/gui/shell/switcher.h"
 #include "src/gui/shell/sx_card.h"
 #include "src/gui/shell/sx_row.h"
 #include "src/gui/shell/sx_sheet.h"
 #include "src/gui/shell/sx_styles.h"
 #include "src/gui/shell/sx_toast.h"
 #include "src/gui/shell/sx_tokens.h"
-#include "src/gui/streaming/streamerror.h"
-#include "src/gui/streaming/svclist.h"
-#include "src/gui/streaming/svcui.h"
-#include "src/gui/shell/settingsrow.h"
-#include "src/gui/shell/spinner.h"
-#include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
 #include "src/gui/shell/toast.h"
 #include "src/gui/shell/touch.h"
+#include "src/gui/streaming/qobuzart.h"
+#include "src/gui/streaming/streamerror.h"
+#include "src/gui/streaming/svclist.h"
+#include "src/gui/streaming/svcui.h"
 #include "src/gui/wireless/wifisettings.h"
-#include "src/system/decode/growfile.h"
-#include "src/system/playback/device_state.h"
+#include "src/system/core/config.h"
 #include "src/system/core/lang.h"
-#include "src/system/playback/playlist.h"
+#include "src/system/core/utils.h"
+#include "src/system/decode/growfile.h"
+#include "src/system/device/system.h"
 #include "src/system/net/http.h"
+#include "src/system/net/wifi.h"
+#include "src/system/net/wifitransfer.h"
+#include "src/system/playback/device_state.h"
+#include "src/system/playback/playlist.h"
+#include "src/system/streaming/cardimport.h"
 #include "src/system/streaming/provider.h"
 #include "src/system/streaming/streamerr.h"
 #include "src/system/streaming/streamturn.h"
 #include "src/system/streaming/subsonic.h"
-#include "src/system/streaming/cardimport.h"
 #include "src/system/streaming/subsoniccache.h"
 #include "src/system/streaming/subsonicsync.h"
-#include "src/system/device/system.h"
-#include "src/system/core/config.h"
-#include "src/system/core/utils.h"
-#include "src/system/net/wifi.h"
-#include "src/system/net/wifitransfer.h"
 
 // ---------------------------------------------------------------------------
 // Subsonic front end: the user's own server (Navidrome, Gonic, ...).
@@ -67,7 +66,6 @@
 // asks for another fifty; past this cap the list really stops, because every
 // entry is static memory on a device with 64 MB in total.
 #define SUB_MAX_HELD (4 * SUB_PAGE_LIMIT)
-
 
 static lv_obj_t *login_screen;
 lv_obj_t *subsonic_list_screen;
@@ -95,7 +93,7 @@ typedef enum {
 	JOB_STARRED_TRACKS,
 	JOB_STARRED_ALBUMS,
 	JOB_PLAYLISTS,
-	JOB_ALBUM_LIST, // getAlbumList2, the type in `text2`
+	JOB_ALBUM_LIST,	   // getAlbumList2, the type in `text2`
 	JOB_RANDOM_TRACKS, // getRandomSongs: "Random 50", one draw, no paging
 	JOB_PLAY,
 	// Not lists: they leave the list on screen alone.
@@ -106,13 +104,13 @@ typedef enum {
 typedef struct {
 	job_kind_t kind;
 	unsigned sleep_serial;
-	char text[256];					// search terms, user name, or the list's title
-	char text2[128];				// password, or the album list type ("newest")
+	char text[256];					  // search terms, user name, or the list's title
+	char text2[128];				  // password, or the album list type ("newest")
 	char server[SUBSONIC_SERVER_MAX]; // sign-in only
-	char id_text[SUBSONIC_ID_MAX];	// album, artist or playlist id
-	int index;						// which track of the list playback starts from
-	int offset;						// first entry of this page: 0 = new list
-	unsigned list_serial;			// list jobs: list_serial when asked
+	char id_text[SUBSONIC_ID_MAX];	  // album, artist or playlist id
+	int index;						  // which track of the list playback starts from
+	int offset;						  // first entry of this page: 0 = new list
+	unsigned list_serial;			  // list jobs: list_serial when asked
 } job_t;
 
 static pthread_mutex_t job_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -223,15 +221,9 @@ static void duration_text(int seconds, char *out, size_t size) {
 	snprintf(out, size, "%d:%02d", seconds / 60, seconds % 60);
 }
 
-static bool kind_is_tracks(job_kind_t kind) {
-	return kind == JOB_SEARCH_TRACKS || kind == JOB_ALBUM_TRACKS || kind == JOB_PLAYLIST_TRACKS ||
-		   kind == JOB_STARRED_TRACKS || kind == JOB_RANDOM_TRACKS;
-}
+static bool kind_is_tracks(job_kind_t kind) { return kind == JOB_SEARCH_TRACKS || kind == JOB_ALBUM_TRACKS || kind == JOB_PLAYLIST_TRACKS || kind == JOB_STARRED_TRACKS || kind == JOB_RANDOM_TRACKS; }
 
-static bool kind_is_albums(job_kind_t kind) {
-	return kind == JOB_SEARCH_ALBUMS || kind == JOB_STARRED_ALBUMS || kind == JOB_ARTIST_ALBUMS ||
-		   kind == JOB_ALBUM_LIST;
-}
+static bool kind_is_albums(job_kind_t kind) { return kind == JOB_SEARCH_ALBUMS || kind == JOB_STARRED_ALBUMS || kind == JOB_ARTIST_ALBUMS || kind == JOB_ALBUM_LIST; }
 
 static bool kind_is_artists(job_kind_t kind) { return kind == JOB_SEARCH_ARTISTS || kind == JOB_ARTISTS; }
 
@@ -261,7 +253,7 @@ static void refused_async(void *user) {
 static void sync_done(bool ok, const char *error, void *user) {
 	(void)user;
 	if (!ok) {
-		gui_post(refused_async, strdup(error ? error : ""));
+		gui_post_or_free(refused_async, strdup(error ? error : ""));
 	}
 }
 
@@ -329,8 +321,7 @@ static void queued_add(const subsonic_track_t *t, char *path, size_t size) {
 	if (!subsoniccache_find(key, path, size)) {
 		subsoniccache_path(key, suffix, path, size);
 	}
-	subsoniccache_write_sidecars(key, suffix, t->id, t->title, t->artist, t->album, t->album_id, t->track_number,
-								 NULL);
+	subsoniccache_write_sidecars(key, suffix, t->id, t->title, t->artist, t->album, t->album_id, t->track_number, NULL);
 	pthread_mutex_lock(&queued_lock);
 	bool known = false;
 	for (int i = 0; i < queued_count && !known; i++) {
@@ -445,18 +436,13 @@ static void list_hold(lv_obj_t *row, void *user) {
 	sx_sheet_item_t items[5];
 	memset(items, 0, sizeof(items));
 	int n = 0;
-	items[n++] = (sx_sheet_item_t){.label = tr("queue_play_next"), .icon = &icon_list_start, .action = sheet_queue,
-								   .user = (void *)(intptr_t)PLAYLIST_QUEUE_NEXT};
-	items[n++] = (sx_sheet_item_t){.label = tr("queue_add_to_end"), .icon = &icon_list_plus_small,
-								   .action = sheet_queue, .user = (void *)(intptr_t)PLAYLIST_QUEUE_END};
+	items[n++] = (sx_sheet_item_t){.label = tr("queue_play_next"), .icon = &icon_list_start, .action = sheet_queue, .user = (void *)(intptr_t)PLAYLIST_QUEUE_NEXT};
+	items[n++] = (sx_sheet_item_t){.label = tr("queue_add_to_end"), .icon = &icon_list_plus_small, .action = sheet_queue, .user = (void *)(intptr_t)PLAYLIST_QUEUE_END};
 	static char title[SUBSONIC_TITLE_MAX];
 	if (kind_is_tracks(list_kind)) {
 		const subsonic_track_t *t = &result_tracks[index];
 		bool fav = subsonicsync_is_favorite(t->id);
-		items[n++] = (sx_sheet_item_t){.label = tr(fav ? "remove_from_favourites" : "medialist_add_to_favourites"),
-									   .icon = fav ? &icon_star_filled : &icon_star,
-									   .action = sheet_star,
-									   .user = fav ? NULL : (void *)1};
+		items[n++] = (sx_sheet_item_t){.label = tr(fav ? "remove_from_favourites" : "medialist_add_to_favourites"), .icon = fav ? &icon_star_filled : &icon_star, .action = sheet_star, .user = fav ? NULL : (void *)1};
 		if (t->album_id[0] && list_kind != JOB_ALBUM_TRACKS) {
 			items[n++] = (sx_sheet_item_t){.label = tr("show_album"), .icon = &icon_chevron_right, .action = sheet_album};
 		}
@@ -465,10 +451,7 @@ static void list_hold(lv_obj_t *row, void *user) {
 		// The server says whether an album is starred only in the list of
 		// starred ones: there it is offered for removal, elsewhere for adding.
 		bool fav = list_kind == JOB_STARRED_ALBUMS;
-		items[n++] = (sx_sheet_item_t){.label = tr(fav ? "remove_from_favourites" : "medialist_add_to_favourites"),
-									   .icon = fav ? &icon_star_filled : &icon_star,
-									   .action = sheet_star,
-									   .user = fav ? NULL : (void *)1};
+		items[n++] = (sx_sheet_item_t){.label = tr(fav ? "remove_from_favourites" : "medialist_add_to_favourites"), .icon = fav ? &icon_star_filled : &icon_star, .action = sheet_star, .user = fav ? NULL : (void *)1};
 		snprintf(title, sizeof(title), "%s", result_albums[index].title);
 	}
 	static char subtitle[400];
@@ -1035,8 +1018,7 @@ static bool track_is_playable(const char *path) {
 	bool growing = growfile_is_growing(path);
 	bool downloading = subsoniccache_is_downloading(key);
 	if (growing != downloading) {
-		fprintf(stderr, "subsonic: '%s' -- growfile says %d, the cache says %d: THEY DISAGREE\n", path, growing,
-				downloading);
+		fprintf(stderr, "subsonic: '%s' -- growfile says %d, the cache says %d: THEY DISAGREE\n", path, growing, downloading);
 	}
 	return growing || downloading;
 }
@@ -1173,19 +1155,19 @@ static bool prepare_track(const queued_t *q, char *path, size_t size) {
 	}
 	char cover[SUBSONIC_URL_MAX];
 	subsonic_cover_url(q->track.cover_id, PLAYER_COVER_PX, cover, sizeof(cover));
-	subsoniccache_write_sidecars(q->key, suffix, q->track.id, q->track.title, q->track.artist, q->track.album,
-								 q->track.album_id, q->track.track_number, cover);
+	subsoniccache_write_sidecars(q->key, suffix, q->track.id, q->track.title, q->track.artist, q->track.album, q->track.album_id, q->track.track_number, cover);
 	subsoniccache_note_played(path);
 
 	char *owned = strdup(path);
 	if (owned) {
-		gui_post(cover_ready_async, owned);
+		gui_post_or_free(cover_ready_async, owned);
 	}
 	return true;
 }
 
 static void do_play(int index, unsigned sleep_serial) {
-	if (sleep_serial != sleeptimer_expiration_serial()) return;
+	if (sleep_serial != sleeptimer_expiration_serial())
+		return;
 	if (index < 0 || index >= result_count) {
 		return;
 	}
@@ -1207,8 +1189,7 @@ static void do_play(int index, unsigned sleep_serial) {
 	char path[512];
 	if (!subsoniccache_start(key, url, suffix, track->duration, path, sizeof(path))) {
 		const char *why = subsoniccache_last_error();
-		result_class = streamerr_describe("subsonic", why && why[0] ? why : tr("download_failed"), result_error,
-										  sizeof(result_error));
+		result_class = streamerr_describe("subsonic", why && why[0] ? why : tr("download_failed"), result_error, sizeof(result_error));
 		return;
 	}
 	subsoniccache_note_played(path);
@@ -1238,8 +1219,7 @@ static void do_play(int index, unsigned sleep_serial) {
 		}
 		// Tags for the whole queue at once, a few dozen bytes each: the Queue
 		// page shows titles instead of hashes. No covers: those are downloads.
-		subsoniccache_write_sidecars(q->key, s, q->track.id, q->track.title, q->track.artist, q->track.album,
-									 q->track.album_id, q->track.track_number, NULL);
+		subsoniccache_write_sidecars(q->key, s, q->track.id, q->track.title, q->track.artist, q->track.album, q->track.album_id, q->track.track_number, NULL);
 		path_ptr[queued_count] = paths[queued_count];
 		queued_count++;
 	}
@@ -1248,14 +1228,14 @@ static void do_play(int index, unsigned sleep_serial) {
 		return;
 	}
 
-	if (sleep_serial != sleeptimer_expiration_serial()) return;
+	if (sleep_serial != sleeptimer_expiration_serial())
+		return;
 	device_state_play_list(path_ptr, queued_count, start);
 
 	// The cover last, with the music already playing.
 	char cover[SUBSONIC_URL_MAX];
 	subsonic_cover_url(track->cover_id, PLAYER_COVER_PX, cover, sizeof(cover));
-	subsoniccache_write_sidecars(key, suffix, track->id, track->title, track->artist, track->album, track->album_id,
-								 track->track_number, cover);
+	subsoniccache_write_sidecars(key, suffix, track->id, track->title, track->artist, track->album, track->album_id, track->track_number, cover);
 
 	gui_post(play_started_async, NULL);
 	prefetch_submit();
@@ -1608,7 +1588,10 @@ static void *worker_main(void *arg) {
 		a->status_ok = status_ok;
 		a->status_tracks = status_tracks;
 		a->status_ms = status_ms;
-		gui_post(job_done_cb, a);
+		if (!gui_post(job_done_cb, a)) {
+			free(a->tracks);
+			free(a);
+		}
 	}
 	return NULL;
 }
@@ -1643,9 +1626,7 @@ static int list_history_len;
 static job_t current_list_job;
 static bool have_current_list;
 
-static bool job_is_list(job_kind_t kind) {
-	return kind != JOB_PLAY && kind != JOB_LOGIN && kind != JOB_NONE && kind != JOB_STATUS && kind != JOB_QUEUE_ALBUM;
-}
+static bool job_is_list(job_kind_t kind) { return kind != JOB_PLAY && kind != JOB_LOGIN && kind != JOB_NONE && kind != JOB_STATUS && kind != JOB_QUEUE_ALBUM; }
 
 // A list's title, known before it comes: the list page opens under it at once.
 static const char *job_title(const job_t *job) {
@@ -1711,9 +1692,7 @@ static void run(const job_t *job_in, const char *waiting_text) {
 		// Re-reading the SAME list is not a step forward: the whole job is
 		// compared, not just its kind, otherwise two albums in a row would not
 		// stack.
-		bool same = have_current_list && current_list_job.kind == job->kind &&
-					strcmp(current_list_job.id_text, job->id_text) == 0 &&
-					strcmp(current_list_job.text, job->text) == 0 && strcmp(current_list_job.text2, job->text2) == 0;
+		bool same = have_current_list && current_list_job.kind == job->kind && strcmp(current_list_job.id_text, job->id_text) == 0 && strcmp(current_list_job.text, job->text) == 0 && strcmp(current_list_job.text2, job->text2) == 0;
 		bool on_list = lv_screen_active() == list_screen;
 		if (have_current_list && !same && on_list && list_history_len < LIST_HISTORY_DEPTH) {
 			list_history[list_history_len++] = current_list_job;
@@ -1902,8 +1881,7 @@ static void search_accept_cb(lv_event_t *e) {
 	}
 
 	job_t job = {0};
-	job.kind = search_kind_index == 1 ? JOB_SEARCH_ALBUMS
-									  : (search_kind_index == 2 ? JOB_SEARCH_ARTISTS : JOB_SEARCH_TRACKS);
+	job.kind = search_kind_index == 1 ? JOB_SEARCH_ALBUMS : (search_kind_index == 2 ? JOB_SEARCH_ARTISTS : JOB_SEARCH_TRACKS);
 	snprintf(job.text, sizeof(job.text), "%s", text);
 	run(&job, "searching");
 }
@@ -1966,8 +1944,7 @@ static void build_search_page(gui_config_t *cfg) {
 	}
 	paint_search_pills();
 
-	search_keyboard = keyboard_create(search_screen, cfg->screen_width, 316, search_field, NULL, "ok",
-									  search_accept_cb, NULL);
+	search_keyboard = keyboard_create(search_screen, cfg->screen_width, 316, search_field, NULL, "ok", search_accept_cb, NULL);
 	switcher_attach_back_gesture(search_screen);
 }
 
@@ -2092,8 +2069,7 @@ static void build_login_page(gui_config_t *cfg) {
 	lv_obj_set_style_text_font(note, &font_ui_20, 0);
 	lv_label_set_text(note, tr("subsonic_login_example"));
 
-	login_keyboard = keyboard_create(login_screen, cfg->screen_width, 316, server_field, NULL, "ok", login_accept_cb,
-									 NULL);
+	login_keyboard = keyboard_create(login_screen, cfg->screen_width, 316, server_field, NULL, "ok", login_accept_cb, NULL);
 	switcher_attach_back_gesture(login_screen);
 }
 
@@ -2132,8 +2108,7 @@ static lv_obj_t *server_card;
 static gui_config_t *home_cfg;
 
 // The quality pills: the original file, or a transcode for a slow network.
-static const char *const QUALITY_NAMES[SUBSONIC_QUALITY_COUNT] = {"subsonic_original", "qobuz_mp3_320_kbps",
-																	"subsonic_mp3_192", "subsonic_opus_128"};
+static const char *const QUALITY_NAMES[SUBSONIC_QUALITY_COUNT] = {"subsonic_original", "qobuz_mp3_320_kbps", "subsonic_mp3_192", "subsonic_opus_128"};
 static lv_obj_t *quality_pills[SUBSONIC_QUALITY_COUNT];
 
 // The magnifier appears only once signed in.
@@ -2332,11 +2307,7 @@ typedef struct {
 // The first is the handoff's "Albums": all of them, A to Z. The others are
 // the server's own selections, under their heading.
 static const album_list_t ALBUM_LISTS[] = {
-	{"alphabeticalByName", "albums"},
-	{"newest", "subsonic_recently_added"},
-	{"recent", "subsonic_recently_played"},
-	{"frequent", "subsonic_most_played"},
-	{"random", "subsonic_random_albums"},
+	{"alphabeticalByName", "albums"}, {"newest", "subsonic_recently_added"}, {"recent", "subsonic_recently_played"}, {"frequent", "subsonic_most_played"}, {"random", "subsonic_random_albums"},
 };
 
 static void album_list_cb(lv_event_t *e) {
@@ -2483,9 +2454,7 @@ static void build_list_page(gui_config_t *cfg) {
 	player_sheet_attach_drag(list_screen, true);
 }
 
-static void *provider_open_album(const char *album_id, const char *title) {
-	return subsonicpage_open_album(album_id, title) ? subsonic_list_screen : NULL;
-}
+static void *provider_open_album(const char *album_id, const char *title) { return subsonicpage_open_album(album_id, title) ? subsonic_list_screen : NULL; }
 
 void subsonicpage_init(gui_config_t *cfg) {
 	// The mark over the artwork and "Show album" for the rest of the program

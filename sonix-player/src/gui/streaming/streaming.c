@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <string.h>
 
 #include "lvgl/lvgl.h"
@@ -12,29 +13,31 @@
 #include "src/gui/nowplaying/player.h"
 #include "src/gui/shell/gridpage.h"
 #include "src/gui/shell/icons.h"
+#include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
+#include "src/gui/shell/sx_card.h"
+#include "src/gui/shell/sx_sheet.h"
+#include "src/gui/shell/sx_styles.h"
+#include "src/gui/shell/sx_toast.h"
 #include "src/gui/shell/theme.h"
 #include "src/gui/shell/toast.h"
 #include "src/gui/streaming/downloadspage.h"
 #include "src/gui/streaming/podcastpage.h"
 #include "src/gui/streaming/qobuzpage.h"
 #include "src/gui/streaming/radiopage.h"
+#include "src/gui/streaming/spotifypage.h"
 #include "src/gui/streaming/subsonicpage.h"
 #include "src/gui/streaming/svcui.h"
-#include "src/gui/shell/settingsrow.h"
-#include "src/gui/shell/sx_card.h"
-#include "src/gui/shell/sx_sheet.h"
-#include "src/gui/shell/sx_styles.h"
-#include "src/gui/shell/sx_toast.h"
 #include "src/gui/streaming/tidalpage.h"
 #include "src/gui/streaming/yandexpage.h"
+#include "src/system/streaming/spotify.h"
 #ifdef SONIX_ZVUK
 #include "src/gui/streaming/zvukpage.h"
 #include "src/system/streaming/zvuk.h"
 #endif
-#include "src/system/streaming/cardimport.h"
 #include "src/system/core/config.h"
 #include "src/system/core/lang.h"
+#include "src/system/streaming/cardimport.h"
 #include "src/system/streaming/podcast.h"
 #include "src/system/streaming/qobuz.h"
 #include "src/system/streaming/subsonic.h"
@@ -70,6 +73,7 @@ typedef enum {
 	SVC_PODCASTS,
 	SVC_SUBSONIC,
 	SVC_YANDEX,
+	SVC_SPOTIFY,
 #ifdef SONIX_ZVUK
 	SVC_ZVUK,
 #endif
@@ -87,6 +91,7 @@ static const struct {
 	// The user's own server: Navidrome, Gonic, Airsonic...
 	[SVC_SUBSONIC] = {"subsonic", {"subsonic", &icon_menu_subsonic, &subsonic_screen, NULL}},
 	[SVC_YANDEX] = {"yandex", {"yandex", &icon_menu_yandex, &yandex_screen, NULL}},
+	[SVC_SPOTIFY] = {"spotify", {"spotify", &icon_menu_spotify, NULL, spotifypage_open}},
 #ifdef SONIX_ZVUK
 	// Fork only (Makefile: SONIX_ZVUK).
 	[SVC_ZVUK] = {"zvuk", {"zvuk", &icon_menu_zvuk, &zvuk_screen, NULL}},
@@ -109,6 +114,10 @@ static bool service_usable(service_t s) {
 		return podcast_configured();
 	case SVC_YANDEX:
 		return yandex_configured();
+	case SVC_SPOTIFY: {
+		const char *engine = getenv("SONIX_SPOTIFY_ENGINE");
+		return access(engine && engine[0] ? engine : "/usr/bin/sonix_spotify", X_OK) == 0;
+	}
 	default:
 		return true;
 	}
@@ -127,6 +136,8 @@ static bool service_signed_in(service_t s) {
 		return subsonic_logged_in();
 	case SVC_YANDEX:
 		return yandex_logged_in();
+	case SVC_SPOTIFY:
+		return spotify_logged_in();
 #ifdef SONIX_ZVUK
 	case SVC_ZVUK:
 		return zvuk_logged_in();
@@ -170,8 +181,7 @@ static void tiles_load(void) {
 			const char *end = strchr(at, ',');
 			size_t len = end ? (size_t)(end - at) : strlen(at);
 			for (int s = 0; s < SVC_COUNT; s++) {
-				if (strlen(SERVICES[s].id) == len && strncmp(SERVICES[s].id, at, len) == 0 &&
-					!is_added((service_t)s)) {
+				if (strlen(SERVICES[s].id) == len && strncmp(SERVICES[s].id, at, len) == 0 && !is_added((service_t)s)) {
 					added[added_n++] = (service_t)s;
 				}
 			}
@@ -203,7 +213,8 @@ static void tiles_load(void) {
 bool streaming_home_entry(const char *id, grid_entry_t *entry) {
 	for (int i = 0; i < SVC_COUNT; i++) {
 		if (!strcmp(id, SERVICES[i].id) && service_usable((service_t)i)) {
-			if (entry) *entry = SERVICES[i].entry;
+			if (entry)
+				*entry = SERVICES[i].entry;
 			return true;
 		}
 	}
@@ -244,8 +255,7 @@ static void tiles_rebuild(void) {
 	// here is the same size as a tile there whatever number of them there is.
 	gridpage_set_entries(tile_grid, page_cfg, entries, n, 2, 3, true);
 	for (int i = 0; i < n; i++) {
-		lv_obj_add_event_cb(lv_obj_get_child(tile_grid, i), tile_long_pressed_cb, LV_EVENT_LONG_PRESSED,
-							(void *)(intptr_t)i);
+		lv_obj_add_event_cb(lv_obj_get_child(tile_grid, i), tile_long_pressed_cb, LV_EVENT_LONG_PRESSED, (void *)(intptr_t)i);
 	}
 	lv_obj_set_hidden(empty_note, n > 0);
 }
@@ -324,9 +334,7 @@ static lv_obj_t *add_list;
 // What each service is, in a few words, under its name. The keys sit in an
 // array so the string extractor finds them (see radiopage.c).
 static const char *const ABOUT[SVC_COUNT] = {
-	[SVC_TIDAL] = "streaming_about_tidal",		 [SVC_QOBUZ] = "streaming_about_qobuz",
-	[SVC_RADIO] = "streaming_about_radio",		 [SVC_PODCASTS] = "streaming_about_podcasts",
-	[SVC_SUBSONIC] = "streaming_about_subsonic", [SVC_YANDEX] = "streaming_about_yandex",
+	[SVC_TIDAL] = "streaming_about_tidal", [SVC_QOBUZ] = "streaming_about_qobuz", [SVC_RADIO] = "streaming_about_radio", [SVC_PODCASTS] = "streaming_about_podcasts", [SVC_SUBSONIC] = "streaming_about_subsonic", [SVC_YANDEX] = "streaming_about_yandex",
 #ifdef SONIX_ZVUK
 	[SVC_ZVUK] = "streaming_about_zvuk",
 #endif
@@ -374,6 +382,9 @@ static void add_rows_build(void) {
 	// Usable ones first, so what can be added is at the top of the list.
 	for (int pass = 0; pass < 2; pass++) {
 		for (int s = 0; s < SVC_COUNT; s++) {
+			if (s == SVC_SPOTIFY && !service_usable(SVC_SPOTIFY)) {
+				continue;
+			}
 			if (!is_added((service_t)s) && service_usable((service_t)s) == (pass == 0)) {
 				add_row((service_t)s);
 				listed++;
@@ -446,6 +457,7 @@ static void import_listener(const char *service, cardimport_result_t result, con
 }
 
 void streaming_init(gui_config_t *cfg) {
+	spotifypage_init(cfg);
 	qobuzpage_init(cfg);
 	tidalpage_init(cfg);
 	podcastpage_init(cfg);

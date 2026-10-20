@@ -1,54 +1,53 @@
 #include "tidalpage.h"
 #include "src/system/playback/sleeptimer.h"
 
-
-#include <stdatomic.h>
 #include <errno.h>
+#include <malloc.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
-#include <malloc.h>
 
-#include "src/gui/shell/confirm.h"
 #include "src/gui/fonts/fonts.h"
-#include "src/gui/shell/icons.h"
 #include "src/gui/nowplaying/player.h"
+#include "src/gui/shell/confirm.h"
+#include "src/gui/shell/icons.h"
+#include "src/gui/shell/keyboard.h"
 #include "src/gui/shell/popover.h"
-#include "src/gui/streaming/qobuzart.h"
+#include "src/gui/shell/settingsrow.h"
+#include "src/gui/shell/spinner.h"
+#include "src/gui/shell/switcher.h"
 #include "src/gui/shell/sx_card.h"
 #include "src/gui/shell/sx_row.h"
 #include "src/gui/shell/sx_sheet.h"
 #include "src/gui/shell/sx_styles.h"
 #include "src/gui/shell/sx_toast.h"
 #include "src/gui/shell/sx_tokens.h"
+#include "src/gui/shell/theme.h"
+#include "src/gui/shell/toast.h"
+#include "src/gui/shell/touch.h"
+#include "src/gui/streaming/qobuzart.h"
 #include "src/gui/streaming/streamerror.h"
 #include "src/gui/streaming/svclist.h"
 #include "src/gui/streaming/svcui.h"
-#include "src/gui/shell/settingsrow.h"
-#include "src/gui/shell/spinner.h"
-#include "src/gui/shell/switcher.h"
-#include "src/gui/shell/theme.h"
-#include "src/gui/shell/toast.h"
-#include "src/gui/shell/keyboard.h"
-#include "src/gui/shell/touch.h"
 #include "src/gui/wireless/wifisettings.h"
-#include "src/system/decode/growfile.h"
-#include "src/system/playback/device_state.h"
 #include "src/system/core/lang.h"
-#include "src/system/playback/playlist.h"
-#include "src/system/device/system.h"
-#include "src/system/streaming/tidal.h"
-#include "src/system/streaming/tidalcache.h"
-#include "src/system/streaming/provider.h"
-#include "src/system/streaming/streamerr.h"
-#include "src/system/net/http.h"
-#include "src/system/streaming/streamturn.h"
-#include "src/system/streaming/tidalsync.h"
 #include "src/system/core/utils.h"
+#include "src/system/decode/growfile.h"
+#include "src/system/device/system.h"
+#include "src/system/net/http.h"
 #include "src/system/net/wifi.h"
 #include "src/system/net/wifitransfer.h"
+#include "src/system/playback/device_state.h"
+#include "src/system/playback/playlist.h"
+#include "src/system/streaming/provider.h"
+#include "src/system/streaming/streamerr.h"
+#include "src/system/streaming/streamturn.h"
+#include "src/system/streaming/tidal.h"
+#include "src/system/streaming/tidalcache.h"
+#include "src/system/streaming/tidalsync.h"
 
 // ---------------------------------------------------------------------------
 // Tidal, front end.
@@ -70,7 +69,6 @@
 // asks for fifty more; past this cap the list really does stop, because every
 // entry is static memory on a device with 64 MB in total.
 #define TIDAL_MAX_HELD (4 * TIDAL_PAGE_LIMIT)
-
 
 static lv_obj_t *login_screen;
 lv_obj_t *tidal_list_screen;
@@ -107,15 +105,15 @@ typedef enum {
 typedef struct {
 	job_kind_t kind;
 	unsigned sleep_serial;
-	char text[256];	  // search terms, or the title the list will carry
-	char text2[64];	  // which showcase, for the featured lists
+	char text[256]; // search terms, or the title the list will carry
+	char text2[64]; // which showcase, for the featured lists
 	// Album and playlist share one field: both identifiers are text (Tidal
 	// playlists are named by UUID), and a job can never concern an album and a
 	// playlist at the same time.
 	char id_text[TIDAL_ID_MAX];
-	long id;   // numeric identifier: artists only
-	int index; // which track playback starts from; which showcase for the featured lists
-	int offset; // which entry this page starts at: 0 = new list
+	long id;			  // numeric identifier: artists only
+	int index;			  // which track playback starts from; which showcase for the featured lists
+	int offset;			  // which entry this page starts at: 0 = new list
 	unsigned list_serial; // list jobs: list_serial when asked
 } job_t;
 
@@ -259,14 +257,9 @@ static void duration_text(int seconds, char *out, size_t size) {
 	snprintf(out, size, "%d:%02d", seconds / 60, seconds % 60);
 }
 
-static bool kind_is_tracks(job_kind_t kind) {
-	return kind == JOB_SEARCH_TRACKS || kind == JOB_ALBUM_TRACKS || kind == JOB_PLAYLIST_TRACKS ||
-		   kind == JOB_FAV_TRACKS;
-}
+static bool kind_is_tracks(job_kind_t kind) { return kind == JOB_SEARCH_TRACKS || kind == JOB_ALBUM_TRACKS || kind == JOB_PLAYLIST_TRACKS || kind == JOB_FAV_TRACKS; }
 
-static bool kind_is_albums(job_kind_t kind) {
-	return kind == JOB_SEARCH_ALBUMS || kind == JOB_FAV_ALBUMS || kind == JOB_ARTIST_ALBUMS || kind == JOB_FEATURED;
-}
+static bool kind_is_albums(job_kind_t kind) { return kind == JOB_SEARCH_ALBUMS || kind == JOB_FAV_ALBUMS || kind == JOB_ARTIST_ALBUMS || kind == JOB_FEATURED; }
 
 static void run(const job_t *job, const char *waiting_text);
 
@@ -294,7 +287,7 @@ static void refused_async(void *user) {
 static void sync_done(bool ok, const char *error, void *user) {
 	(void)user;
 	if (!ok) {
-		gui_post(refused_async, strdup(error ? error : ""));
+		gui_post_or_free(refused_async, strdup(error ? error : ""));
 	}
 }
 
@@ -472,7 +465,7 @@ static void reload_list_async(void *user) {
 static void playlist_deleted(bool ok, const char *error, void *user) {
 	(void)user;
 	if (!ok) {
-		gui_post(refused_async, strdup(error ? error : ""));
+		gui_post_or_free(refused_async, strdup(error ? error : ""));
 	} else {
 		gui_post(reload_list_async, NULL);
 	}
@@ -509,10 +502,8 @@ static void list_hold(lv_obj_t *row, void *user) {
 	int n = 0;
 	static char title[TIDAL_TITLE_MAX];
 	if (kind_is_tracks(list_kind) || kind_is_albums(list_kind)) {
-		items[n++] = (sx_sheet_item_t){.label = tr("queue_play_next"), .icon = &icon_list_start, .action = sheet_queue,
-									   .user = (void *)(intptr_t)PLAYLIST_QUEUE_NEXT};
-		items[n++] = (sx_sheet_item_t){.label = tr("queue_add_to_end"), .icon = &icon_list_plus_small,
-									   .action = sheet_queue, .user = (void *)(intptr_t)PLAYLIST_QUEUE_END};
+		items[n++] = (sx_sheet_item_t){.label = tr("queue_play_next"), .icon = &icon_list_start, .action = sheet_queue, .user = (void *)(intptr_t)PLAYLIST_QUEUE_NEXT};
+		items[n++] = (sx_sheet_item_t){.label = tr("queue_add_to_end"), .icon = &icon_list_plus_small, .action = sheet_queue, .user = (void *)(intptr_t)PLAYLIST_QUEUE_END};
 	}
 	if (kind_is_tracks(list_kind)) {
 		const tidal_track_t *t = &result_tracks[index];
@@ -520,10 +511,7 @@ static void list_hold(lv_obj_t *row, void *user) {
 			n = 0; // nothing of the queue for a track that will not play
 		}
 		bool fav = tidalsync_is_favorite(t->id);
-		items[n++] = (sx_sheet_item_t){.label = tr(fav ? "remove_from_favourites" : "medialist_add_to_favourites"),
-									   .icon = fav ? &icon_star_filled : &icon_star,
-									   .action = sheet_star,
-									   .user = fav ? NULL : (void *)1};
+		items[n++] = (sx_sheet_item_t){.label = tr(fav ? "remove_from_favourites" : "medialist_add_to_favourites"), .icon = fav ? &icon_star_filled : &icon_star, .action = sheet_star, .user = fav ? NULL : (void *)1};
 		if (t->album_id[0] && list_kind != JOB_ALBUM_TRACKS) {
 			items[n++] = (sx_sheet_item_t){.label = tr("show_album"), .icon = &icon_chevron_right, .action = sheet_album};
 		}
@@ -532,14 +520,10 @@ static void list_hold(lv_obj_t *row, void *user) {
 		// Tidal says whether an album is a favourite only in the list of
 		// favourites: there it is offered for removal, elsewhere for adding.
 		bool fav = list_kind == JOB_FAV_ALBUMS;
-		items[n++] = (sx_sheet_item_t){.label = tr(fav ? "remove_from_favourites" : "medialist_add_to_favourites"),
-									   .icon = fav ? &icon_star_filled : &icon_star,
-									   .action = sheet_star,
-									   .user = fav ? NULL : (void *)1};
+		items[n++] = (sx_sheet_item_t){.label = tr(fav ? "remove_from_favourites" : "medialist_add_to_favourites"), .icon = fav ? &icon_star_filled : &icon_star, .action = sheet_star, .user = fav ? NULL : (void *)1};
 		snprintf(title, sizeof(title), "%s", result_albums[index].title);
 	} else if (list_kind == JOB_USER_PLAYLISTS) {
-		items[n++] = (sx_sheet_item_t){
-			.label = tr("delete_playlist"), .icon = &icon_trash, .destructive = true, .action = sheet_playlist_delete};
+		items[n++] = (sx_sheet_item_t){.label = tr("delete_playlist"), .icon = &icon_trash, .destructive = true, .action = sheet_playlist_delete};
 		snprintf(title, sizeof(title), "%s", result_playlists[index].name);
 	} else {
 		return; // an artist: nothing but opening it
@@ -950,8 +934,7 @@ static void job_done_cb(void *user) {
 		if (result_error[0] || result_queue_count <= 0) {
 			toast_error(result_error[0] ? result_error : tr("playlist_cannot_add_the_tracks"));
 		} else {
-			queue_tracks(result_queue_tracks, result_queue_count, (playlist_queue_where_t)result_queue_where,
-						 result_queue_what);
+			queue_tracks(result_queue_tracks, result_queue_count, (playlist_queue_where_t)result_queue_where, result_queue_what);
 		}
 		free(result_queue_tracks);
 		result_queue_tracks = NULL;
@@ -1144,8 +1127,7 @@ static bool track_is_playable(const char *path) {
 	bool growing = growfile_is_growing(path);
 	bool downloading = id != 0 && tidalcache_downloading_id() == id;
 	if (growing != downloading) {
-		fprintf(stderr, "tidal: '%s' -- growfile says %d, the cache says %d: THEY DISAGREE\n", path, growing,
-				downloading);
+		fprintf(stderr, "tidal: '%s' -- growfile says %d, the cache says %d: THEY DISAGREE\n", path, growing, downloading);
 	}
 	return growing || downloading;
 }
@@ -1178,8 +1160,7 @@ bool tidalpage_prepare_track(const char *path) {
 	}
 	// Not there. Log the reason in full: when this decision is wrong the
 	// player loops, and a silent log gives no way to see it.
-	fprintf(stderr, "tidal: '%s' not ready (id=%ld, downloading=%ld): stopping and requesting it\n", path,
-			tidalcache_track_id(path), tidalcache_downloading_id());
+	fprintf(stderr, "tidal: '%s' not ready (id=%ld, downloading=%ld): stopping and requesting it\n", path, tidalcache_track_id(path), tidalcache_downloading_id());
 
 	// The network is needed right now: tell the Wi-Fi idle logic before even
 	// stopping playback.
@@ -1220,7 +1201,6 @@ static void play_started_async(void *user) {
 		svclist_rebind(list);
 	}
 }
-
 
 // ---------------------------------------------------------------------------
 // prefetch, on its own thread
@@ -1367,8 +1347,7 @@ static bool prepare_track(const tidal_track_t *track, char *path, size_t size) {
 	// The real MIME type from the manifest, not the guessed one: a FLAC
 	// stitched back together from segments carries no tags of its own, and
 	// these sidecars are all the player will have to read.
-	tidalcache_write_sidecars(track->id, stream->mime, track->title, track->artist, track->album, track->album_id,
-							  track->track_number, track->cover);
+	tidalcache_write_sidecars(track->id, stream->mime, track->title, track->artist, track->album, track->album_id, track->track_number, track->cover);
 	free(stream);
 
 	// Prefetched tracks count too: they occupy the card, which is what the
@@ -1377,13 +1356,14 @@ static bool prepare_track(const tidal_track_t *track, char *path, size_t size) {
 
 	char *owned = strdup(path);
 	if (owned) {
-		gui_post(cover_ready_async, owned);
+		gui_post_or_free(cover_ready_async, owned);
 	}
 	return true;
 }
 
 static void do_play(int index, unsigned sleep_serial) {
-	if (sleep_serial != sleeptimer_expiration_serial()) return;
+	if (sleep_serial != sleeptimer_expiration_serial())
+		return;
 	if (index < 0 || index >= result_count) {
 		return;
 	}
@@ -1406,8 +1386,7 @@ static void do_play(int index, unsigned sleep_serial) {
 
 	if (!tidal_track_stream(track->id, stream)) {
 		const char *why = tidal_last_error();
-		result_class = streamerr_describe("tidal", why && why[0] ? why : tr("download_failed"), result_error,
-										  sizeof(result_error));
+		result_class = streamerr_describe("tidal", why && why[0] ? why : tr("download_failed"), result_error, sizeof(result_error));
 		free(stream);
 		return;
 	}
@@ -1417,8 +1396,7 @@ static void do_play(int index, unsigned sleep_serial) {
 		// The cache says what went wrong: no card, no network, card full. The
 		// generic "download failed" is only for when even it does not know.
 		const char *why = tidalcache_last_error();
-		result_class = streamerr_describe("tidal", why && why[0] ? why : tr("download_failed"), result_error,
-										  sizeof(result_error));
+		result_class = streamerr_describe("tidal", why && why[0] ? why : tr("download_failed"), result_error, sizeof(result_error));
 		free(stream);
 		return;
 	}
@@ -1435,8 +1413,7 @@ static void do_play(int index, unsigned sleep_serial) {
 
 	// Tags before starting playback: that is when device_state reads the
 	// metadata, and a moment later would be too late.
-	tidalcache_write_sidecars(track->id, mime, track->title, track->artist, track->album, track->album_id,
-							  track->track_number, NULL);
+	tidalcache_write_sidecars(track->id, mime, track->title, track->artist, track->album, track->album_id, track->track_number, NULL);
 
 	// --- the queue: the whole list, not only what has downloaded ------------
 	//
@@ -1490,14 +1467,14 @@ static void do_play(int index, unsigned sleep_serial) {
 		tidalcache_write_sidecars(t->id, expected, t->title, t->artist, t->album, t->album_id, t->track_number, NULL);
 	}
 
-	if (sleep_serial != sleeptimer_expiration_serial()) return;
+	if (sleep_serial != sleeptimer_expiration_serial())
+		return;
 	device_state_play_list(path_ptr, queued_count, start);
 
 	// The cover now, with the music already playing: it is a download and not
 	// worth delaying the first note for. It goes before the player opens on
 	// purpose, so the image is already there when the page appears.
-	tidalcache_write_sidecars(track->id, mime, track->title, track->artist, track->album, track->album_id,
-							  track->track_number, track->cover);
+	tidalcache_write_sidecars(track->id, mime, track->title, track->artist, track->album, track->album_id, track->track_number, track->cover);
 
 	gui_post(play_started_async, NULL);
 
@@ -1970,10 +1947,7 @@ static job_t inflight_job;
 static bool inflight_valid;
 static bool inflight_is_back; // going back consumes a step instead of adding one
 
-static bool job_is_list(job_kind_t kind) {
-	return kind != JOB_PLAY && kind != JOB_LOGIN_BEGIN && kind != JOB_LOGIN_POLL && kind != JOB_NONE &&
-		   kind != JOB_QUEUE_ALBUM;
-}
+static bool job_is_list(job_kind_t kind) { return kind != JOB_PLAY && kind != JOB_LOGIN_BEGIN && kind != JOB_LOGIN_POLL && kind != JOB_NONE && kind != JOB_QUEUE_ALBUM; }
 
 // The job put nothing on screen: navigation stays exactly as it was, and the
 // next tap starts from the list currently displayed.
@@ -1998,10 +1972,7 @@ static void list_nav_commit(void) {
 		// Re-reading the same list (after removing a favourite, say) is not a
 		// step forward: the whole job is compared, not only the kind, or two
 		// albums in a row would not stack.
-		bool same = have_current_list && current_list_job.kind == inflight_job.kind &&
-					current_list_job.id == inflight_job.id &&
-					strcmp(current_list_job.id_text, inflight_job.id_text) == 0 &&
-					strcmp(current_list_job.text, inflight_job.text) == 0;
+		bool same = have_current_list && current_list_job.kind == inflight_job.kind && current_list_job.id == inflight_job.id && strcmp(current_list_job.id_text, inflight_job.id_text) == 0 && strcmp(current_list_job.text, inflight_job.text) == 0;
 		if (have_current_list && !same && lv_screen_active() == list_screen && list_history_len < LIST_HISTORY_DEPTH) {
 			list_history[list_history_len++] = current_list_job;
 		} else if (lv_screen_active() != list_screen) {
@@ -2216,8 +2187,7 @@ static void search_accept_cb(lv_event_t *e) {
 	}
 
 	job_t job = {0};
-	job.kind = search_kind_index == 1 ? JOB_SEARCH_ALBUMS
-									  : (search_kind_index == 2 ? JOB_SEARCH_ARTISTS : JOB_SEARCH_TRACKS);
+	job.kind = search_kind_index == 1 ? JOB_SEARCH_ALBUMS : (search_kind_index == 2 ? JOB_SEARCH_ARTISTS : JOB_SEARCH_TRACKS);
 	snprintf(job.text, sizeof(job.text), "%s", text);
 	run(&job, "searching");
 }
@@ -2290,8 +2260,7 @@ static void build_search_page(gui_config_t *cfg) {
 	}
 	paint_search_pills();
 
-	search_keyboard = keyboard_create(search_screen, cfg->screen_width, 316, search_field, NULL, "ok",
-									  search_accept_cb, NULL);
+	search_keyboard = keyboard_create(search_screen, cfg->screen_width, 316, search_field, NULL, "ok", search_accept_cb, NULL);
 	switcher_attach_back_gesture(search_screen);
 }
 
@@ -2328,9 +2297,9 @@ static lv_obj_t *login_message;
 static lv_obj_t *login_retry;
 
 static lv_timer_t *login_timer;
-static int login_elapsed;	// seconds since the code arrived
-static bool login_active;	// the page is open and the flow is running
-static bool login_polling;	// a poll is in flight: never two at once
+static int login_elapsed;  // seconds since the code arrived
+static bool login_active;  // the page is open and the flow is running
+static bool login_polling; // a poll is in flight: never two at once
 
 static void login_set_visible(lv_obj_t *widget, bool visible) {
 	if (!widget) {
@@ -2443,9 +2412,7 @@ static void login_code_arrived(void) {
 
 	// The QR first: if it generates, the written URL is unnecessary and the
 	// wording changes accordingly -- scan, not type.
-	bool qr_ok = login_qr && login.verification_url[0] &&
-				 lv_qrcode_update(login_qr, login.verification_url, (uint32_t)strlen(login.verification_url)) ==
-					 LV_RESULT_OK;
+	bool qr_ok = login_qr && login.verification_url[0] && lv_qrcode_update(login_qr, login.verification_url, (uint32_t)strlen(login.verification_url)) == LV_RESULT_OK;
 
 	login_set_visible(login_qr, qr_ok);
 	login_set_visible(login_url, !qr_ok);
@@ -2649,14 +2616,12 @@ static const char *const FEATURED_NAMES[3] = {"new_releases", "tidal_most_stream
 // until the player is restarted.
 static bool featured_hidden[3];
 
-static const int QUALITY_VALUES[4] = {TIDAL_QUALITY_LOW, TIDAL_QUALITY_HIGH, TIDAL_QUALITY_LOSSLESS,
-									  TIDAL_QUALITY_HIRES};
+static const int QUALITY_VALUES[4] = {TIDAL_QUALITY_LOW, TIDAL_QUALITY_HIGH, TIDAL_QUALITY_LOSSLESS, TIDAL_QUALITY_HIRES};
 
 // The perceived quality first, then the format underneath: "High" alone is not
 // distinguishable from "Hi-res", and "AAC 320" alone tells nobody it is lossy.
 // These go through tr(): half of each is a translatable word.
-static const char *const QUALITY_NAMES[4] = {"tidal_low_aac_96", "tidal_high_aac_320", "tidal_cd_flac_16_44",
-											 "tidal_hi_res_flac_24"};
+static const char *const QUALITY_NAMES[4] = {"tidal_low_aac_96", "tidal_high_aac_320", "tidal_cd_flac_16_44", "tidal_hi_res_flac_24"};
 static lv_obj_t *quality_pills[4];
 
 // The magnifier, shown only when signed in: otherwise there is nothing to
@@ -2910,9 +2875,7 @@ static void build_list_page(gui_config_t *cfg) {
 
 // "Show album" from the player, as the provider registry asks for it: the
 // screen back leads to, or NULL when the album could not be opened.
-static void *provider_open_album(const char *album_id, const char *title) {
-	return tidalpage_open_album(album_id, title) ? tidal_list_screen : NULL;
-}
+static void *provider_open_album(const char *album_id, const char *title) { return tidalpage_open_album(album_id, title) ? tidal_list_screen : NULL; }
 
 void tidalpage_init(gui_config_t *cfg) {
 	// What only the GUI can tell the rest of the program about Tidal: its mark
