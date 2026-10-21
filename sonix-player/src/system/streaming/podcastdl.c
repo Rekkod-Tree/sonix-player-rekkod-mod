@@ -1,14 +1,17 @@
+#define _GNU_SOURCE
 #include "podcastdl.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
-#include <utime.h>
 #include <unistd.h>
+#include <utime.h>
 
 #include "src/system/core/utils.h"
 #include "src/system/device/system.h"
@@ -26,15 +29,19 @@ typedef struct {
 	char feed_author[PODCAST_AUTHOR_MAX];
 	char folder[512];
 	char path[768];
-	char part[800];
 	char image[PODCAST_URL_MAX];
+	char show[DL_NAME_MAX + 1], file[180], staging[240];
+	dev_t root_dev, part_dev;
+	ino_t root_ino, part_ino;
+	bool part_created;
 } job_t;
 
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static podcastdl_state_t state = PODCASTDL_IDLE;
 static long long bytes_done;
 static long long bytes_total;
-static volatile bool cancel_asked;
+static _Atomic bool cancel_asked;
+static unsigned temp_serial;
 static http_stream_t *active_stream; // guarded by `lock`; NULL outside the body loop
 
 bool podcastdl_root(char *out, size_t size) {
@@ -157,9 +164,7 @@ bool podcastdl_path(const podcast_episode_t *episode, const char *feed_title, ch
 		return false;
 	}
 	char base[512], folder[512];
-	return podcastdl_root(base, sizeof(base)) &&
-		   folder_of(base, feed_title && feed_title[0] ? feed_title : episode->feed_title, folder, sizeof(folder)) &&
-		   path_in_folder(episode, folder, out, size);
+	return podcastdl_root(base, sizeof(base)) && folder_of(base, feed_title && feed_title[0] ? feed_title : episode->feed_title, folder, sizeof(folder)) && path_in_folder(episode, folder, out, size);
 }
 
 bool podcastdl_exists(const podcast_episode_t *episode, const char *feed_title) {
@@ -174,94 +179,145 @@ static void set_state(podcastdl_state_t s) {
 	pthread_mutex_unlock(&lock);
 }
 
-// The podcast's artwork, once per folder: cover.jpg or cover.png by what the
-// bytes are, which is what the player and the thumbnails look for.
-static void fetch_cover(const char *folder, const char *url) {
-	if (!url || !url[0]) {
-		return;
-	}
-	char jpg[560], png[560];
-	snprintf(jpg, sizeof(jpg), "%s/cover.jpg", folder);
-	snprintf(png, sizeof(png), "%s/cover.png", folder);
+// No descriptor survives a network wait. A short pin prevents ordinary USB
+// unmount during local I/O; relative lookup also survives a forced/lazy detach
+// without resolving a replacement card through the old absolute pathname.
+static int job_dir(const job_t *job, bool create, bool cleanup) {
+	if ((!cleanup && cancel_asked) || job->state_epoch != podcaststate_card_epoch())
+		return -1;
+	char root[512];
+	int pin = storage_pin_card(root, sizeof(root));
 	struct stat st;
-	if (stat(jpg, &st) == 0 || stat(png, &st) == 0) {
-		return;
+	if (pin < 0)
+		return -1;
+	if (job->state_epoch != podcaststate_card_epoch() || fstat(pin, &st) != 0 || st.st_dev != job->root_dev || st.st_ino != job->root_ino || (!cleanup && cancel_asked)) {
+		close(pin);
+		return -1;
 	}
-	char *body = NULL;
-	size_t len = 0;
-	if (!http_get(url, &body, &len, 8 * 1024 * 1024, DL_TIMEOUT_SECS) || !body || len < 8) {
-		free(body);
-		return;
+	if (create && mkdirat(pin, PODCASTDL_FOLDER, 0755) != 0 && errno != EEXIST) {
+		close(pin);
+		return -1;
 	}
-	const unsigned char *b = (const unsigned char *)body;
-	const char *dest = NULL;
-	if (b[0] == 0xFF && b[1] == 0xD8) {
-		dest = jpg;
-	} else if (b[0] == 0x89 && b[1] == 'P' && b[2] == 'N' && b[3] == 'G') {
-		dest = png;
+	int parent = openat(pin, PODCASTDL_FOLDER, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+	close(pin);
+	if (parent < 0)
+		return -1;
+	if (create && mkdirat(parent, job->show, 0755) != 0 && errno != EEXIST) {
+		close(parent);
+		return -1;
 	}
-	if (dest) {
-		FILE *f = fopen(dest, "wb");
-		if (f) {
-			bool ok = fwrite(body, 1, len, f) == len;
-			if (fclose(f) != 0 || !ok) {
-				remove(dest);
-			}
+	int dir = openat(parent, job->show, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+	close(parent);
+	return dir;
+}
+
+static bool same_part(const job_t *job, int fd) {
+	struct stat st;
+	return fd >= 0 && fstat(fd, &st) == 0 && S_ISREG(st.st_mode) && st.st_dev == job->part_dev && st.st_ino == job->part_ino;
+}
+
+static bool create_part(job_t *job) {
+	int dir = job_dir(job, true, false);
+	if (dir < 0)
+		return false;
+	int fd = -1;
+	for (int attempt = 0; attempt < 16; attempt++) {
+		unsigned serial = __atomic_add_fetch(&temp_serial, 1, __ATOMIC_RELAXED);
+		snprintf(job->staging, sizeof(job->staging), ".%s-%ld-%u.part", job->file, (long)getpid(), serial);
+		fd = openat(dir, job->staging, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
+		if (fd >= 0 || errno != EEXIST)
+			break;
+	}
+	struct stat st;
+	bool ok = fd >= 0 && fstat(fd, &st) == 0 && S_ISREG(st.st_mode);
+	if (ok) {
+		job->part_dev = st.st_dev;
+		job->part_ino = st.st_ino;
+		job->part_created = true;
+	}
+	if (fd >= 0) {
+		if (!ok)
+			unlinkat(dir, job->staging, 0);
+		close(fd);
+	}
+	close(dir);
+	return ok;
+}
+
+static bool append_part(job_t *job, const char *buf, size_t size, long long have) {
+	int dir = job_dir(job, false, false);
+	if (dir < 0)
+		return false;
+	int fd = openat(dir, job->staging, O_WRONLY | O_APPEND | O_NOFOLLOW | O_CLOEXEC);
+	struct stat st;
+	bool ok = same_part(job, fd) && fstat(fd, &st) == 0 && st.st_size == have;
+	close(dir);
+	while (ok && size) {
+		ssize_t n = write(fd, buf, size);
+		if (n < 0 && errno == EINTR)
+			continue;
+		if (n <= 0) {
+			ok = false;
+			break;
 		}
+		buf += n;
+		size -= (size_t)n;
 	}
-	free(body);
+	if (fd >= 0 && close(fd) != 0)
+		ok = false;
+	return ok;
+}
+
+static void cleanup_part(const job_t *job) {
+	if (!job->part_created)
+		return;
+	int dir = job_dir(job, false, true);
+	if (dir < 0)
+		return;
+	int fd = openat(dir, job->staging, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+	if (same_part(job, fd))
+		unlinkat(dir, job->staging, 0);
+	if (fd >= 0)
+		close(fd);
+	close(dir);
 }
 
 static bool download_body(job_t *job) {
 	http_stream_t *st = calloc(1, sizeof(*st));
-	if (!st) {
+	if (!st)
 		return false;
-	}
 	if (!http_stream_open(st, job->episode.enclosure, DL_TIMEOUT_SECS)) {
-		fprintf(stderr, "podcastdl: %s does not open\n", job->episode.enclosure);
 		free(st);
 		return false;
 	}
-
 	pthread_mutex_lock(&lock);
 	bytes_total = st->content_length > 0 ? st->content_length : 0;
 	active_stream = st;
+	if (cancel_asked)
+		http_stream_wake(st);
 	pthread_mutex_unlock(&lock);
 
-	bool ok = false;
-	FILE *f = cancel_asked ? NULL : fopen(job->part, "wb");
-	if (f) {
-		char *buf = malloc(DL_CHUNK);
-		ok = buf != NULL;
-		long long done = 0;
-		while (ok && !cancel_asked) {
-			int n = http_stream_read(st, buf, DL_CHUNK);
-			if (n < 0) {
-				ok = false;
-				break;
-			}
-			if (n == 0) {
-				break;
-			}
-			if (fwrite(buf, 1, (size_t)n, f) != (size_t)n) {
-				fprintf(stderr, "podcastdl: write failed: %s\n", strerror(errno));
-				ok = false;
-				break;
-			}
+	char *buf = malloc(DL_CHUNK);
+	bool ok = buf && create_part(job);
+	long long done = 0;
+	while (ok && !cancel_asked) {
+		int n = http_stream_read(st, buf, DL_CHUNK);
+		if (n < 0) {
+			ok = false;
+			break;
+		}
+		if (!n)
+			break;
+		ok = append_part(job, buf, (size_t)n, done);
+		if (ok) {
 			done += n;
 			pthread_mutex_lock(&lock);
 			bytes_done = done;
 			pthread_mutex_unlock(&lock);
 		}
-		free(buf);
-		if (fclose(f) != 0) {
-			ok = false;
-		}
-		if (cancel_asked || done == 0 || (bytes_total > 0 && done != bytes_total)) {
-			ok = false;
-		}
 	}
-
+	free(buf);
+	ok = ok && !cancel_asked && done > 0 && (st->content_length <= 0 || done == st->content_length);
 	pthread_mutex_lock(&lock);
 	active_stream = NULL;
 	pthread_mutex_unlock(&lock);
@@ -270,16 +326,62 @@ static bool download_body(job_t *job) {
 	return ok;
 }
 
+// Artwork is optional. Fetch without a card pin, then admit a fresh local
+// transaction; cancellation/detach cannot turn its late response into a write.
+static void fetch_cover(const job_t *job) {
+	if (!job->image[0] || cancel_asked)
+		return;
+	int dir = job_dir(job, false, false);
+	if (dir < 0)
+		return;
+	struct stat st;
+	bool exists = fstatat(dir, "cover.jpg", &st, AT_SYMLINK_NOFOLLOW) == 0 || fstatat(dir, "cover.png", &st, AT_SYMLINK_NOFOLLOW) == 0;
+	close(dir);
+	if (exists)
+		return;
+	char *body = NULL;
+	size_t len = 0;
+	if (!http_get(job->image, &body, &len, 8 * 1024 * 1024, DL_TIMEOUT_SECS) || !body || len < 8) {
+		free(body);
+		return;
+	}
+	const unsigned char *b = (const unsigned char *)body;
+	const char *dest = b[0] == 0xFF && b[1] == 0xD8 ? "cover.jpg" : b[0] == 0x89 && b[1] == 'P' && b[2] == 'N' && b[3] == 'G' ? "cover.png" : NULL;
+	dir = dest ? job_dir(job, false, false) : -1;
+	if (dir >= 0) {
+		char tmp[80];
+		snprintf(tmp, sizeof(tmp), ".cover-%ld-%u.tmp", (long)getpid(), __atomic_add_fetch(&temp_serial, 1, __ATOMIC_RELAXED));
+		int fd = openat(dir, tmp, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
+		if (fd >= 0) {
+			FILE *f = fdopen(fd, "wb");
+			bool ok = f && fwrite(body, 1, len, f) == len && fflush(f) == 0 && fsync(fileno(f)) == 0;
+			if (f ? fclose(f) != 0 : close(fd) != 0)
+				ok = false;
+			if (!ok || cancel_asked || job->state_epoch != podcaststate_card_epoch() || renameat(dir, tmp, dir, dest) != 0)
+				unlinkat(dir, tmp, 0);
+			else
+				fsync(dir);
+		}
+		close(dir);
+	}
+	free(body);
+}
+
 // The sidecar podcastcache.c writes for an episode it streams, with the id of
 // the episode added: here the file name is its title, not its id.
-static void write_tags(const job_t *job) {
-	char tags[800];
-	char tmp[816];
-	snprintf(tags, sizeof(tags), "%s.tags", job->path);
-	snprintf(tmp, sizeof(tmp), "%s.tmp", tags);
-	FILE *f = fopen(tmp, "w");
+static bool prepare_tags(const job_t *job, int dir, char *tmp, size_t size) {
+	char tags[200];
+	snprintf(tags, sizeof(tags), "%s.tags", job->file);
+	snprintf(tmp, size, ".%s-%ld-%u.tmp", tags, (long)getpid(), __atomic_add_fetch(&temp_serial, 1, __ATOMIC_RELAXED));
+	int fd = openat(dir, tmp, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
+	FILE *f = fd >= 0 ? fdopen(fd, "w") : NULL;
 	if (!f) {
-		return;
+		if (fd >= 0) {
+			close(fd);
+			unlinkat(dir, tmp, 0);
+		}
+		tmp[0] = 0;
+		return false;
 	}
 	const podcast_episode_t *e = &job->episode;
 	fprintf(f, "title=%s\n", e->title);
@@ -290,10 +392,12 @@ static void write_tags(const job_t *job) {
 	fprintf(f, "feed_image=%s\n", job->image);
 	fprintf(f, "cover_url=%s\n", e->image);
 	fprintf(f, "episode_id=%lld\n", e->id);
-	bool ok = fclose(f) == 0;
-	if (!ok || rename(tmp, tags) != 0) {
-		remove(tmp);
-	}
+	bool ok = !ferror(f) && fflush(f) == 0 && fsync(fileno(f)) == 0;
+	if (fclose(f) != 0)
+		ok = false;
+	if (!ok)
+		unlinkat(dir, tmp, 0);
+	return ok;
 }
 
 static void *download_main(void *arg) {
@@ -301,23 +405,37 @@ static void *download_main(void *arg) {
 	thread_be_low_priority("podcast save"); // the card on screen is waiting for it
 
 	bool ok = !cancel_asked && download_body(job);
-	if (ok && rename(job->part, job->path) != 0) {
-		fprintf(stderr, "podcastdl: rename to %s failed: %s\n", job->path, strerror(errno));
+	int dir = ok ? job_dir(job, false, false) : -1;
+	int fd = dir >= 0 ? openat(dir, job->staging, O_RDONLY | O_NOFOLLOW | O_CLOEXEC) : -1;
+	ok = ok && same_part(job, fd);
+	if (ok && job->episode.published > 0) {
+		struct timespec times[2] = {{.tv_sec = job->episode.published}, {.tv_sec = job->episode.published}};
+		ok = futimens(fd, times) == 0;
+	}
+	char tags_tmp[240] = "", tags[200];
+	snprintf(tags, sizeof(tags), "%s.tags", job->file);
+	if (ok)
+		ok = fsync(fd) == 0 && prepare_tags(job, dir, tags_tmp, sizeof(tags_tmp));
+	if (ok)
+		ok = !cancel_asked && job->state_epoch == podcaststate_card_epoch() && renameat(dir, job->staging, dir, job->file) == 0;
+	if (ok)
+		ok = renameat(dir, tags_tmp, dir, tags) == 0;
+	if (tags_tmp[0] && dir >= 0)
+		unlinkat(dir, tags_tmp, 0);
+	// Unsupported directory fsync is normal on some filesystems; real I/O
+	// failure must not be announced as a completed download.
+	if (ok && fsync(dir) != 0 && errno != EINVAL && errno != ENOTSUP)
 		ok = false;
-	}
+	if (fd >= 0)
+		close(fd);
+	if (dir >= 0)
+		close(dir);
 	if (!ok) {
-		remove(job->part);
-		rmdir(job->folder); // only when this download was all it would have held
+		cleanup_part(job);
 	} else {
-		if (job->episode.published > 0) {
-			struct utimbuf times = {(time_t)job->episode.published, (time_t)job->episode.published};
-			utime(job->path, &times);
-		}
-		write_tags(job);
 		podcaststate_downloaded(job->episode.id, job->path, job->state_epoch);
-		fetch_cover(job->folder, job->image);
+		fetch_cover(job);
 	}
-	sync();
 
 	printf("podcastdl: %s %s\n", job->path, ok ? "complete" : cancel_asked ? "cancelled" : "failed");
 	set_state(ok ? PODCASTDL_DONE : cancel_asked ? PODCASTDL_CANCELLED : PODCASTDL_FAILED);
@@ -334,13 +452,17 @@ bool podcastdl_owns(const char *path) {
 	return strncasecmp(path, base, n) == 0 && path[n] == '/';
 }
 
-bool podcastdl_start(const podcast_episode_t *episode, const char *feed_title, const char *feed_author,
-					 const char *feed_image) {
+bool podcastdl_start(const podcast_episode_t *episode, const char *feed_title, const char *feed_author, const char *feed_image) {
 	if (!episode || !episode->enclosure[0]) {
 		return false;
 	}
 	pthread_mutex_lock(&lock);
 	bool busy = state == PODCASTDL_RUNNING;
+	if (!busy) {
+		state = PODCASTDL_RUNNING;
+		bytes_done = bytes_total = 0;
+		cancel_asked = false;
+	}
 	pthread_mutex_unlock(&lock);
 	if (busy) {
 		return false;
@@ -348,6 +470,7 @@ bool podcastdl_start(const podcast_episode_t *episode, const char *feed_title, c
 
 	job_t *job = calloc(1, sizeof(*job));
 	if (!job) {
+		set_state(PODCASTDL_FAILED);
 		return false;
 	}
 	job->state_epoch = podcaststate_card_epoch();
@@ -355,36 +478,23 @@ bool podcastdl_start(const podcast_episode_t *episode, const char *feed_title, c
 	const char *title = feed_title && feed_title[0] ? feed_title : episode->feed_title;
 	snprintf(job->feed_title, sizeof(job->feed_title), "%s", title);
 	snprintf(job->feed_author, sizeof(job->feed_author), "%s", feed_author ? feed_author : "");
-	char base[512];
-	if (!podcastdl_root(base, sizeof(base)) ||
-		!folder_of(base, title, job->folder, sizeof(job->folder)) ||
-		!path_in_folder(episode, job->folder, job->path, sizeof(job->path))) {
-		free(job);
-		return false;
-	}
-	mkdir(base, 0755);
-	mkdir(job->folder, 0755);
+	char root[512], base[512];
+	int pin = storage_pin_card(root, sizeof(root));
 	struct stat st;
-	if (stat(job->folder, &st) != 0 || !S_ISDIR(st.st_mode)) {
-		fprintf(stderr, "podcastdl: cannot make %s\n", job->folder);
+	bool admitted = pin >= 0 && fstat(pin, &st) == 0 && job->state_epoch == podcaststate_card_epoch();
+	if (pin >= 0)
+		close(pin);
+	int n = admitted ? snprintf(base, sizeof(base), "%s/" PODCASTDL_FOLDER, root) : -1;
+	if (n < 0 || (size_t)n >= sizeof(base) || !folder_of(base, title, job->folder, sizeof(job->folder)) || !path_in_folder(episode, job->folder, job->path, sizeof(job->path))) {
 		free(job);
+		set_state(PODCASTDL_FAILED);
 		return false;
 	}
-	const char *slash = strrchr(job->path, '/');
-	int n = snprintf(job->part, sizeof(job->part), "%s/.%s.part", job->folder, slash ? slash + 1 : job->path);
-	if (n < 0 || (size_t)n >= sizeof(job->part)) {
-		fprintf(stderr, "podcastdl: path too long for %s\n", job->path);
-		free(job);
-		return false;
-	}
+	job->root_dev = st.st_dev;
+	job->root_ino = st.st_ino;
+	podcastdl_safe_name(title, "Podcast", job->show, sizeof(job->show));
+	snprintf(job->file, sizeof(job->file), "%s", strrchr(job->path, '/') + 1);
 	snprintf(job->image, sizeof(job->image), "%s", feed_image && feed_image[0] ? feed_image : episode->image);
-
-	pthread_mutex_lock(&lock);
-	state = PODCASTDL_RUNNING;
-	bytes_done = 0;
-	bytes_total = 0;
-	cancel_asked = false;
-	pthread_mutex_unlock(&lock);
 
 	pthread_t thread;
 	pthread_attr_t attr;

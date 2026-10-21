@@ -52,6 +52,7 @@
 #include "src/system/remote/dlna.h"
 #include "src/system/streaming/cardimport.h"
 #include "src/system/streaming/podcastcache.h"
+#include "src/system/streaming/podcastdl.h"
 #include "src/system/streaming/podcaststate.h"
 #include "src/system/streaming/podcastsubs.h"
 #include "src/system/streaming/provider.h"
@@ -682,7 +683,9 @@ bool storage_sd_writable(void) {
 	return (!sd_requires_mount || is_mounted(sd_root)) && statvfs(sd_root, &st) == 0 && !(st.f_flag & ST_RDONLY);
 }
 
-static int mount_sd(storage_config_t *storage_cfg, const system_runtime_t *runtime) {
+static void card_databases_detach(void);
+
+static int mount_sd(storage_config_t *storage_cfg, const system_runtime_t *runtime, bool runtime_recovery) {
 	(void)runtime;
 	sd_requires_mount = storage_cfg->manage_mount;
 	sd_writable = false;
@@ -699,6 +702,8 @@ static int mount_sd(storage_config_t *storage_cfg, const system_runtime_t *runti
 	// below would otherwise read it as "already there, leave it alone".
 	if (is_mounted(mount_point) && !mount_is_alive(mount_point)) {
 		fprintf(stderr, "storage: %s is mounted but dead; clearing it first\n", mount_point);
+		if (runtime_recovery)
+			card_databases_detach();
 		force_unmount(mount_point);
 	}
 
@@ -733,6 +738,10 @@ static int mount_sd(storage_config_t *storage_cfg, const system_runtime_t *runti
 		return -1;
 	}
 
+	// A lost remove event must not carry old jobs into a new FAT volume.
+	// At runtime the caller holds card_lock; startup has no card services yet.
+	if (runtime_recovery)
+		card_databases_detach();
 	mkdir(mount_point, 0755); // in case the mount point doesn't exist
 
 	printf("storage: mounting %s on %s\n", device, mount_point);
@@ -773,7 +782,7 @@ static void unmount_sd(storage_config_t *storage_cfg) {
 }
 
 static void check_and_mount_existing_sd(storage_config_t *storage_cfg, const system_runtime_t *runtime) {
-	mount_sd(storage_cfg, runtime);
+	mount_sd(storage_cfg, runtime, false);
 
 	if (!storage_cfg->manage_mount) {
 		return; // host build: the browser reads an ordinary folder
@@ -828,6 +837,8 @@ static void card_databases_detach(void) {
 	// of play would otherwise read as "the track ended, start it again".
 	device_state_note_storage_gone();
 	audio_stop();
+	// Nonblocking: no card lock is held across downloader network waits.
+	podcastdl_cancel();
 	podcaststate_set_root(NULL);
 
 	logging_suspend_for_usb(); // closes the on-card log file
@@ -1012,7 +1023,7 @@ void storage_recheck_card(void) {
 		force_unmount(sd_root);
 	}
 
-	if (mount_sd(g_storage_cfg, g_runtime) == 0 && mount_is_alive(sd_root)) {
+	if (mount_sd(g_storage_cfg, g_runtime, true) == 0 && mount_is_alive(sd_root)) {
 		card_databases_attach(sd_root);
 		fprintf(stderr, "storage: the card is back on %s\n", sd_root);
 	}
@@ -1247,7 +1258,7 @@ void *sd_hotplug_thread(void *arg) {
 	char buf[4096 + 1]; // +1 is for null terminator
 
 	while (1) {
-		int len = recv(sock, buf, sizeof(buf), 0);
+		int len = recv(sock, buf, sizeof(buf) - 1, 0);
 		if (len <= 0) {
 			continue;
 		}
@@ -1274,7 +1285,7 @@ void *sd_hotplug_thread(void *arg) {
 					if (attempt) {
 						usleep(300 * 1000);
 					}
-					mounted = mount_sd(storage_cfg, runtime) == 0 && mount_is_alive(sd_root);
+					mounted = mount_sd(storage_cfg, runtime, true) == 0 && mount_is_alive(sd_root);
 				}
 
 				if (mounted) {

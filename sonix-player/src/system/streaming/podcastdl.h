@@ -17,7 +17,7 @@
 // or emptied.
 //
 // One download at a time, on a thread of its own. The file is written under a
-// hidden ".<name>.part" and renamed when complete, so a cut download never
+// hidden ".<name>-<pid>-<serial>.part" and renamed when complete, so a cut download never
 // shows up as an episode.
 
 #define PODCASTDL_FOLDER "Podcast"
@@ -46,15 +46,18 @@ bool podcastdl_exists(const podcast_episode_t *episode, const char *feed_title);
 // Starts downloading `episode` into the folder of `feed_title`. `feed_image` is
 // the podcast's artwork, fetched once per folder; `feed_author` goes into the
 // sidecar for the player's follow star. Either NULL or empty for none. False,
-// starting nothing, when a download is already running, there is no card, or
-// the folder cannot be made.
+// starting nothing, when a download is already running, there is no admitted
+// card, the path is invalid or the worker cannot start. Directory/network/write
+// failures after start are reported by podcastdl_state().
 bool podcastdl_start(const podcast_episode_t *episode, const char *feed_title, const char *feed_author,
 					 const char *feed_image);
 
 // True when `path` is inside the Podcast folder.
 bool podcastdl_owns(const char *path);
 
-// Stops the running download and deletes what it wrote. Returns at once; the
+// Stops the running download and removes its own staging file when the same
+// card is still admitted. A staging file left on a detached card is never
+// cleaned through the replacement card pathname. Returns at once; the
 // state becomes PODCASTDL_CANCELLED when the thread has wound up.
 void podcastdl_cancel(void);
 

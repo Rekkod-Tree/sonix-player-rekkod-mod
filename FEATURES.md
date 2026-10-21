@@ -1,5 +1,19 @@
 ﻿# Features
 
+## Podcast storage isolation after alpha23
+
+- A previous-card podcast download cannot create, replace or clean files on a new
+  card at the same mount point; file mutations use short admitted directory handles.
+- Network waits hold no card descriptors. Detach cancels without blocking storage
+  shutdown; unique staging files are checked before append, publish and cleanup.
+- Runtime remount recovery invalidates old epochs even after a missed removal
+  event; healthy duplicate insertion events preserve playback. Hotplug reads keep
+  space for the string terminator.
+- Independent barrier/fault tests and native R1 filesystem fixtures cover stale-card
+  isolation, cancellation and write errors. PGO is not retrained.
+- See `PODCAST_STORAGE_SAFETY_2026-10-21.md` for verification scope and the separate
+  outstanding audio/sidecar publication issue #30.
+
 ## Point fixes after alpha22
 
 - Podcast paths use caller-owned copies and reject truncation; formats and epoch checks remain compatible.
