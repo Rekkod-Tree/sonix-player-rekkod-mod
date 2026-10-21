@@ -1,0 +1,4589 @@
+{
+  "date": "2026-10-21",
+  "scope": "Browser prototype; firmware and device unchanged",
+  "algorithmConfigurations": 8640,
+  "renderedVariants": 384,
+  "contrastFailures": 0,
+  "geometryFailures": 0,
+  "cases": [
+    {
+      "config": {
+        "name": "normal",
+        "state": "normal",
+        "sample": "normal",
+        "primary": "palette",
+        "tint": false,
+        "cover": "teal",
+        "forcedColorPlaceholders": true
+      },
+      "page": "Список",
+      "results": [
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "dark"
+        }
+      ]
+    },
+    {
+      "config": {
+        "name": "normal",
+        "state": "normal",
+        "sample": "normal",
+        "primary": "palette",
+        "tint": false,
+        "cover": "teal",
+        "forcedColorPlaceholders": true
+      },
+      "page": "Плеер",
+      "results": [
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "dark"
+        }
+      ]
+    },
+    {
+      "config": {
+        "name": "normal",
+        "state": "normal",
+        "sample": "normal",
+        "primary": "palette",
+        "tint": false,
+        "cover": "teal",
+        "forcedColorPlaceholders": true
+      },
+      "page": "Настройки",
+      "results": [
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "dark"
+        }
+      ]
+    },
+    {
+      "config": {
+        "name": "normal",
+        "state": "normal",
+        "sample": "normal",
+        "primary": "palette",
+        "tint": false,
+        "cover": "teal",
+        "forcedColorPlaceholders": true
+      },
+      "page": "Шторка",
+      "results": [
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "dark"
+        }
+      ]
+    },
+    {
+      "config": {
+        "name": "pressed",
+        "state": "pressed",
+        "sample": "normal",
+        "primary": "palette",
+        "tint": false,
+        "cover": "teal",
+        "forcedColorPlaceholders": true
+      },
+      "page": "Список",
+      "results": [
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "dark"
+        }
+      ]
+    },
+    {
+      "config": {
+        "name": "pressed",
+        "state": "pressed",
+        "sample": "normal",
+        "primary": "palette",
+        "tint": false,
+        "cover": "teal",
+        "forcedColorPlaceholders": true
+      },
+      "page": "Плеер",
+      "results": [
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "dark"
+        }
+      ]
+    },
+    {
+      "config": {
+        "name": "pressed",
+        "state": "pressed",
+        "sample": "normal",
+        "primary": "palette",
+        "tint": false,
+        "cover": "teal",
+        "forcedColorPlaceholders": true
+      },
+      "page": "Настройки",
+      "results": [
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "dark"
+        }
+      ]
+    },
+    {
+      "config": {
+        "name": "pressed",
+        "state": "pressed",
+        "sample": "normal",
+        "primary": "palette",
+        "tint": false,
+        "cover": "teal",
+        "forcedColorPlaceholders": true
+      },
+      "page": "Шторка",
+      "results": [
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "dark"
+        }
+      ]
+    },
+    {
+      "config": {
+        "name": "disabled",
+        "state": "disabled",
+        "sample": "normal",
+        "primary": "palette",
+        "tint": false,
+        "cover": "teal",
+        "forcedColorPlaceholders": true
+      },
+      "page": "Список",
+      "results": [
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "dark"
+        }
+      ]
+    },
+    {
+      "config": {
+        "name": "disabled",
+        "state": "disabled",
+        "sample": "normal",
+        "primary": "palette",
+        "tint": false,
+        "cover": "teal",
+        "forcedColorPlaceholders": true
+      },
+      "page": "Плеер",
+      "results": [
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "dark"
+        }
+      ]
+    },
+    {
+      "config": {
+        "name": "disabled",
+        "state": "disabled",
+        "sample": "normal",
+        "primary": "palette",
+        "tint": false,
+        "cover": "teal",
+        "forcedColorPlaceholders": true
+      },
+      "page": "Настройки",
+      "results": [
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "dark"
+        }
+      ]
+    },
+    {
+      "config": {
+        "name": "disabled",
+        "state": "disabled",
+        "sample": "normal",
+        "primary": "palette",
+        "tint": false,
+        "cover": "teal",
+        "forcedColorPlaceholders": true
+      },
+      "page": "Шторка",
+      "results": [
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "dark"
+        }
+      ]
+    },
+    {
+      "config": {
+        "name": "long",
+        "state": "normal",
+        "sample": "long",
+        "primary": "palette",
+        "tint": false,
+        "cover": "teal",
+        "forcedColorPlaceholders": true
+      },
+      "page": "Список",
+      "results": [
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "dark"
+        }
+      ]
+    },
+    {
+      "config": {
+        "name": "long",
+        "state": "normal",
+        "sample": "long",
+        "primary": "palette",
+        "tint": false,
+        "cover": "teal",
+        "forcedColorPlaceholders": true
+      },
+      "page": "Плеер",
+      "results": [
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "dark"
+        }
+      ]
+    },
+    {
+      "config": {
+        "name": "long",
+        "state": "normal",
+        "sample": "long",
+        "primary": "palette",
+        "tint": false,
+        "cover": "teal",
+        "forcedColorPlaceholders": true
+      },
+      "page": "Настройки",
+      "results": [
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "dark"
+        }
+      ]
+    },
+    {
+      "config": {
+        "name": "long",
+        "state": "normal",
+        "sample": "long",
+        "primary": "palette",
+        "tint": false,
+        "cover": "teal",
+        "forcedColorPlaceholders": true
+      },
+      "page": "Шторка",
+      "results": [
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "dark"
+        }
+      ]
+    },
+    {
+      "config": {
+        "name": "missing",
+        "state": "normal",
+        "sample": "missing",
+        "primary": "palette",
+        "tint": false,
+        "cover": "teal",
+        "forcedColorPlaceholders": true
+      },
+      "page": "Список",
+      "results": [
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "dark"
+        }
+      ]
+    },
+    {
+      "config": {
+        "name": "missing",
+        "state": "normal",
+        "sample": "missing",
+        "primary": "palette",
+        "tint": false,
+        "cover": "teal",
+        "forcedColorPlaceholders": true
+      },
+      "page": "Плеер",
+      "results": [
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "dark"
+        }
+      ]
+    },
+    {
+      "config": {
+        "name": "missing",
+        "state": "normal",
+        "sample": "missing",
+        "primary": "palette",
+        "tint": false,
+        "cover": "teal",
+        "forcedColorPlaceholders": true
+      },
+      "page": "Настройки",
+      "results": [
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "dark"
+        }
+      ]
+    },
+    {
+      "config": {
+        "name": "missing",
+        "state": "normal",
+        "sample": "missing",
+        "primary": "palette",
+        "tint": false,
+        "cover": "teal",
+        "forcedColorPlaceholders": true
+      },
+      "page": "Шторка",
+      "results": [
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "dark"
+        }
+      ]
+    },
+    {
+      "config": {
+        "name": "tint",
+        "state": "normal",
+        "sample": "normal",
+        "primary": "blue",
+        "tint": true,
+        "cover": "rose",
+        "forcedColorPlaceholders": true
+      },
+      "page": "Список",
+      "results": [
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "dark"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "light"
+        },
+        {
+          "checked": 22,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "dark"
+        }
+      ]
+    },
+    {
+      "config": {
+        "name": "tint",
+        "state": "normal",
+        "sample": "normal",
+        "primary": "blue",
+        "tint": true,
+        "cover": "rose",
+        "forcedColorPlaceholders": true
+      },
+      "page": "Плеер",
+      "results": [
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "dark"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "light"
+        },
+        {
+          "checked": 11,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "dark"
+        }
+      ]
+    },
+    {
+      "config": {
+        "name": "tint",
+        "state": "normal",
+        "sample": "normal",
+        "primary": "blue",
+        "tint": true,
+        "cover": "rose",
+        "forcedColorPlaceholders": true
+      },
+      "page": "Настройки",
+      "results": [
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "dark"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "light"
+        },
+        {
+          "checked": 17,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "dark"
+        }
+      ]
+    },
+    {
+      "config": {
+        "name": "tint",
+        "state": "normal",
+        "sample": "normal",
+        "primary": "blue",
+        "tint": true,
+        "cover": "rose",
+        "forcedColorPlaceholders": true
+      },
+      "page": "Шторка",
+      "results": [
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "mono",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "vivid",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "lcd",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminal",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "terminalColor",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "cyber2077",
+          "theme": "dark"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "light"
+        },
+        {
+          "checked": 42,
+          "geometry": {
+            "durationsContained": true,
+            "playerContained": true,
+            "settingsAboveMini": true
+          },
+          "issues": [],
+          "palette": "netrunner",
+          "theme": "dark"
+        }
+      ]
+    }
+  ],
+  "interactionChecks": {
+    "sharedPlayPause": 16,
+    "sharedFavoriteState": 16,
+    "sharedEqToggle": 16,
+    "placeholderSwitchSynced": true,
+    "keyboardScrollBefore": 206,
+    "keyboardScrollAfter": 206,
+    "keyboardFocusRestored": true
+  },
+  "forcedColorChecks": {
+    "sameBetweenThemes": true,
+    "priorityOverMonoArtForPlaceholders": true,
+    "realArtHonorsMonoArt": true
+  },
+  "limitations": [
+    "No physical display or firmware verification",
+    "No screen-reader audit",
+    "Pointer tool auto-scrolls targets before clicks; scroll preservation verified by keyboard"
+  ]
+}
