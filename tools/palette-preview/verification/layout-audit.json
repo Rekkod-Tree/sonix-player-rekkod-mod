@@ -1,0 +1,294 @@
+{
+  "home": [
+    {
+      "columns": "218px 218px",
+      "contained": true,
+      "display": "block",
+      "footerInside": true,
+      "palette": "mono",
+      "theme": "light",
+      "tiles": 6
+    },
+    {
+      "columns": "218px 218px",
+      "contained": true,
+      "display": "block",
+      "footerInside": true,
+      "palette": "mono",
+      "theme": "dark",
+      "tiles": 6
+    },
+    {
+      "columns": "218px 218px",
+      "contained": true,
+      "display": "block",
+      "footerInside": true,
+      "palette": "vivid",
+      "theme": "light",
+      "tiles": 6
+    },
+    {
+      "columns": "218px 218px",
+      "contained": true,
+      "display": "block",
+      "footerInside": true,
+      "palette": "vivid",
+      "theme": "dark",
+      "tiles": 6
+    },
+    {
+      "columns": "218px 218px",
+      "contained": true,
+      "display": "block",
+      "footerInside": true,
+      "palette": "lcd",
+      "theme": "light",
+      "tiles": 6
+    },
+    {
+      "columns": "218px 218px",
+      "contained": true,
+      "display": "block",
+      "footerInside": true,
+      "palette": "lcd",
+      "theme": "dark",
+      "tiles": 6
+    },
+    {
+      "columns": "218px 218px",
+      "contained": true,
+      "display": "block",
+      "footerInside": true,
+      "palette": "terminal",
+      "theme": "light",
+      "tiles": 6
+    },
+    {
+      "columns": "218px 218px",
+      "contained": true,
+      "display": "block",
+      "footerInside": true,
+      "palette": "terminal",
+      "theme": "dark",
+      "tiles": 6
+    },
+    {
+      "columns": "218px 218px",
+      "contained": true,
+      "display": "block",
+      "footerInside": true,
+      "palette": "terminalColor",
+      "theme": "light",
+      "tiles": 6
+    },
+    {
+      "columns": "218px 218px",
+      "contained": true,
+      "display": "block",
+      "footerInside": true,
+      "palette": "terminalColor",
+      "theme": "dark",
+      "tiles": 6
+    },
+    {
+      "columns": "218px 218px",
+      "contained": true,
+      "display": "block",
+      "footerInside": true,
+      "palette": "cyber",
+      "theme": "light",
+      "tiles": 6
+    },
+    {
+      "columns": "218px 218px",
+      "contained": true,
+      "display": "block",
+      "footerInside": true,
+      "palette": "cyber",
+      "theme": "dark",
+      "tiles": 6
+    },
+    {
+      "columns": "218px 218px",
+      "contained": true,
+      "display": "block",
+      "footerInside": true,
+      "palette": "cyber2077",
+      "theme": "light",
+      "tiles": 6
+    },
+    {
+      "columns": "218px 218px",
+      "contained": true,
+      "display": "block",
+      "footerInside": true,
+      "palette": "cyber2077",
+      "theme": "dark",
+      "tiles": 6
+    },
+    {
+      "columns": "218px 218px",
+      "contained": true,
+      "display": "block",
+      "footerInside": true,
+      "palette": "netrunner",
+      "theme": "light",
+      "tiles": 6
+    },
+    {
+      "columns": "218px 218px",
+      "contained": true,
+      "display": "block",
+      "footerInside": true,
+      "palette": "netrunner",
+      "theme": "dark",
+      "tiles": 6
+    }
+  ],
+  "shade": [
+    {
+      "brightness": 1,
+      "buttons": 8,
+      "fourColumns": true,
+      "joined": true,
+      "palette": "mono",
+      "statusMatchesPanel": true,
+      "theme": "light"
+    },
+    {
+      "brightness": 1,
+      "buttons": 8,
+      "fourColumns": true,
+      "joined": true,
+      "palette": "mono",
+      "statusMatchesPanel": true,
+      "theme": "dark"
+    },
+    {
+      "brightness": 1,
+      "buttons": 8,
+      "fourColumns": true,
+      "joined": true,
+      "palette": "vivid",
+      "statusMatchesPanel": true,
+      "theme": "light"
+    },
+    {
+      "brightness": 1,
+      "buttons": 8,
+      "fourColumns": true,
+      "joined": true,
+      "palette": "vivid",
+      "statusMatchesPanel": true,
+      "theme": "dark"
+    },
+    {
+      "brightness": 1,
+      "buttons": 8,
+      "fourColumns": true,
+      "joined": true,
+      "palette": "lcd",
+      "statusMatchesPanel": true,
+      "theme": "light"
+    },
+    {
+      "brightness": 1,
+      "buttons": 8,
+      "fourColumns": true,
+      "joined": true,
+      "palette": "lcd",
+      "statusMatchesPanel": true,
+      "theme": "dark"
+    },
+    {
+      "brightness": 1,
+      "buttons": 8,
+      "fourColumns": true,
+      "joined": true,
+      "palette": "terminal",
+      "statusMatchesPanel": true,
+      "theme": "light"
+    },
+    {
+      "brightness": 1,
+      "buttons": 8,
+      "fourColumns": true,
+      "joined": true,
+      "palette": "terminal",
+      "statusMatchesPanel": true,
+      "theme": "dark"
+    },
+    {
+      "brightness": 1,
+      "buttons": 8,
+      "fourColumns": true,
+      "joined": true,
+      "palette": "terminalColor",
+      "statusMatchesPanel": true,
+      "theme": "light"
+    },
+    {
+      "brightness": 1,
+      "buttons": 8,
+      "fourColumns": true,
+      "joined": true,
+      "palette": "terminalColor",
+      "statusMatchesPanel": true,
+      "theme": "dark"
+    },
+    {
+      "brightness": 1,
+      "buttons": 8,
+      "fourColumns": true,
+      "joined": true,
+      "palette": "cyber",
+      "statusMatchesPanel": true,
+      "theme": "light"
+    },
+    {
+      "brightness": 1,
+      "buttons": 8,
+      "fourColumns": true,
+      "joined": true,
+      "palette": "cyber",
+      "statusMatchesPanel": true,
+      "theme": "dark"
+    },
+    {
+      "brightness": 1,
+      "buttons": 8,
+      "fourColumns": true,
+      "joined": true,
+      "palette": "cyber2077",
+      "statusMatchesPanel": true,
+      "theme": "light"
+    },
+    {
+      "brightness": 1,
+      "buttons": 8,
+      "fourColumns": true,
+      "joined": true,
+      "palette": "cyber2077",
+      "statusMatchesPanel": true,
+      "theme": "dark"
+    },
+    {
+      "brightness": 1,
+      "buttons": 8,
+      "fourColumns": true,
+      "joined": true,
+      "palette": "netrunner",
+      "statusMatchesPanel": true,
+      "theme": "light"
+    },
+    {
+      "brightness": 1,
+      "buttons": 8,
+      "fourColumns": true,
+      "joined": true,
+      "palette": "netrunner",
+      "statusMatchesPanel": true,
+      "theme": "dark"
+    }
+  ]
+}

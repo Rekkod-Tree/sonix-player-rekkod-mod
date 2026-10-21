@@ -1,23 +1,25 @@
 <!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Sonix · Две палитры, четыре независимых настройки</title>
+<title>Sonix · Атлас палитр</title>
 <link rel="stylesheet" href="preview.css"><script defer src="colors.js"></script><script defer src="preview.js"></script></head>
 <body><header><div class="eyebrow">SONIX / REKKOD MOD · ЦВЕТОВОЕ ПРЕВЬЮ</div>
-<h1>Два характера. Один интерфейс.</h1><p>Монохром и Контраст — в светлой и тёмной темах. Меняются цвета, геометрия остаётся общей.</p></header>
+<h1>Восемь характеров. Один плеер.</h1><p>Строгий монохром, цветной контраст, ретро LCD, терминалы и три направления киберпанка. Общая геометрия, ограниченная гамма.</p></header>
 <main><section class="controls" aria-label="Настройки сравнения">
-<div><label for="primary">Primary-цвет</label><select id="primary"><option value="gray">Серый</option><option value="blue" selected>Синий</option><option value="cover">Из обложки</option><option value="orange">Оранжевый</option><option value="green">Зелёный</option><option value="purple">Фиолетовый</option></select></div>
+<div><label for="primary">Primary-цвет</label><select id="primary"><option value="palette" selected>Из палитры</option><option value="gray">Серый</option><option value="blue">Синий</option><option value="cover">Из обложки</option><option value="orange">Оранжевый</option><option value="green">Зелёный</option><option value="purple">Фиолетовый</option></select></div>
 <div><label for="cover">Обложка для сравнения</label><select id="cover"><option value="teal">Бирюзовая</option><option value="amber">Янтарная</option><option value="rose">Малиновая</option></select></div>
+<div><label for="backlight">Подсветка ретро LCD</label><select id="backlight"><option value="olive">Оливковая</option><option value="amber">Янтарная</option><option value="ice">Ледяная</option><option value="white">Белая</option><option value="pink">Розовая</option></select></div>
 <label class="tint-control"><input id="tint" type="checkbox"><span>Окрашивать базовые цвета от обложки<small>Независимо от выбранного primary</small></span></label>
-<button id="strict" class="quiet">Строгий серый</button><button id="colorful" class="quiet">Яркий акцент</button>
+<label class="tint-control"><input id="monoArt" type="checkbox"><span>Монохромные обложки<small>Отдельный способ показа изображений</small></span></label>
 </section>
+<section class="palette-picker"><div class="picker-label">Сравниваемые палитры <small>Можно оставить одну или несколько</small></div><div id="palette-picks" role="group" aria-label="Сравниваемые палитры"></div></section>
 <nav id="pages" aria-label="Экран для сравнения"></nav>
-<div class="compare-label"><span>Палитра × тема · одна настройка primary для всех четырёх</span><span>Экран 480 × 800 · масштаб превью 55–65%</span></div>
-<section id="comparison" aria-label="Четыре варианта оформления"></section>
+<div class="compare-label"><span>Палитра × тема · общие настройки primary и окрашивания</span><span>Экран 480 × 800 · масштаб превью 55–65%</span></div>
+<section id="comparison" aria-label="Варианты оформления"></section>
 <section class="layers"><h2>Что за что отвечает</h2><div class="layer-grid">
 <article><b>01 · Палитра</b><p>Базовые цвета и правила: уровни поверхностей, насыщенность primary, сила окрашивания, контраст текста.</p></article>
 <article><b>02 · Тема</b><p>Светлая или тёмная ветка выбранной палитры. Проверяются отдельно, без простого инвертирования.</p></article>
-<article><b>03 · Primary</b><p>Цвет действий и выделений: вручную или из обложки. Серый доступен и в «Контрасте», цветной — в «Монохроме».</p></article>
+<article><b>03 · Primary</b><p>Цвет действий и выделений: вручную или из обложки. «Из палитры» берёт её рекомендуемый цвет; ручной выбор работает везде.</p></article>
 <article><b>04 · Окрашивание</b><p>Добавляет тон обложки в базовые поверхности по правилам палитры. Не меняет выбор primary.</p></article>
-</div><p class="note">Это цветовая проба, не запись с устройства. Демонстрационные обложки взяты из прежнего прототипа. Цвета округляются до RGB565; тон обложек задан заранее. Реальное извлечение цвета и перенос в прошивку здесь не выполняются.</p>
-<details><summary>Расчёт и ограничения</summary><p>OKLCH → sRGB → RGB565. Окрашивание использует hue обложки и ограниченную chroma: до 0,018 в «Монохроме», до 0,035 в «Контрасте». Primary рассчитывается отдельно; для надписей подбирается читаемая светлота. Красный цвет ошибки не зависит от обложки. На всех показанных экранах, включая плеер, действует выбранная тема — это предложение для сравнения, а не описание текущей прошивки.</p></details></section>
+</div><p class="note">Это цветовая проба, не запись с устройства. Демонстрационные обложки взяты из прежнего прототипа. Шторка повторяет сетку 4×2 из текущего quickpanel.c; состав кнопок демонстрационный. Цвета округляются до RGB565; тон обложек задан заранее. Реальное извлечение цвета и перенос в прошивку здесь не выполняются.</p>
+<details><summary>Расчёт и ограничения</summary><p>OKLCH → sRGB → RGB565. Окрашивание использует hue обложки и ограниченную правилами палитры chroma. Без окрашивания у LCD остаётся выбранная подсветка; при включении базовые поверхности получают тон обложки. Подсветка — параметр LCD, а не primary. Primary рассчитывается отдельно; для надписей подбирается читаемая светлота. Красный цвет ошибки не зависит от обложки. На всех показанных экранах, включая плеер, действует выбранная тема — это предложение для сравнения, а не описание текущей прошивки.</p></details><p class="note">Киберпанк: авторские цветовые интерпретации по мотивам <a href="https://www.cyberpunk.net/us/en/" target="_blank" rel="noreferrer">Cyberpunk 2077</a>, а не извлечённые токены игры. Без игровых изображений, логотипов и декоративных эффектов.</p></section>
 </main><footer>Сравнение цвета · без изменений звука, функций и настроек плеера</footer></body></html>
