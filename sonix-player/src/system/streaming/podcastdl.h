@@ -30,11 +30,14 @@ typedef enum {
 	PODCASTDL_CANCELLED,
 } podcastdl_state_t;
 
-// <card>/Podcast, or "" when there is no card.
-const char *podcastdl_root(void);
+// Copy <card>/Podcast into caller-owned storage. False and an empty output on
+// no card or insufficient space (when out/size allow it). No storage pin or
+// card epoch is acquired: callers still need admission for file mutations.
+bool podcastdl_root(char *out, size_t size);
 
 // Where `episode` of the podcast titled `feed_title` is saved. False when there
-// is no card. Says nothing about whether the file exists.
+// is no card or output space is insufficient; output is cleared on failure.
+// Says nothing about whether the file exists or storage admission.
 bool podcastdl_path(const podcast_episode_t *episode, const char *feed_title, char *out, size_t size);
 
 // Whether that file is already on the card.

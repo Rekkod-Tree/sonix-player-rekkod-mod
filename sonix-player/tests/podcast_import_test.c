@@ -131,8 +131,7 @@ int main(void) {
 	char tiny[4], base[100];
 	assert(!podcastimport_paths(fixture_root, "yandex", "1", "Show", "2", "Title", tiny, sizeof(tiny), base, sizeof(base)));
 
-	// Keep the ordinary writer queue deterministic; flush drains it synchronously.
-	writer_started = true;
+	// Use the real writer: flush waits for pending and in-flight checkpoints.
 	podcaststate_set_root(fixture_root);
 	podcaststate_note(a, 60, 3600, true);
 	podcaststate_flush();

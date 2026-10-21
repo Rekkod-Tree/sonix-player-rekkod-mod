@@ -10,14 +10,16 @@
 //
 // Principle 6, "a change is a toast with Undo": a light line near the bottom
 // of the screen -- above the mini player, above the player's controls when
-// the player is up -- saying what just happened, for SX_TOAST_MS (3.5 s; a
-// long sentence a little longer). With an undo callback it carries "Undo" on
+// the player is up -- saying what just happened, for SX_TOAST_MS (6 s).
+// With an undo callback it carries "Undo" on
 // the right and a 3 px bar under the text counting the time down; tapping
 // "Undo" calls back and takes the toast away.
 //
 // One instance on lv_layer_top(), built once; a new toast replaces the one up
 // (an undo not taken is simply dropped). A pull down of SX_TOAST_DISMISS_PX
-// puts it away early. It does not block the page -- a tap off it goes to the
+// puts it away early; so does a tap on its body. Holding pauses its timeout.
+// A replacement cannot consume the previous notification's unfinished touch.
+// It does not block the page -- a tap off it goes to the
 // page -- except the busy toast that may not be put away (sx_toast_busy).
 //
 // The older toasts (toast.h: success, error, plain, busy) and the notices

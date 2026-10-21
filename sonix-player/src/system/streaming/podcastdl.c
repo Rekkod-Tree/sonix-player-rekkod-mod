@@ -37,16 +37,23 @@ static long long bytes_total;
 static volatile bool cancel_asked;
 static http_stream_t *active_stream; // guarded by `lock`; NULL outside the body loop
 
-static char root[512];
-
-const char *podcastdl_root(void) {
+bool podcastdl_root(char *out, size_t size) {
+	if (!out || !size) {
+		return false;
+	}
+	out[0] = '\0';
+	// storage_sd_root's string is fixed at startup; availability can change.
+	// This is only a path snapshot, never storage admission or an epoch.
 	const char *sd = storage_sd_root();
 	if (!sd || !sd[0]) {
-		root[0] = '\0';
-	} else {
-		snprintf(root, sizeof(root), "%.480s/%s", sd, PODCASTDL_FOLDER);
+		return false;
 	}
-	return root;
+	int n = snprintf(out, size, "%s/%s", sd, PODCASTDL_FOLDER);
+	if (n < 0 || (size_t)n >= size) {
+		out[0] = '\0';
+		return false;
+	}
+	return true;
 }
 
 // The same mapping as podcastcache.c: the decoder picks its path from the
@@ -118,31 +125,41 @@ void podcastdl_safe_name(const char *title, const char *fallback, char *out, siz
 	}
 }
 
-static bool folder_of(const char *feed_title, char *out, size_t size) {
-	const char *base = podcastdl_root();
-	if (!base[0]) {
-		return false;
-	}
+static bool folder_of(const char *base, const char *feed_title, char *out, size_t size) {
 	char name[DL_NAME_MAX + 1];
 	podcastdl_safe_name(feed_title, "Podcast", name, sizeof(name));
 	int n = snprintf(out, size, "%s/%s", base, name);
-	return n > 0 && (size_t)n < size;
+	if (n < 0 || (size_t)n >= size) {
+		out[0] = '\0';
+		return false;
+	}
+	return true;
 }
 
-bool podcastdl_path(const podcast_episode_t *episode, const char *feed_title, char *out, size_t size) {
-	if (!episode || !out || size == 0) {
-		return false;
-	}
-	char folder[512];
-	if (!folder_of(feed_title && feed_title[0] ? feed_title : episode->feed_title, folder, sizeof(folder))) {
-		return false;
-	}
+static bool path_in_folder(const podcast_episode_t *episode, const char *folder, char *out, size_t size) {
 	char fallback[32];
 	snprintf(fallback, sizeof(fallback), "%lld", episode->id);
 	char name[DL_NAME_MAX + 1];
 	podcastdl_safe_name(episode->title, fallback, name, sizeof(name));
-	snprintf(out, size, "%s/%s.%s", folder, name, extension_for(episode->mime));
+	int n = snprintf(out, size, "%s/%s.%s", folder, name, extension_for(episode->mime));
+	if (n < 0 || (size_t)n >= size) {
+		out[0] = '\0';
+		return false;
+	}
 	return true;
+}
+
+bool podcastdl_path(const podcast_episode_t *episode, const char *feed_title, char *out, size_t size) {
+	if (out && size) {
+		out[0] = '\0';
+	}
+	if (!episode || !out || !size) {
+		return false;
+	}
+	char base[512], folder[512];
+	return podcastdl_root(base, sizeof(base)) &&
+		   folder_of(base, feed_title && feed_title[0] ? feed_title : episode->feed_title, folder, sizeof(folder)) &&
+		   path_in_folder(episode, folder, out, size);
 }
 
 bool podcastdl_exists(const podcast_episode_t *episode, const char *feed_title) {
@@ -309,9 +326,12 @@ static void *download_main(void *arg) {
 }
 
 bool podcastdl_owns(const char *path) {
-	const char *base = podcastdl_root();
+	char base[512];
+	if (!path || !podcastdl_root(base, sizeof(base))) {
+		return false;
+	}
 	size_t n = strlen(base);
-	return path && n > 0 && strncasecmp(path, base, n) == 0 && path[n] == '/';
+	return strncasecmp(path, base, n) == 0 && path[n] == '/';
 }
 
 bool podcastdl_start(const podcast_episode_t *episode, const char *feed_title, const char *feed_author,
@@ -335,12 +355,14 @@ bool podcastdl_start(const podcast_episode_t *episode, const char *feed_title, c
 	const char *title = feed_title && feed_title[0] ? feed_title : episode->feed_title;
 	snprintf(job->feed_title, sizeof(job->feed_title), "%s", title);
 	snprintf(job->feed_author, sizeof(job->feed_author), "%s", feed_author ? feed_author : "");
-	if (!folder_of(title, job->folder, sizeof(job->folder)) ||
-		!podcastdl_path(episode, title, job->path, sizeof(job->path))) {
+	char base[512];
+	if (!podcastdl_root(base, sizeof(base)) ||
+		!folder_of(base, title, job->folder, sizeof(job->folder)) ||
+		!path_in_folder(episode, job->folder, job->path, sizeof(job->path))) {
 		free(job);
 		return false;
 	}
-	mkdir(podcastdl_root(), 0755);
+	mkdir(base, 0755);
 	mkdir(job->folder, 0755);
 	struct stat st;
 	if (stat(job->folder, &st) != 0 || !S_ISDIR(st.st_mode)) {

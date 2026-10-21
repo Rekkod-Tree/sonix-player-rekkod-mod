@@ -49,6 +49,11 @@ static int bar_w;
 static lv_point_t press_at;
 static bool press_tracking;
 static bool held;
+static uint32_t generation;
+static uint32_t press_generation;
+static lv_obj_t *press_target;
+static lv_indev_t *press_indev;
+static bool undo_ready;
 static uint32_t deadline_ms;
 static uint32_t remaining_ms;
 
@@ -58,10 +63,44 @@ bool sx_toast_busy_showing(void) { return busy && sx_toast_showing(); }
 
 static void bar_exec_cb(void *obj, int32_t v) { lv_obj_set_width((lv_obj_t *)obj, v); }
 
+// A reused object must not inherit the previous notification's finger.
+static void invalidate_input(void) {
+	if (press_tracking && press_indev && lv_indev_get_state(press_indev) == LV_INDEV_STATE_PRESSED)
+		lv_indev_wait_release(press_indev);
+	generation++;
+	press_tracking = false;
+	undo_ready = false;
+	press_indev = NULL;
+	press_target = NULL;
+	held = false;
+}
+
+static bool owns_press(lv_event_t *e) { return press_tracking && press_generation == generation && press_target == lv_event_get_current_target_obj(e); }
+
 static void hold_cb(lv_event_t *e) {
-	if (busy || !sx_toast_showing())
+	if (!sx_toast_showing())
 		return;
 	lv_event_code_t code = lv_event_get_code(e);
+	if (code == LV_EVENT_PRESSED) {
+		press_indev = lv_indev_active();
+		if (!press_indev)
+			return;
+		lv_indev_get_point(press_indev, &press_at);
+		press_target = lv_event_get_current_target_obj(e);
+		press_generation = generation;
+		press_tracking = true;
+		undo_ready = false;
+	}
+	if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) {
+		if (!owns_press(e))
+			return;
+		if (press_target == undo_btn) {
+			undo_ready = code == LV_EVENT_RELEASED;
+			press_tracking = false;
+		}
+	}
+	if (busy)
+		return;
 	if (code == LV_EVENT_PRESSED || code == LV_EVENT_FOCUSED) {
 		if (held)
 			return;
@@ -92,6 +131,7 @@ void sx_toast_dismiss(void) {
 	if (!toast) {
 		return;
 	}
+	invalidate_input();
 	lv_obj_set_hidden(toast, true);
 	lv_obj_set_hidden(blocker, true);
 	lv_timer_pause(end_timer);
@@ -115,6 +155,9 @@ static void end_timer_cb(lv_timer_t *t) {
 
 static void undo_clicked_cb(lv_event_t *e) {
 	(void)e;
+	if (!undo_ready || press_generation != generation || press_target != undo_btn || !sx_toast_showing())
+		return;
+	undo_ready = false;
 	void (*cb)(void *) = undo_cb;
 	void *user = undo_user;
 	sx_toast_dismiss();
@@ -132,16 +175,13 @@ static void toast_event_cb(lv_event_t *e) {
 	}
 	lv_point_t p;
 	lv_indev_get_point(indev, &p);
-	if (code == LV_EVENT_PRESSED) {
-		press_at = p;
-		press_tracking = true;
+	if (code == LV_EVENT_PRESSED)
 		return;
-	}
 	if (code == LV_EVENT_PRESS_LOST) {
 		press_tracking = false;
 		return;
 	}
-	if (code != LV_EVENT_RELEASED || !press_tracking) {
+	if (code != LV_EVENT_RELEASED || !owns_press(e)) {
 		return;
 	}
 	press_tracking = false;
@@ -268,9 +308,9 @@ void sx_toast_follow_slot(void) {
 	}
 }
 
-static void show(const lv_image_dsc_t *glyph, lv_color_t colour, const char *text, void (*undo)(void *),
-				 void *user, bool is_busy, bool dismissable) {
+static void show(const lv_image_dsc_t *glyph, lv_color_t colour, const char *text, void (*undo)(void *), void *user, bool is_busy, bool dismissable) {
 	sx_toast_init();
+	invalidate_input();
 
 	// A toast up is replaced: its undo, if any, is not offered any more.
 	lv_anim_delete(bar_fill, bar_exec_cb);
@@ -292,8 +332,7 @@ static void show(const lv_image_dsc_t *glyph, lv_color_t colour, const char *tex
 		lv_image_set_scale(glyph_img, scale);
 		// The object keeps the bitmap's own size at any scale; shrink it to the
 		// drawn size so the text starts where the glyph ends.
-		lv_obj_set_size(glyph_img, big > GLYPH_MAX ? GLYPH_MAX : glyph->header.w,
-						big > GLYPH_MAX ? GLYPH_MAX : glyph->header.h);
+		lv_obj_set_size(glyph_img, big > GLYPH_MAX ? GLYPH_MAX : glyph->header.w, big > GLYPH_MAX ? GLYPH_MAX : glyph->header.h);
 		lv_image_set_inner_align(glyph_img, LV_IMAGE_ALIGN_CENTER);
 		lv_obj_set_hidden(glyph_img, false);
 	} else {
@@ -357,17 +396,11 @@ static void show(const lv_image_dsc_t *glyph, lv_color_t colour, const char *tex
 
 void sx_toast(const char *text) { show(NULL, lv_color_black(), text, NULL, NULL, false, false); }
 
-void sx_toast_undo(const char *text, void (*undo)(void *user), void *user) {
-	show(NULL, lv_color_black(), text, undo, user, false, false);
-}
+void sx_toast_undo(const char *text, void (*undo)(void *user), void *user) { show(NULL, lv_color_black(), text, undo, user, false, false); }
 
-void sx_toast_glyph(const lv_image_dsc_t *glyph, lv_color_t colour, const char *text) {
-	show(glyph, colour, text, NULL, NULL, false, false);
-}
+void sx_toast_glyph(const lv_image_dsc_t *glyph, lv_color_t colour, const char *text) { show(glyph, colour, text, NULL, NULL, false, false); }
 
-void sx_toast_busy(const char *text, bool dismissable) {
-	show(NULL, lv_color_black(), text, NULL, NULL, true, dismissable);
-}
+void sx_toast_busy(const char *text, bool dismissable) { show(NULL, lv_color_black(), text, NULL, NULL, true, dismissable); }
 
 void sx_toast_busy_end(void) {
 	if (busy) {

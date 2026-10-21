@@ -282,7 +282,8 @@ static int show_cmp(const void *a, const void *b) {
 }
 
 int podcastcard_shows(podcastcard_show_t *out, int max) {
-	const char *root = podcastdl_root();
+	char root[512];
+	podcastdl_root(root, sizeof(root));
 	if (!out || max <= 0 || !root[0]) {
 		return 0;
 	}
@@ -334,14 +335,18 @@ const char *podcastcard_show_name(const podcastcard_show_t *show) {
 }
 
 int podcastcard_count_for_title(const char *title) {
-	const char *root = podcastdl_root();
+	char root[512];
+	podcastdl_root(root, sizeof(root));
 	if (!title || !title[0] || !root[0]) {
 		return 0;
 	}
 	char name[256];
 	podcastdl_safe_name(title, "Podcast", name, sizeof(name));
 	char folder[600];
-	snprintf(folder, sizeof(folder), "%s/%s", root, name);
+	int written = snprintf(folder, sizeof(folder), "%s/%s", root, name);
+	if (written < 0 || (size_t)written >= sizeof(folder)) {
+		return 0;
+	}
 	DIR *dir = opendir(folder);
 	if (!dir) {
 		return 0;
@@ -1444,7 +1449,8 @@ static void download_cb(void *user) {
 }
 
 static void remove_folder_if_empty(const char *folder) {
-	if (strcmp(folder, podcastdl_root()) == 0) {
+	char root[512];
+	if (!podcastdl_root(root, sizeof(root)) || strcmp(folder, root) == 0) {
 		return; // the Podcast folder itself stays
 	}
 	DIR *dir = opendir(folder);

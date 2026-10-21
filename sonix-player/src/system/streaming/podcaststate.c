@@ -399,7 +399,8 @@ static void file_title(const char *path, char *out, size_t size) {
 // The parent folder's name: the podcast, for a file of the Podcast folder.
 static void folder_name(const char *path, char *out, size_t size) {
 	out[0] = '\0';
-	const char *root = podcastdl_root();
+	char root[512];
+	podcastdl_root(root, sizeof(root));
 	size_t n = strlen(root);
 	if (!n || strncmp(path, root, n) != 0 || path[n] != '/') {
 		return;

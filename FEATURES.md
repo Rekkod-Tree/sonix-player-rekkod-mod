@@ -1,5 +1,12 @@
 ﻿# Features
 
+## Point fixes after alpha22
+
+- Podcast paths use caller-owned copies and reject truncation; formats and epoch checks remain compatible.
+- Toast touches belong to one notification; replacement cannot dismiss or undo the next one.
+- Independent sanitizer/pointer regressions, integration host, target LTO/ABI and bounded R1 app checks passed; full-image acceptance remains separate.
+- See `POINT_FIXES_2026-10-21.md` for verification scope and the separate outstanding downloader storage defect.
+
 ## Alpha22 reliability candidate
 
 - Card-import generations and source-file checks revoke late SD mutations.

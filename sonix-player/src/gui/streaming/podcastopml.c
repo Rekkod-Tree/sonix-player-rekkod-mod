@@ -678,7 +678,8 @@ static void feeds_unloaded_cb(lv_event_t *e) {
 static bool export_busy;
 
 static void export_write(void) {
-	const char *root = podcastdl_root();
+	char root[512];
+	podcastdl_root(root, sizeof(root));
 	if (!root[0]) {
 		toast_error(tr("sd_card_missing"));
 		return;
@@ -779,7 +780,8 @@ void podcastopml_export(void) {
 	if (export_busy) {
 		return;
 	}
-	if (podcastdl_root()[0] && podcastsubs_count() > 0 && podcast_configured() && network_up()) {
+	char root[512];
+	if (podcastdl_root(root, sizeof(root)) && podcastsubs_count() > 0 && podcast_configured() && network_up()) {
 		long long *ids = calloc(PODCASTSUBS_MAX + 1, sizeof(*ids));
 		if (ids && podcastsubs_missing_urls(ids, PODCASTSUBS_MAX) > 0) {
 			pthread_t thread;
