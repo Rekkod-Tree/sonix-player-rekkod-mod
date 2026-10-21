@@ -20,6 +20,7 @@
 #define DL_NAME_MAX 150 // bytes of a file or folder name, before the extension
 
 typedef struct {
+	unsigned state_epoch;
 	podcast_episode_t episode;
 	char feed_title[PODCAST_TITLE_MAX];
 	char feed_author[PODCAST_AUTHOR_MAX];
@@ -296,7 +297,7 @@ static void *download_main(void *arg) {
 			utime(job->path, &times);
 		}
 		write_tags(job);
-		podcaststate_downloaded(job->episode.id, job->path);
+		podcaststate_downloaded(job->episode.id, job->path, job->state_epoch);
 		fetch_cover(job->folder, job->image);
 	}
 	sync();
@@ -329,6 +330,7 @@ bool podcastdl_start(const podcast_episode_t *episode, const char *feed_title, c
 	if (!job) {
 		return false;
 	}
+	job->state_epoch = podcaststate_card_epoch();
 	job->episode = *episode;
 	const char *title = feed_title && feed_title[0] ? feed_title : episode->feed_title;
 	snprintf(job->feed_title, sizeof(job->feed_title), "%s", title);

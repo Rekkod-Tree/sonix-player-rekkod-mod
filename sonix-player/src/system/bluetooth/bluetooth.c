@@ -1640,7 +1640,7 @@ static bool ensure_bluealsa(void) {
 static void read_local_name(void) {
 	// What the user chose wins over the firmware's file, which is on a
 	// read-only filesystem and is the factory name.
-	const char *chosen = config_get("wireless", "bt_name", "");
+	const char *chosen = config_get_copy("wireless", "bt_name", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE);
 	if (chosen && chosen[0]) {
 		pthread_mutex_lock(&lock);
 		snprintf(g_local_name, sizeof(g_local_name), "%s", chosen);
@@ -2183,7 +2183,7 @@ static void remember_last_device(const char *mac) {
 	if (!mac || !mac[0]) {
 		return;
 	}
-	const char *known = config_get("wireless", BT_LAST_DEVICE_KEY, "");
+	const char *known = config_get_copy("wireless", BT_LAST_DEVICE_KEY, "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE);
 	if (strcasecmp(known, mac) == 0) {
 		return; // already what it says: no write, no card wear
 	}
@@ -2199,7 +2199,7 @@ static void forget_last_device(const char *mac) {
 	if (!mac || !mac[0]) {
 		return;
 	}
-	if (strcasecmp(config_get("wireless", BT_LAST_DEVICE_KEY, ""), mac) != 0) {
+	if (strcasecmp(config_get_copy("wireless", BT_LAST_DEVICE_KEY, "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE), mac) != 0) {
 		return;
 	}
 	config_set("wireless", BT_LAST_DEVICE_KEY, "");
@@ -2553,7 +2553,7 @@ static bool reconnect_should_stop(const char *mac) {
 
 static void reconnect_last(void) {
 	char mac[BT_MAC_MAX];
-	snprintf(mac, sizeof(mac), "%s", config_get("wireless", BT_LAST_DEVICE_KEY, ""));
+	snprintf(mac, sizeof(mac), "%s", config_get_copy("wireless", BT_LAST_DEVICE_KEY, "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE));
 	if (!mac[0]) {
 		// Said, not passed over in silence: "it does not reconnect by itself"
 		// and "there is nothing written down to reconnect to" look identical
@@ -2969,14 +2969,14 @@ static void device_key(const char *prefix, const char *mac, char *out, size_t si
 static void codec_choice_get(const char *mac, char *out, size_t size) {
 	char key[40];
 	device_key("bt_codec_", mac, key, sizeof(key));
-	snprintf(out, size, "%s", config_get("wireless", key, ""));
+	snprintf(out, size, "%s", config_get_copy("wireless", key, "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE));
 }
 
 // "" forgets the choice.
 static void codec_choice_set(const char *mac, const char *codec) {
 	char key[40];
 	device_key("bt_codec_", mac, key, sizeof(key));
-	if (strcmp(config_get("wireless", key, ""), codec) == 0) {
+	if (strcmp(config_get_copy("wireless", key, "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE), codec) == 0) {
 		return; // already what it says: no write, no wear
 	}
 	config_set("wireless", key, codec);
@@ -3008,9 +3008,18 @@ static void codec_choice_set(const char *mac, const char *codec) {
 
 static bool ldac_quality_known(const char *mode) { return strcmp(mode, "abr") == 0 || strcmp(mode, "high") == 0 || strcmp(mode, "standard") == 0 || strcmp(mode, "mobile") == 0; }
 
+// Export immutable names, never a pointer into a caller's config snapshot.
+static const char *ldac_quality_name(const char *mode) {
+	static const char *const names[] = {"abr", "high", "standard", "mobile"};
+	for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++)
+		if (!strcmp(mode, names[i]))
+			return names[i];
+	return "abr";
+}
+
 static const char *ldac_quality_default(void) {
-	const char *mode = config_get("wireless", "bt_ldac_quality", "abr");
-	return ldac_quality_known(mode) ? mode : "abr";
+	const char *mode = config_get_copy("wireless", "bt_ldac_quality", "abr", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE);
+	return ldac_quality_name(mode);
 }
 
 // The headphones the running daemon is for: those connected, else the last.
@@ -3019,19 +3028,19 @@ static void ldac_headset(char *out, size_t size) {
 	copy_field(out, size, g_a2dp_connected ? g_a2dp_mac : "", sizeof(g_a2dp_mac));
 	pthread_mutex_unlock(&lock);
 	if (!out[0]) {
-		snprintf(out, size, "%s", config_get("wireless", BT_LAST_DEVICE_KEY, ""));
+		snprintf(out, size, "%s", config_get_copy("wireless", BT_LAST_DEVICE_KEY, "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE));
 	}
 }
 
 // Their own rate if one was chosen for them, the default otherwise. The
-// pointer is into the settings or a literal, like bluetooth_ldac_quality()'s.
+// pointer is an immutable canonical mode name.
 static const char *ldac_quality_for(const char *mac) {
 	if (mac && mac[0]) {
 		char key[40];
 		device_key("bt_ldac_", mac, key, sizeof(key));
-		const char *mode = config_get("wireless", key, "");
+		const char *mode = config_get_copy("wireless", key, "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE);
 		if (ldac_quality_known(mode)) {
-			return mode;
+			return ldac_quality_name(mode);
 		}
 	}
 	return ldac_quality_default();
@@ -3040,7 +3049,7 @@ static const char *ldac_quality_for(const char *mac) {
 static void ldac_choice_set(const char *mac, const char *mode) {
 	char key[40];
 	device_key("bt_ldac_", mac, key, sizeof(key));
-	if (strcmp(config_get("wireless", key, ""), mode) == 0) {
+	if (strcmp(config_get_copy("wireless", key, "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE), mode) == 0) {
 		return;
 	}
 	config_set("wireless", key, mode);
@@ -4710,7 +4719,7 @@ static void restart_for_option(const char *why) {
 	post_job(&job);
 }
 
-bool bluetooth_aac_vbr(void) { return strcmp(config_get("wireless", "bt_aac_mode", "vbr"), "cbr") != 0; }
+bool bluetooth_aac_vbr(void) { return strcmp(config_get_copy("wireless", "bt_aac_mode", "vbr", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE), "cbr") != 0; }
 
 void bluetooth_set_aac_vbr(bool on) {
 	if (on == bluetooth_aac_vbr()) {
@@ -4733,7 +4742,7 @@ static const char *const RATE_MODE_KEYS[] = {"auto", "44100", "follow", "96000"}
 #define RATE_MODE_DEFAULT "follow"
 
 bt_rate_mode_t bluetooth_rate_mode(void) {
-	const char *value = config_get("wireless", "bt_sample_rate", RATE_MODE_DEFAULT);
+	const char *value = config_get_copy("wireless", "bt_sample_rate", RATE_MODE_DEFAULT, (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE);
 	for (int i = 0; i < (int)(sizeof(RATE_MODE_KEYS) / sizeof(RATE_MODE_KEYS[0])); i++) {
 		if (strcmp(value, RATE_MODE_KEYS[i]) == 0) {
 			return (bt_rate_mode_t)i;

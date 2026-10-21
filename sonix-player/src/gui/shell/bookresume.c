@@ -28,7 +28,7 @@ static void selected_book(char *book, size_t size) {
 	for (int i = 0; i < 5; i++) {
 		char key[32];
 		snprintf(key, sizeof(key), i ? "resume_book_%d" : "resume_book", i);
-		const char *part = config_get("home", key, "");
+		const char *part = config_get_copy("home", key, "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE);
 		size_t length = strlen(part);
 		if (used + length >= size) {
 			book[0] = 0;
@@ -88,7 +88,7 @@ void bookresume_note(const device_state_t *state) {
 	main_menu_refresh();
 }
 void bookresume_description(char *text, size_t size) {
-	const char *title = config_get("home", "resume_title", "");
+	const char *title = config_get_copy("home", "resume_title", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE);
 	snprintf(text, size, "%s", title[0] ? title : tr("home_choose_book"));
 }
 static void play(const char *book, bool confirmed) {
@@ -154,7 +154,7 @@ static void settings_action(void *unused) {
 }
 void bookresume_menu(void) {
 	selected_book(menu_book, sizeof(menu_book));
-	snprintf(menu_title, sizeof(menu_title), "%s", config_get("home", "resume_title", ""));
+	snprintf(menu_title, sizeof(menu_title), "%s", config_get_copy("home", "resume_title", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE));
 	sx_sheet_item_t items[5];
 	int n = 0;
 	if (menu_book[0])

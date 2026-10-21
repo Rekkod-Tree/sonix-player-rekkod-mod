@@ -56,7 +56,7 @@ static void save_state(const char *output) {
 static bool load_state(const char *output) {
 	char key[KEY_MAX];
 	make_key(key, sizeof(key), "po_", output);
-	const char *value = config_get("eq", key, "");
+	const char *value = config_get_copy("eq", key, "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE);
 	if (strlen(value) < 4 || value[3] != ':') {
 		return false;
 	}
@@ -84,7 +84,7 @@ static bool load_state(const char *output) {
 	// the length of one card read would be heard.
 	make_key(key, sizeof(key), "pn_", output);
 	char name[128];
-	snprintf(name, sizeof(name), "%s", config_get("eq", key, ""));
+	snprintf(name, sizeof(name), "%s", config_get_copy("eq", key, "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE));
 	if (name[0] && strcmp(name, peq_current_preset()) != 0) {
 		if (!peq_preset_load(name, NULL)) {
 			// Deleted or renamed on the card since. The bands stay as they are,
@@ -125,7 +125,7 @@ void eqprofile_output_changed(const char *output, const char *mac) {
 
 	if (!live_known) {
 		// First look since start-up: whose state is live is on file.
-		snprintf(live, sizeof(live), "%s", config_get("eq", "po_live", ""));
+		snprintf(live, sizeof(live), "%s", config_get_copy("eq", "po_live", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE));
 		live_known = true;
 	}
 	if (strcmp(now, live) == 0) {

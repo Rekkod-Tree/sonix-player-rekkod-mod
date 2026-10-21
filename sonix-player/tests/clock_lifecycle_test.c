@@ -1,3 +1,4 @@
+#include "src/system/core/config.h"
 // Isolated non-HOST policy fixture. Every clock/RTC/network/process operation
 // is intercepted; tzset only affects this test process's conversion rules.
 // Build with -I. -pthread and src/system/core/json.c src/system/device/tzrules.c.
@@ -147,11 +148,15 @@ bool config_save(void) {
 	saves++;
 	return true;
 }
-const char *config_get(const char *s, const char *k, const char *fallback) {
+const char *stub_config_get(const char *s, const char *k, const char *fallback) {
 	(void)s;
 	(void)k;
 	return fallback;
 }
+const char *config_get_copy(const char *section, const char *key, const char *fallback, char *out, size_t size) {
+ const char *v=stub_config_get(section,key,fallback); if(v && size) snprintf(out,size,"%s",v); return v ? out : NULL;
+}
+
 long config_get_int(const char *s, const char *k, long fallback) {
 	(void)s;
 	(void)k;

@@ -175,6 +175,15 @@ void audiobookdb_touch(const char *path);
 void audiobookdb_mark_finished(const char *path);
 bool audiobookdb_is_finished(const char *path);
 
+// Completed chapter boundaries survive rescans, independently of resume position.
+// start_ms is -1 for an entire folder-book part, otherwise its chapter start.
+void audiobookdb_queue_chapter_done(const char *book, const char *file, long long start_ms);
+typedef bool (*audiobook_chapter_done_cb)(const char *file, long long start_ms, void *user);
+// Flushes pending writes first. Callback runs under db_lock and must not reenter it.
+void audiobookdb_chapter_history(const char *book, audiobook_chapter_done_cb cb, void *user);
+// Changes only when the backing database is opened or closed, not on rescan.
+unsigned audiobookdb_card_epoch(void);
+
 // ---------------------------------------------------------------------------
 // Where the listener got to
 // ---------------------------------------------------------------------------

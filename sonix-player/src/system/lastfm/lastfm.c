@@ -146,7 +146,7 @@ static bool online(void) {
 // the device, there with or without a card.
 static void build_paths(void) {
 	char dir[400] = "/tmp";
-	const char *cfg = config_path();
+	const char *cfg = config_path_copy((char[512]){0}, 512);
 	if (cfg && cfg[0]) {
 		const char *slash = strrchr(cfg, '/');
 		if (slash == cfg) {

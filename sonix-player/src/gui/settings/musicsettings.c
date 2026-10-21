@@ -1077,8 +1077,13 @@ static void eq_enable_cb(lv_event_t *e) {
 static void eq_slider_cb(lv_event_t *e) {
 	int band = (int)(intptr_t)lv_event_get_user_data(e);
 	if (band >= 0 && band < EQ_BANDS && eq_sliders[band]) {
-		eq_set_band(band, (int)lv_slider_get_value(eq_sliders[band]));
+		eq_adjust_band(band, (int)lv_slider_get_value(eq_sliders[band]));
 	}
+}
+
+static void eq_released_cb(lv_event_t *e) {
+	(void)e;
+	config_save();
 }
 
 // "31" ... "16k": the label under each slider.
@@ -1175,6 +1180,8 @@ static void build_eq_page(gui_config_t *cfg) {
 		// A 6 px trough is no touch target; each column's full width is.
 		lv_obj_set_ext_click_area(slider, 16);
 		lv_obj_add_event_cb(slider, eq_slider_cb, LV_EVENT_VALUE_CHANGED, (void *)(intptr_t)i);
+		lv_obj_add_event_cb(slider, eq_released_cb, LV_EVENT_RELEASED, NULL);
+		lv_obj_add_event_cb(slider, eq_released_cb, LV_EVENT_PRESS_LOST, NULL);
 
 		eq_sliders[i] = slider;
 

@@ -190,7 +190,7 @@ static void recent_load(void) {
 	for (int i = 0; i < RECENT_MAX; i++) {
 		char key[32], query[sizeof(recent[0])];
 		snprintf(key, sizeof(key), "search_recent_%d", i);
-		const char *q = config_get("library", key, "");
+		const char *q = config_get_copy("library", key, "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE);
 		query_copy(query, sizeof(query), q);
 		if (!query[0])
 			continue;

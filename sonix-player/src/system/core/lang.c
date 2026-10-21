@@ -370,7 +370,7 @@ void lang_init(const char *dir) {
 	// is the one language whoever meets the welcome screen has some chance of
 	// reading whatever theirs is, and the first thing that screen asks is which
 	// language to continue in.
-	const char *chosen = config_get("ui", "language", NULL);
+	const char *chosen = config_get_copy("ui", "language", NULL, (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE);
 	snprintf(current, sizeof(current), "%s", chosen ? chosen : LANG_FIRST_BOOT);
 
 	char path[512];

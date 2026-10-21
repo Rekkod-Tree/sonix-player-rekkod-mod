@@ -1,3 +1,4 @@
+#include "src/system/core/config.h"
 // Read-only metadata contract probe for the two user-supplied Yandex examples.
 // Uses the normal config/session reader, HTTP transport and complete parser.
 // Does not call api(): its automatic token refresh can write the session.
@@ -135,7 +136,7 @@ int main(int argc, char **argv) {
 		fclose(report);
 		return 1;
 	}
-	const char *base = config_get("yandex", "base_url", YANDEX_API_DEFAULT);
+	const char *base = config_get_copy("yandex", "base_url", YANDEX_API_DEFAULT, (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE);
 	// Fixed metadata requests only, never another host or an audio endpoint.
 	if (strcmp(base, YANDEX_API_DEFAULT) != 0) {
 		fputs("metadata nonstandard_endpoint\n", report);

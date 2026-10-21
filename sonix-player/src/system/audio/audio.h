@@ -175,6 +175,10 @@ int audio_get_dsd_multiple(void);
 
 void audio_seek(double seconds);
 
+// Unfloored engine progress, never the UI scrub preview. False while a play
+// or seek has not produced its first PCM block; serial changes on either.
+bool audio_get_listening_progress(double *current, double *total, unsigned *serial);
+
 // Playback speed. 1.0 is normal; anything else goes through a time stretcher,
 // so the pitch does not move -- see speed.h. Only the 16-bit path honours it,
 // which is every audiobook and every lossy track; a hi-res FLAC ignores it.

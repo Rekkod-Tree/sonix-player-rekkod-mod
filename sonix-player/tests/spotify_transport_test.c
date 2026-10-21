@@ -1,3 +1,4 @@
+#include "src/system/core/config.h"
 // cc -O2 -std=gnu11 -ffunction-sections -fdata-sections -I. -I./lvgl
 // -DLV_CONF_INCLUDE_SIMPLE=1 tests/spotify_transport_test.c -pthread
 // -Wl,--gc-sections -o /tmp/spotify_transport_test
@@ -10,7 +11,11 @@
 #include "src/system/streaming/spotify.c"
 
 static char config_file[512];
-const char *config_path(void) { return config_file; }
+const char *stub_config_path(void) { return config_file; }
+const char *config_path_copy(char *out, size_t size) {
+ const char *v=stub_config_path(); if(v && size) snprintf(out,size,"%s",v); return v ? out : NULL;
+}
+
 static char *old_response;
 static unsigned old_ticket;
 static void *old_request(void *unused) {

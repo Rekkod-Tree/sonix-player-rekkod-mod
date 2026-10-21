@@ -4675,7 +4675,7 @@ static void set_scan_folder(const char *path) {
 // ---------------------------------------------------------------------------
 
 static void lines_path(const char *file, char *out, size_t size) {
-	const char *cfg = config_path();
+	const char *cfg = config_path_copy((char[512]){0}, 512);
 	const char *slash = cfg ? strrchr(cfg, '/') : NULL;
 	if (slash) {
 		snprintf(out, size, "%.*s/%s", (int)(slash - cfg), cfg, file);
@@ -5942,7 +5942,7 @@ char **library_scan_folders(int *count) {
 	}
 
 	int capacity = 0;
-	const char *p = config_get("library", "scan_folders", "");
+	const char *p = config_get_copy("library", "scan_folders", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE);
 	while (p && *p) {
 		const char *end = strchr(p, '/');
 		size_t len = end ? (size_t)(end - p) : strlen(p);
@@ -5962,7 +5962,7 @@ void library_scan_folders_set(const char *const *names, int count) {
 	if (!lines_write(SCAN_FOLDERS_FILE, names, count)) {
 		return;
 	}
-	if (config_get("library", "scan_folders", "")[0]) {
+	if (config_get_copy("library", "scan_folders", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE)[0]) {
 		config_set("library", "scan_folders", "");
 		config_save();
 	}
@@ -7972,7 +7972,7 @@ bool library_organize_check(void) {
 
 bool library_detect_changes(void) { return config_get_bool("library", "detect_changes", false); }
 
-bool library_detect_changes_chosen(void) { return config_get("library", "detect_changes", NULL) != NULL; }
+bool library_detect_changes_chosen(void) { return config_get_copy("library", "detect_changes", NULL, (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE) != NULL; }
 
 void library_set_detect_changes(bool on) {
 	config_set_bool("library", "detect_changes", on);

@@ -59,7 +59,7 @@ static void load(void) {
 	if (loaded)
 		return;
 	loaded = true;
-	const char *saved = config_get("home", "tiles", NULL);
+	const char *saved = config_get_copy("home", "tiles", NULL, (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE);
 	if (!saved) {
 		defaults();
 		return;

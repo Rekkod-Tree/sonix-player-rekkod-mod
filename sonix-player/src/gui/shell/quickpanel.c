@@ -708,8 +708,8 @@ static void order_load(void) {
 	// and what 1.2.5 had in front besides (gain, line out, SonixLink) with the
 	// parametric EQ behind the handle, so nothing that was a tap away goes
 	// further. The rest wait among the unused ones.
-	const char *saved_order = config_get("quickpanel", "order", "");
-	const char *saved_hidden = config_get("quickpanel", "hidden", "");
+	const char *saved_order = config_get_copy("quickpanel", "order", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE);
+	const char *saved_hidden = config_get_copy("quickpanel", "hidden", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE);
 	if ((!saved_order || !saved_order[0]) && (!saved_hidden || !saved_hidden[0])) {
 		static const uint8_t FRESH[] = {
 			QP_BTN_WIFI, QP_BTN_BLUETOOTH, QP_BTN_SLEEP, QP_BTN_AIRPLAY, QP_BTN_MSEB, QP_BTN_EQ, QP_BTN_VOLUME_LIMIT,
@@ -741,14 +741,12 @@ static void order_load(void) {
 	// Long enough for a saved grid of empty places plus every button the file
 	// never mentioned, which is the worst a hand-edited file can produce.
 	uint8_t line[QP_SLOT_COUNT + QP_BTN_COUNT];
-	uint8_t line_n = parse_list(config_get("quickpanel", "order", ""), line, QP_LIST_SPLIT, placed);
+	uint8_t line_n = parse_list(config_get_copy("quickpanel", "order", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE), line, QP_LIST_SPLIT, placed);
 	if (saved_version >= 4) {
-		line_n += parse_list(config_get("quickpanel", "order_more", ""), line + line_n,
-							 (uint8_t)(QP_SLOT_COUNT - line_n), placed);
+		line_n += parse_list(config_get_copy("quickpanel", "order_more", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE), line + line_n, (uint8_t)(QP_SLOT_COUNT - line_n), placed);
 	}
-	hidden_n = parse_list(config_get("quickpanel", "hidden", ""), hidden, QP_BTN_COUNT, placed);
-	hidden_n += parse_list(config_get("quickpanel", "hidden_more", ""), hidden + hidden_n,
-						   (uint8_t)(QP_BTN_COUNT - hidden_n), placed);
+	hidden_n = parse_list(config_get_copy("quickpanel", "hidden", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE), hidden, QP_BTN_COUNT, placed);
+	hidden_n += parse_list(config_get_copy("quickpanel", "hidden_more", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE), hidden + hidden_n, (uint8_t)(QP_BTN_COUNT - hidden_n), placed);
 
 	// Anything the file did not mention: a fresh install, or a button that did
 	// not exist when it was written. It goes into the panel, because a control

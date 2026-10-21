@@ -267,7 +267,7 @@ static bool load(const char *path) {
 }
 
 void streamkeys_init(void) {
-	const char *configured = config_get("streaming", "keys_file", NULL);
+	const char *configured = config_get_copy("streaming", "keys_file", NULL, (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE);
 	const char *path = NULL;
 	if (configured && configured[0]) {
 		path = load(configured) ? configured : NULL;

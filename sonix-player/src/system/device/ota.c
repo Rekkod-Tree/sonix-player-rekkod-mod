@@ -334,7 +334,7 @@ bool ota_check_start(void) {
 
 	const char *r = sysinfo_ota_repo();
 	snprintf(repo, sizeof(repo), "%s", r[0] ? r : DEFAULT_REPO);
-	const char *s = firmware_update_stem();
+	const char *s = firmware_update_stem((char[128]){0}, 128);
 	snprintf(stem, sizeof(stem), "%s", s ? s : "");
 
 	pthread_t thread;

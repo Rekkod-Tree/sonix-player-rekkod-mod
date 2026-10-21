@@ -515,6 +515,7 @@ void device_state_note_storage_gone(void) {
 	device_state_get(&state);
 	// The databases on the card close right after this.
 	flush_book_position(&state);
+	audiobook_track_changed(NULL);
 	// A second in is not a position worth coming back to, and a live stream has
 	// none at all.
 	if (state.live || !state.current_file[0] || state.progress_current_secs <= 1.0) {
@@ -1771,7 +1772,15 @@ bool device_state_prev(char *out_path, size_t out_size) {
 	return true;
 }
 
-bool device_state_take_completion(void) { return audio_take_completion(); }
+bool device_state_take_completion(void) {
+	bool done = audio_take_completion();
+	if (done) {
+		unsigned serial;
+		audio_get_listening_progress(NULL, NULL, &serial);
+		audiobook_listen_end(serial);
+	}
+	return done;
+}
 
 audio_status_t device_state_toggle_play_pause(void) {
 	// A live stream cannot be paused: there is no position to come back to,
@@ -1924,6 +1933,7 @@ void device_state_scrub_commit(void) {
 }
 
 void device_state_seek(double seconds) {
+	audiobook_listen_seek();
 	// A seek from anywhere else -- the slider, the queue -- ends a scrub that
 	// was still open, or the interface would go on drawing a thumb that no
 	// longer means anything.

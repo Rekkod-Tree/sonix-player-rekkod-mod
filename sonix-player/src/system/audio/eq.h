@@ -22,6 +22,8 @@ void eq_init(void);
 void eq_set_enabled(bool enabled); // saved to config
 bool eq_get_enabled(void);
 
+// Dragging updates DSP and RAM immediately; release commits config once.
+void eq_adjust_band(int band, int gain_db);
 void eq_set_band(int band, int gain_db); // clamped, saved to config
 int eq_get_band(int band);
 

@@ -31,11 +31,15 @@ bool audiobookdb_book_info(const char *path, char *title, size_t size, char *aut
 	snprintf(title, size, "%s", "A book actually playing");
 	return true;
 }
-const char *config_get(const char *section, const char *key, const char *fallback) {
+const char *stub_config_get(const char *section, const char *key, const char *fallback) {
 	assert(!strcmp(section, "home"));
 	for (int i = 0; i < value_count; i++) if (!strcmp(values[i].key, key)) return values[i].value;
 	return fallback;
 }
+const char *config_get_copy(const char *section, const char *key, const char *fallback, char *out, size_t size) {
+ const char *v=stub_config_get(section,key,fallback); if(v && size) snprintf(out,size,"%s",v); return v ? out : NULL;
+}
+
 void config_set(const char *section, const char *key, const char *value) {
 	assert(!strcmp(section, "home") && strlen(value) < 128);
 	int i;
@@ -53,7 +57,7 @@ static void expect_selected(const char *expected) {
 	for (int i = 0; i < 5; i++) {
 		char key[32];
 		snprintf(key, sizeof(key), i ? "resume_book_%d" : "resume_book", i);
-		const char *part = config_get("home", key, "");
+		const char *part = config_get_copy("home", key, "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE);
 		assert(mbstowcs(NULL, part, 0) != (size_t)-1);
 		strcat(combined, part);
 	}

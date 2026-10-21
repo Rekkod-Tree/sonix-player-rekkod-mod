@@ -202,7 +202,7 @@ const char *tidal_expected_mime(void) {
 // place where things that survive a reboot live.
 static void session_path(char *out, size_t size) {
 	out[0] = '\0';
-	const char *cfg = config_path();
+	const char *cfg = config_path_copy((char[512]){0}, 512);
 	if (!cfg || !cfg[0]) {
 		return;
 	}
@@ -302,13 +302,13 @@ void tidal_init(void) {
 	// it even when Tidal is not configured.
 	tidalsync_register_provider();
 
-	snprintf(api_url, sizeof(api_url), "%s", config_get("tidal", "base_url", TIDAL_API_DEFAULT));
-	snprintf(auth_url, sizeof(auth_url), "%s", config_get("tidal", "auth_url", TIDAL_AUTH_DEFAULT));
+	snprintf(api_url, sizeof(api_url), "%s", config_get_copy("tidal", "base_url", TIDAL_API_DEFAULT, (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE));
+	snprintf(auth_url, sizeof(auth_url), "%s", config_get_copy("tidal", "auth_url", TIDAL_AUTH_DEFAULT, (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE));
 
 	// Spaces become %20 here, once. Writing them as '+' in the form would be
 	// shorter and wrong: the '+' would itself be percent-encoded and end up
 	// inside the scope name.
-	http_url_encode(config_get("tidal", "scope", TIDAL_SCOPE_DEFAULT), scope_encoded, sizeof(scope_encoded));
+	http_url_encode(config_get_copy("tidal", "scope", TIDAL_SCOPE_DEFAULT, (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE), scope_encoded, sizeof(scope_encoded));
 
 	cover_px = (int)config_get_int("tidal", "cover_size", TIDAL_COVER_PX_DEFAULT);
 	// Only the sizes the CDN really serves: any other is a 403 on every cover.
@@ -334,18 +334,18 @@ void tidal_init(void) {
 	// A session left in device_config.ini is truncated and worthless, so it is
 	// cleared out rather than left to linger. Only the country and the name are
 	// kept, since those fit in 128 bytes.
-	if (config_get("tidal", "access_token", NULL)) {
+	if (config_get_copy("tidal", "access_token", NULL, (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE)) {
 		printf("tidal: found an old truncated session, dropping it\n");
 		config_set("tidal", "access_token", "");
 		config_set("tidal", "refresh_token", "");
 		if (!country_code[0]) {
-			snprintf(country_code, sizeof(country_code), "%s", config_get("tidal", "country", ""));
+			snprintf(country_code, sizeof(country_code), "%s", config_get_copy("tidal", "country", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE));
 		}
 		if (!user_id[0]) {
-			snprintf(user_id, sizeof(user_id), "%s", config_get("tidal", "user_id", ""));
+			snprintf(user_id, sizeof(user_id), "%s", config_get_copy("tidal", "user_id", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE));
 		}
 		if (!display_name[0]) {
-			snprintf(display_name, sizeof(display_name), "%s", config_get("tidal", "user", ""));
+			snprintf(display_name, sizeof(display_name), "%s", config_get_copy("tidal", "user", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE));
 		}
 		config_save();
 	}

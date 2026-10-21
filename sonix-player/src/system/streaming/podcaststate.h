@@ -78,10 +78,13 @@ void podcaststate_forget(const char *path);
 // An episode of the catalogue that has a file in the Podcast folder: its row,
 // when it has one, points there from now on. Called when a download completes
 // and for files saved before that was done.
-void podcaststate_downloaded(long long episode_id, const char *path);
+// Pass the epoch captured before the download started.
+unsigned podcaststate_card_epoch(void);
+void podcaststate_downloaded(long long episode_id, const char *path, unsigned epoch);
 
 // Every row whose file is inside `folder` (absolute), and every row of the
 // podcast `feed_id`. The callback runs once per row, on the caller's thread.
+// Callbacks run under the database lock and must not reenter podcaststate.
 // Return how many rows were delivered.
 typedef void (*podcaststate_cb_t)(const podcaststate_t *state, void *user);
 int podcaststate_in_folder(const char *folder, podcaststate_cb_t cb, void *user);

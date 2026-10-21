@@ -81,6 +81,7 @@
 
 #include "lvgl/lvgl.h"
 #include "lvgl/src/core/lv_obj_event_private.h"
+#include "lvgl/src/misc/lv_area_private.h"
 
 lv_obj_t *player_screen;
 
@@ -3750,6 +3751,7 @@ static void refresh_now_playing(void) {
 	// and the first one forgotten leaves the player dressed as a podcast over
 	// a song.
 	apply_audiobook_mode(!state.live && audiobook_is_playing(), !state.live && podcastcache_is_episode(state.current_file));
+	chapters_refresh();
 
 	if (state.live) {
 		// The station on top, what it says is on air underneath -- the same
@@ -4318,6 +4320,11 @@ static void update_progress(void) {
 	device_state_t state;
 	device_state_get(&state);
 
+	double heard_position, heard_length;
+	unsigned heard_serial;
+	bool heard_ready = audio_get_listening_progress(&heard_position, &heard_length, &heard_serial);
+	audiobook_listen_progress(heard_position, heard_length, heard_ready && !state.live && state.status == AUDIO_STATUS_PLAYING, heard_serial);
+
 	// The live source moves under the player: the station's own name comes
 	// with the connection, the on-air title arrives later and keeps changing,
 	// the artwork lands when its download finishes -- and the whole thing
@@ -4497,6 +4504,31 @@ static bool live_step(int step) {
 	return true;
 }
 
+// A headset may spend several seconds recognising a second long press.
+// Remember an explicit restart rather than racing the three-second playhead.
+static char previous_restart_file[512];
+static uint32_t previous_restart_at;
+static unsigned previous_restart_metadata;
+static bool previous_restart_pending;
+
+static void previous_track(const device_state_t *state, bool remote) {
+	bool repeated = previous_restart_pending && (uint32_t)(lv_tick_get() - previous_restart_at) <= 8000 && previous_restart_metadata == device_state_metadata_revision() && state->progress_current_secs <= 10.0 && strcmp(previous_restart_file, state->current_file) == 0;
+	previous_restart_pending = false;
+	if (state->progress_current_secs > 3.0 && !repeated) {
+		device_state_seek(0);
+		snprintf(previous_restart_file, sizeof(previous_restart_file), "%s", state->current_file);
+		previous_restart_at = lv_tick_get();
+		previous_restart_metadata = device_state_metadata_revision();
+		previous_restart_pending = true;
+	} else if (remote) {
+		dlna_request_prev();
+	} else if (device_state_prev(NULL, 0)) {
+		refresh_now_playing();
+	} else {
+		device_state_seek(0);
+	}
+}
+
 void player_screen_prev(void) {
 	if (live_step(-1)) {
 		return;
@@ -4518,18 +4550,13 @@ void player_screen_prev(void) {
 	// Past the first three seconds, prev restarts the track instead of leaving
 	// it: the same rule every player follows, so a double press is what goes
 	// back.
-	if (state.progress_current_secs > 3.0) {
-		device_state_seek(0); // far enough in -> restart current track
-	} else if (device_state_prev(NULL, 0)) {
-		refresh_now_playing(); // near the start -> go to previous track
-	} else {
-		device_state_seek(0); // no queue -> just restart
-	}
+	previous_track(&state, false);
 
 	update_progress();
 }
 
 void player_screen_next(void) {
+	previous_restart_pending = false;
 	if (live_step(1)) {
 		return;
 	}
@@ -4568,6 +4595,7 @@ static void next_btn_event_cb(lv_event_t *e) {
 void player_key_play_pause(void) { apply_playback_status(device_state_toggle_play_pause()); }
 
 void player_key_next(void) {
+	previous_restart_pending = false;
 	if (live_step(1)) {
 		return;
 	}
@@ -4610,11 +4638,7 @@ void player_key_prev(void) {
 	if (dlna_owns_playback()) {
 		// As elsewhere: within the first few seconds go back to the start,
 		// later ask for the previous track -- only here the phone is asked.
-		if (state.progress_current_secs > 3.0) {
-			device_state_seek(0);
-		} else {
-			dlna_request_prev();
-		}
+		previous_track(&state, true);
 		return;
 	}
 
@@ -4624,13 +4648,7 @@ void player_key_prev(void) {
 		return;
 	}
 
-	if (state.progress_current_secs > 3.0) {
-		device_state_seek(0);
-	} else if (device_state_prev(NULL, 0)) {
-		refresh_now_playing();
-	} else {
-		device_state_seek(0);
-	}
+	previous_track(&state, false);
 	update_progress();
 }
 
@@ -5740,11 +5758,21 @@ static void np_toggle_play(void) {
 // The artwork's gestures (the handoff's matrix: "Плеер (обложка)")
 //
 // A tap pauses or plays, a swipe across of NP_COVER_SWIPE_PX plays the next
-// track (to the left) or the previous one (to the right) -- what the on-screen
-// buttons do, so on a book or a podcast it is the jump of seconds -- and the
-// pull down is the sheet's own (sheet_drag_cb). Before 2.0 a leftward swipe
+// track (to the left) or the previous one (to the right). Books step chapters;
+// their buttons still skip seconds, as do podcast swipes. The pull down is
+// the sheet's own (sheet_drag_cb). Before 2.0 a leftward swipe
 // here pulled the lyrics in: they are in the player's menu now ("Lyrics").
 // ---------------------------------------------------------------------------
+
+static bool cover_tap_contains(const lv_point_t *point) {
+	lv_obj_t *art = layout_studio_now ? (lv_obj_is_hidden(studio_cover) ? studio_empty : studio_cover) : cover_art;
+	if (!art || lv_obj_is_hidden(art)) {
+		return false;
+	}
+	lv_area_t bounds;
+	lv_obj_get_coords(art, &bounds);
+	return lv_area_is_point_on(&bounds, point, lv_obj_get_style_radius(art, LV_PART_MAIN));
+}
 
 static void cover_gesture_cb(lv_event_t *e) {
 	static lv_point_t start;
@@ -5791,7 +5819,9 @@ static void cover_gesture_cb(lv_event_t *e) {
 		return; // the pull down, or the swipe back
 	}
 	if (sideways) {
-		if (dx <= -NP_COVER_SWIPE_PX) {
+		if (audiobook_mode && LV_ABS(dx) >= NP_COVER_SWIPE_PX) {
+			chapters_step(dx < 0 ? 1 : -1);
+		} else if (dx <= -NP_COVER_SWIPE_PX) {
 			player_screen_next();
 		} else if (dx >= NP_COVER_SWIPE_PX) {
 			player_screen_prev();
@@ -5803,7 +5833,11 @@ static void cover_gesture_cb(lv_event_t *e) {
 			chain_set_open(false); // the first tap puts the open chain away
 			return;
 		}
-		np_toggle_play();
+		// The viewport also receives gestures beside the inset sleeve. A miss
+		// near the seek bar must not become a pause; both ends stay on artwork.
+		if (cover_tap_contains(&start) && cover_tap_contains(&p)) {
+			np_toggle_play();
+		}
 	}
 }
 
@@ -5935,7 +5969,7 @@ static void upnext_update(void) {
 			np_title_for_path(path, title, sizeof(title));
 		}
 	}
-	const char *shown = title[0] ? title : tr("trackmenu_queue");
+	const char *shown = title[0] ? title : tr(audiobook_mode ? "chapters" : "trackmenu_queue");
 	if (strcmp(shown, upnext_text) == 0 && lv_obj_is_hidden(upnext_lead) == !title[0]) {
 		return;
 	}

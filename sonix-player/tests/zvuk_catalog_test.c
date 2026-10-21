@@ -1,3 +1,4 @@
+#include "src/system/core/config.h"
 /* Same flags as zvuk_spoken_test.c; link json.c, pthread and --gc-sections. */
 #define http_request fixture_request
 #include "src/system/streaming/zvuk.c"
@@ -9,12 +10,20 @@ static int calls;
 static int status_code = 200;
 static bool children;
 const char *tr(const char *key) { return key; }
-const char *config_path(void) { return NULL; }
-const char *config_get(const char *section, const char *key, const char *fallback) {
+const char *stub_config_path(void) { return NULL; }
+const char *config_path_copy(char *out, size_t size) {
+ const char *v=stub_config_path(); if(v && size) snprintf(out,size,"%s",v); return v ? out : NULL;
+}
+
+const char *stub_config_get(const char *section, const char *key, const char *fallback) {
 	(void)section;
 	(void)key;
 	return fallback;
 }
+const char *config_get_copy(const char *section, const char *key, const char *fallback, char *out, size_t size) {
+ const char *v=stub_config_get(section,key,fallback); if(v && size) snprintf(out,size,"%s",v); return v ? out : NULL;
+}
+
 const char *http_last_content_type(void) { return "application/json"; }
 void streamerr_hint(stream_err_t kind) { (void)kind; }
 const char *http_last_error(void) { return NULL; }

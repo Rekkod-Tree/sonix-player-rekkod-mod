@@ -181,7 +181,7 @@ static bool dir_exists(const char *path) {
 static bool load_ca(SSL_CTX *ctx) {
 	char candidate[512];
 
-	const char *configured = config_get("network", "ca_bundle", NULL);
+	const char *configured = config_get_copy("network", "ca_bundle", NULL, (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE);
 	if (configured && configured[0] && file_exists(configured)) {
 		if (api.SSL_CTX_load_verify_locations(ctx, configured, NULL) == 1) {
 			snprintf(ca_source, sizeof(ca_source), "%s", configured);

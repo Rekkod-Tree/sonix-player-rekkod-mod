@@ -61,11 +61,11 @@ static keymap_button_t button_from_key(const char *name) {
 
 void keymap_init(void) {
 	for (int i = 0; i < KEYMAP_BTN_COUNT; i++) {
-		const char *saved = config_get("keys", KEYS[i], NULL);
+		const char *saved = config_get_copy("keys", KEYS[i], NULL, (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE);
 		actions[i] = action_from_key(saved, DEFAULTS[i]);
 	}
-	double_button = button_from_key(config_get("keys", "double_button", NULL));
-	double_action = action_from_key(config_get("keys", "double_action", NULL), KEYMAP_ACTION_NONE);
+	double_button = button_from_key(config_get_copy("keys", "double_button", NULL, (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE));
+	double_action = action_from_key(config_get_copy("keys", "double_action", NULL, (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE), KEYMAP_ACTION_NONE);
 }
 
 keymap_button_t keymap_double_button(void) { return double_button; }

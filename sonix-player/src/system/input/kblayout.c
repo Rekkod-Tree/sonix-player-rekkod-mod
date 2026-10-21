@@ -328,8 +328,8 @@ static void load(void) {
 	loaded = true;
 
 	bool placed[KB_LAYOUT_COUNT] = {false};
-	in_use_n = parse_list(config_get("keyboard", "layouts", ""), in_use, placed);
-	others_n = parse_list(config_get("keyboard", "layouts_off", ""), others, placed);
+	in_use_n = parse_list(config_get_copy("keyboard", "layouts", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE), in_use, placed);
+	others_n = parse_list(config_get_copy("keyboard", "layouts_off", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE), others, placed);
 
 	// Nothing saved, or a layout that did not exist when it was saved. The
 	// interface language's own goes in front of the ones in use; everything
@@ -407,8 +407,8 @@ kblayout_t kblayout_default(void) {
 }
 
 void kblayout_language_changed(void) {
-	const char *on = config_get("keyboard", "layouts", "");
-	const char *off = config_get("keyboard", "layouts_off", "");
+	const char *on = config_get_copy("keyboard", "layouts", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE);
+	const char *off = config_get_copy("keyboard", "layouts_off", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE);
 	if ((on && on[0]) || (off && off[0])) {
 		return;
 	}

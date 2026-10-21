@@ -58,7 +58,7 @@ static bool find_in_dir(const char *root, const char *stem, char *out, size_t ou
 	return found;
 }
 
-const char *firmware_update_stem(void) {
+const char *firmware_update_stem(char *buffer, size_t size) {
 	// ONLY the name of THIS model -- deliberately NOT the stock binary's
 	// "update.upt" fallback.
 	//
@@ -71,7 +71,7 @@ const char *firmware_update_stem(void) {
 	// An unrecognised player therefore gets no name at all: a fallback would
 	// hand an R1 the R3 Pro II's image. The config key is the way out for
 	// anyone who knows what they are doing.
-	const char *name = config_get("firmware", "name", "");
+	const char *name = config_get_copy("firmware", "name", "", buffer, size);
 	if (name && *name) {
 		return name;
 	}
@@ -96,7 +96,7 @@ bool firmware_update_file_find(char *out, size_t out_size) {
 		return false;
 	}
 
-	const char *name = firmware_update_stem();
+	const char *name = firmware_update_stem((char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE);
 	if (!name) {
 		return false;
 	}

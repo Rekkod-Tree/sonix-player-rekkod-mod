@@ -539,6 +539,8 @@ static void mark_stopped_unless_replaced(void) {
 }
 
 static double progress_current_secs = 0.0;
+static unsigned progress_serial;
+static unsigned progress_reported_serial;
 
 // Where the bar was when the track was paused.
 //
@@ -568,8 +570,9 @@ static double opening_position(void) {
 // being written when it arrived belongs to the old position. Caller holds
 // audio_mutex.
 static void report_position(double seconds) {
-	if (!seek_request) {
+	if (!seek_request && !play_request) {
 		progress_current_secs = seconds;
+		progress_reported_serial = progress_serial;
 	}
 }
 
@@ -5005,6 +5008,7 @@ static void play_file(const char *filepath) {
 }
 
 static void *playback_thread_func(void *arg) {
+	(void)arg;
 	// The name, and only the name -- not thread_be_background(), which also puts
 	// the caller on SCHED_IDLE, and this is the one thread that must never wait
 	// behind anything. /proc/self/task/*/comm is what the watchdog's dump
@@ -5192,6 +5196,7 @@ int audio_play(const char *filepath) {
 	// The playback thread routes at track start, the stock engine's way.
 
 	pthread_mutex_lock(&audio_mutex);
+	progress_serial++;
 	restart_fresh_pending = false; // an explicit play beats the armed restart
 	strncpy(current_filepath, filepath, sizeof(current_filepath) - 1);
 	play_request = true;
@@ -5235,6 +5240,7 @@ int audio_play_at(const char *filepath, double start_secs) {
 	fprintf(stderr, "audio[%ld]: play requested '%s' from %.1f s\n", log_ms(), filepath, start_secs);
 
 	pthread_mutex_lock(&audio_mutex);
+	progress_serial++;
 	restart_fresh_pending = false; // an explicit play beats the armed restart
 	strncpy(current_filepath, filepath, sizeof(current_filepath) - 1);
 	current_filepath[sizeof(current_filepath) - 1] = '\0';
@@ -5261,6 +5267,7 @@ int audio_play_paused(const char *filepath, double start_secs) {
 	fprintf(stderr, "audio[%ld]: restore requested '%s' at %.1f s (paused)\n", log_ms(), filepath, start_secs);
 
 	pthread_mutex_lock(&audio_mutex);
+	progress_serial++;
 	restart_fresh_pending = false; // an explicit play beats the armed restart
 	strncpy(current_filepath, filepath, sizeof(current_filepath) - 1);
 	current_filepath[sizeof(current_filepath) - 1] = '\0';
@@ -5509,6 +5516,19 @@ void audio_get_progress(double *current_secs, double *total_secs) {
 	pthread_mutex_unlock(&audio_mutex);
 }
 
+bool audio_get_listening_progress(double *current, double *total, unsigned *serial) {
+	pthread_mutex_lock(&audio_mutex);
+	if (current)
+		*current = progress_current_secs;
+	if (total)
+		*total = progress_total_secs;
+	if (serial)
+		*serial = progress_serial;
+	bool ready = !play_request && !seek_request && progress_reported_serial == progress_serial;
+	pthread_mutex_unlock(&audio_mutex);
+	return ready;
+}
+
 void audio_get_stream_info(int *sample_rate, int *channels) {
 	pthread_mutex_lock(&audio_mutex);
 	if (sample_rate)
@@ -5581,6 +5601,7 @@ void audio_seek(double seconds) {
 	printf("seeking to %.2f seconds\n", seconds);
 
 	pthread_mutex_lock(&audio_mutex);
+	progress_serial++;
 	progress_current_secs = seconds; // the bar follows the finger, not the decoder
 	progress_floor_secs = -1.0;		// and a deliberate jump outranks the pause floor
 	if (restart_fresh_pending) {

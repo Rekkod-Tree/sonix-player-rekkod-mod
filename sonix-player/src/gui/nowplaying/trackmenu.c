@@ -8,21 +8,20 @@
 #include <sys/stat.h>
 
 #include "src/gui/fonts/fonts.h"
-#include "src/gui/shell/icons.h"
 #include "src/gui/library/listacts.h"
 #include "src/gui/library/medialist.h"
-#include "src/gui/nowplaying/player.h"
 #include "src/gui/library/playlistpage.h"
-#include "src/gui/shell/confirm.h"
-#include "src/gui/shell/popover.h"
-#include "src/gui/settings/musicsettings.h"
-#include "src/gui/shell/settingsrow.h"
-#include "src/gui/shell/switcher.h"
-#include "src/gui/shell/theme.h"
-#include "src/gui/shell/toast.h"
+#include "src/gui/nowplaying/chapters.h"
 #include "src/gui/nowplaying/cover.h"
 #include "src/gui/nowplaying/npicons.h"
+#include "src/gui/nowplaying/player.h"
 #include "src/gui/nowplaying/queueundo.h"
+#include "src/gui/settings/musicsettings.h"
+#include "src/gui/shell/confirm.h"
+#include "src/gui/shell/icons.h"
+#include "src/gui/shell/popover.h"
+#include "src/gui/shell/settingsrow.h"
+#include "src/gui/shell/switcher.h"
 #include "src/gui/shell/sx_frame.h"
 #include "src/gui/shell/sx_mini.h"
 #include "src/gui/shell/sx_palette.h"
@@ -31,24 +30,26 @@
 #include "src/gui/shell/sx_styles.h"
 #include "src/gui/shell/sx_toast.h"
 #include "src/gui/shell/sx_tokens.h"
+#include "src/gui/shell/theme.h"
+#include "src/gui/shell/toast.h"
 #include "src/gui/shell/topbar.h"
-#include "src/system/library/covertone.h"
-#include "src/system/library/covertonefan.h"
-#include "src/system/playback/audiobook.h"
-#include "src/system/remote/dlna.h"
-#include "src/system/audio/audio.h"
-#include "src/system/audio/replaygain.h"
-#include "src/system/decode/decode.h"
-#include "src/system/library/metadata.h"
-#include "src/system/playback/device_state.h"
-#include "src/system/core/lang.h"
 #include "src/gui/streaming/podcastcard.h"
 #include "src/gui/streaming/podcastpage.h"
+#include "src/system/audio/audio.h"
+#include "src/system/audio/replaygain.h"
+#include "src/system/core/lang.h"
+#include "src/system/core/utils.h"
+#include "src/system/decode/decode.h"
+#include "src/system/library/covertone.h"
+#include "src/system/library/covertonefan.h"
+#include "src/system/library/library.h"
+#include "src/system/library/metadata.h"
+#include "src/system/playback/audiobook.h"
+#include "src/system/playback/device_state.h"
+#include "src/system/playback/playlist.h"
+#include "src/system/remote/dlna.h"
 #include "src/system/streaming/podcastcache.h"
 #include "src/system/streaming/provider.h"
-#include "src/system/library/library.h"
-#include "src/system/playback/playlist.h"
-#include "src/system/core/utils.h"
 
 lv_obj_t *queue_screen;
 lv_obj_t *details_screen;
@@ -1566,6 +1567,10 @@ static void save_stream_track_cb(void *user) {
 // and its episodes button on a podcast -- a podcast's episodes are exactly the
 // queue.
 void trackmenu_open_queue(void) {
+	if (audiobook_is_playing()) {
+		chapters_open();
+		return;
+	}
 	player_sheet_close(false);
 	switch_screen(queue_screen);
 	switcher_set_player_return(queue_screen);

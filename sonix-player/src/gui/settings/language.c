@@ -248,7 +248,7 @@ bool language_needed(void) {
 	// Not "is the language Italian": Italian is also what someone chooses. The
 	// question is whether anybody has answered at all, so the absence of the
 	// line in the settings is what counts.
-	return config_get("ui", "language", NULL) == NULL;
+	return config_get_copy("ui", "language", NULL, (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE) == NULL;
 }
 
 void language_show_first_boot(void) {

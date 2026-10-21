@@ -1,3 +1,4 @@
+#include "src/system/core/config.h"
 // Normal service-shaped replies, real JSON/parser/stream selection. No network.
 #define http_request fixture_request
 #include "src/system/streaming/zvuk.c"
@@ -8,13 +9,21 @@ static const char *reply;
 static int calls;
 static bool restored_episode;
 const char *tr(const char *key) { return key; }
-const char *config_path(void) { return NULL; }
+const char *stub_config_path(void) { return NULL; }
+const char *config_path_copy(char *out, size_t size) {
+ const char *v=stub_config_path(); if(v && size) snprintf(out,size,"%s",v); return v ? out : NULL;
+}
+
 const char *http_last_content_type(void) { return "application/json"; }
-const char *config_get(const char *section, const char *key, const char *fallback) {
+const char *stub_config_get(const char *section, const char *key, const char *fallback) {
 	(void)section;
 	(void)key;
 	return fallback;
 }
+const char *config_get_copy(const char *section, const char *key, const char *fallback, char *out, size_t size) {
+ const char *v=stub_config_get(section,key,fallback); if(v && size) snprintf(out,size,"%s",v); return v ? out : NULL;
+}
+
 void streamerr_hint(stream_err_t kind) { (void)kind; }
 const char *http_last_error(void) { return NULL; }
 void http_last_outcome(http_outcome_t *out) { memset(out, 0, sizeof(*out)); }

@@ -141,7 +141,7 @@ bool yandex_configured(void) { return client_id() && client_secret() && streamke
 
 static void session_path(char *out, size_t size) {
 	out[0] = '\0';
-	const char *cfg = config_path();
+	const char *cfg = config_path_copy((char[512]){0}, 512);
 	if (!cfg || !cfg[0]) {
 		return;
 	}
@@ -203,8 +203,8 @@ static void load_session(void) {
 }
 
 void yandex_init(void) {
-	snprintf(api_url, sizeof(api_url), "%s", config_get("yandex", "base_url", YANDEX_API_DEFAULT));
-	snprintf(auth_url, sizeof(auth_url), "%s", config_get("yandex", "auth_url", YANDEX_AUTH_DEFAULT));
+	snprintf(api_url, sizeof(api_url), "%s", config_get_copy("yandex", "base_url", YANDEX_API_DEFAULT, (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE));
+	snprintf(auth_url, sizeof(auth_url), "%s", config_get_copy("yandex", "auth_url", YANDEX_AUTH_DEFAULT, (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE));
 	pthread_mutex_lock(&session_lock);
 	load_session();
 	pthread_mutex_unlock(&session_lock);
@@ -2134,7 +2134,7 @@ static void base64_nopad(const unsigned char *in, size_t len, char *out) {
 }
 
 yandex_quality_t yandex_get_quality(void) {
-	const char *v = config_get("yandex", "quality", "lossless");
+	const char *v = config_get_copy("yandex", "quality", "lossless", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE);
 	for (int i = 0; i < QUALITY_COUNT; i++) {
 		if (strcmp(v, QUALITIES[i].config) == 0) {
 			return (yandex_quality_t)i;

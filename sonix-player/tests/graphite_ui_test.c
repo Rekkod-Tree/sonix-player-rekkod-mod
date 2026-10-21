@@ -234,7 +234,7 @@ static void open_fixture_album(const char *path, const char *title) {
 }
 
 static void mock_mode(const char *mode) {
-	assert(strcmp(config_get("zvuk", "base_url", ""), "http://127.0.0.1:18766") == 0);
+	assert(strcmp(config_get_copy("zvuk", "base_url", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE), "http://127.0.0.1:18766") == 0);
 	const char *path = getenv("SONIX_UI_TEST_MOCK_MODE");
 	assert(path);
 	FILE *file = fopen(path, "w");
@@ -390,7 +390,7 @@ static void spoken_states(void) {
 		theme_set_accent(THEME_ACCENT_GRAPHITE);
 		theme_set_dynamic_tint(false);
 		theme_set_dark(true);
-		assert(strcmp(config_get("zvuk", "base_url", ""), "http://127.0.0.1:18769") == 0);
+		assert(strcmp(config_get_copy("zvuk", "base_url", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE), "http://127.0.0.1:18769") == 0);
 		char message[256];
 		assert(zvuk_sign_in("a1b2c3d4e5f60718293a4b5c6d7e8f90", message, sizeof(message)) == CARDIMPORT_OK);
 		switch_screen(zvuk_screen);
@@ -540,7 +540,7 @@ static void spoken_states(void) {
 		if (!spoken_wait_label("Episode 001"))
 			return;
 		capture("spoken-podcast-lazy-last-page");
-		assert(strcmp(config_get("yandex", "base_url", ""), "http://127.0.0.1:18770") == 0);
+		assert(strcmp(config_get_copy("yandex", "base_url", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE), "http://127.0.0.1:18770") == 0);
 		assert(yandex_configured() && yandex_logged_in() && yandex_screen);
 		theme_set_dark(true);
 		spoken_search(yandex_screen, "book", "audiobooks");
@@ -1057,6 +1057,7 @@ static void surface_states(void) {
 
 #include "graphite_components.inc"
 #include "graphite_upstream.inc"
+#include "graphite_feedback.inc"
 
 static void player_home_gestures(void) {
 	int height = lv_display_get_vertical_resolution(lv_display_get_default());
@@ -1279,12 +1280,12 @@ static void home_layout_states(void) {
 		device_state_get(&state);
 		assert(state.status == AUDIO_STATUS_PLAYING);
 		bookresume_note(&state);
-		assert(config_get("home", "resume_book", "")[0]);
-		assert(config_get("home", "resume_book_1", "")[0]);
+		assert(config_get_copy("home", "resume_book", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE)[0]);
+		assert(config_get_copy("home", "resume_book_1", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE)[0]);
 		struct stat first, last;
-		assert(!stat(config_path(), &first));
+		assert(!stat(config_path_copy((char[512]){0}, 512), &first));
 		for (int i = 0; i < 100; i++) bookresume_note(&state);
-		assert(!stat(config_path(), &last));
+		assert(!stat(config_path_copy((char[512]){0}, 512), &last));
 		assert(first.st_mtim.tv_sec == last.st_mtim.tv_sec && first.st_mtim.tv_nsec == last.st_mtim.tv_nsec);
 		device_state_toggle_play_pause();
 		break;
@@ -1308,9 +1309,9 @@ static void home_layout_states(void) {
 		device_state_t state;
 		device_state_get(&state);
 		bookresume_note(&state);
-		assert(!strcmp(config_get("home", "resume_title", ""), "Home resume"));
+		assert(!strcmp(config_get_copy("home", "resume_title", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE), "Home resume"));
 		main_menu_hide(HOME_CONTINUE_BOOK);
-		assert(config_get("home", "resume_book", "")[0]);
+		assert(config_get_copy("home", "resume_book", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE)[0]);
 		bookresume_play();
 		break;
 	}
@@ -1339,7 +1340,7 @@ static void home_layout_states(void) {
 		device_state_get(&state);
 		assert(!strcmp(state.current_file, getenv("SONIX_UI_TEST_TRACK")));
 		main_menu_reset();
-		assert(config_get("home", "resume_book", "")[0]);
+		assert(config_get_copy("home", "resume_book", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE)[0]);
 		main_menu_open_search();
 		break;
 	}
@@ -1445,6 +1446,7 @@ static void home_layout_states(void) {
 #include "graphite_spotify.inc"
 
 static void run(lv_timer_t *timer) {
+	if (getenv("SONIX_UI_TEST_FEEDBACK")) { feedback_states(); return; }
 	if (getenv("SONIX_UI_TEST_SPOTIFY")) { spotify_states(); return; }
 	if (getenv("SONIX_UI_TEST_CATALOG")) { catalog_states(); return; }
 	if (getenv("SONIX_UI_TEST_SLEEP_WAIT")) { sleep_wait_states(); return; }
@@ -1846,7 +1848,7 @@ static void run(lv_timer_t *timer) {
 			input(438, height - 40, false);
 			capture("search-trimmed-query");
 			assert(strcmp(lv_textarea_get_text(field), "Pink Floyd") == 0);
-			assert(strcmp(config_get("library", "search_recent_0", ""), "Pink Floyd") == 0);
+			assert(strcmp(config_get_copy("library", "search_recent_0", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE), "Pink Floyd") == 0);
 			assert(visible(find_label(results_view, "Time")) && visible(find_label(results_view, "Echoes")));
 			lv_obj_send_event(field, LV_EVENT_CLICKED, NULL);
 			lv_textarea_set_text(field, "   ");
@@ -1856,7 +1858,7 @@ static void run(lv_timer_t *timer) {
 			capture("search-blank-query");
 			assert(strcmp(lv_textarea_get_text(field), "") == 0);
 			assert(!visible(filters) && !visible(results_view) && visible(recent_head));
-			assert(strcmp(config_get("library", "search_recent_0", ""), "Pink Floyd") == 0);
+			assert(strcmp(config_get_copy("library", "search_recent_0", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE), "Pink Floyd") == 0);
 
 			// The remove control is adjacent to the query button. Exercise real
 			// pointer hit testing: deleting Time must not replay its search.
@@ -1884,7 +1886,7 @@ static void run(lv_timer_t *timer) {
 	case 18:
 		capture("streaming-light");
 		if (getenv("SONIX_UI_TEST_ZVUK")) {
-			assert(strcmp(config_get("zvuk", "base_url", ""), "http://127.0.0.1:18766") == 0);
+			assert(strcmp(config_get_copy("zvuk", "base_url", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE), "http://127.0.0.1:18766") == 0);
 			char message[256];
 			assert(zvuk_sign_in("a1b2c3d4e5f60718293a4b5c6d7e8f90", message, sizeof(message)) == CARDIMPORT_OK);
 		}

@@ -1,3 +1,4 @@
+#include "src/system/core/config.h"
 // cc -O2 -std=gnu11 -ffunction-sections -fdata-sections -I.
 // tests/tls_probe_test.c src/system/net/{tls,openssl_runtime}.c
 // -ldl -pthread -Wl,--gc-sections -o /tmp/tls_probe_test
@@ -12,12 +13,16 @@
 #include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
-const char *config_get(const char *section, const char *key, const char *fallback) {
+const char *stub_config_get(const char *section, const char *key, const char *fallback) {
 	(void)section;
 	(void)key;
 	const char *path = getenv("SONIX_TEST_CA_BUNDLE");
 	return path ? path : fallback;
 }
+const char *config_get_copy(const char *section, const char *key, const char *fallback, char *out, size_t size) {
+ const char *v=stub_config_get(section,key,fallback); if(v && size) snprintf(out,size,"%s",v); return v ? out : NULL;
+}
+
 const char *tr(const char *key) { return key; }
 int main(int argc, char **argv) {
 	assert(argc == 5);

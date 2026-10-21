@@ -24,7 +24,7 @@ for height in 800 720; do
     run_root="$test_root/$height"
     mkdir -p "$run_root/runtime/usr" "$run_root/local" "$run_root/tmp" "$output/$height"
     cp -a "$test_root/card" "$run_root/card"
-    cp "$player_root/sonix_player_host_ui_test" "$run_root/runtime/sonix_ui_test"
+    cp "${SONIX_UI_TEST_BINARY:-$player_root/sonix_player_host_ui_test}" "$run_root/runtime/sonix_ui_test"
     model=R1
     if [ "$height" = 720 ]; then model=R3PII; fi
     cp -a "$repo_root/sonix-packer/assets/$model/usr/resource" "$run_root/runtime/usr/"

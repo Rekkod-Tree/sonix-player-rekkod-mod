@@ -240,7 +240,7 @@ void peq_set_preset_name(const char *name) {
 
 static void peq_load(void) {
 	peq_enabled = (int)config_get_int("peq", "enabled", 0);
-	snprintf(peq_preset_name, sizeof(peq_preset_name), "%s", config_get("peq", "preset_name", ""));
+	snprintf(peq_preset_name, sizeof(peq_preset_name), "%s", config_get_copy("peq", "preset_name", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE));
 	peq_preamp_tenths =
 		clamp_int((int)config_get_int("peq", "preamp", 0), PEQ_PREAMP_MIN_TENTHS, PEQ_PREAMP_MAX_TENTHS);
 
@@ -327,7 +327,7 @@ void eq_set_enabled(bool enabled) {
 
 bool eq_get_enabled(void) { return eq_enabled != 0; }
 
-void eq_set_band(int band, int gain_db) {
+void eq_adjust_band(int band, int gain_db) {
 	if (band < 0 || band >= EQ_BANDS) {
 		return;
 	}
@@ -343,6 +343,10 @@ void eq_set_band(int band, int gain_db) {
 	char key[16];
 	snprintf(key, sizeof(key), "band%d", band);
 	config_set_int("eq", key, gain_db);
+}
+
+void eq_set_band(int band, int gain_db) {
+	eq_adjust_band(band, gain_db);
 	config_save();
 }
 

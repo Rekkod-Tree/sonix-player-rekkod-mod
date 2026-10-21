@@ -6,6 +6,7 @@ import sys
 import wave
 import shutil
 import zipfile
+import os
 from PIL import Image, ImageDraw
 
 root = Path(sys.argv[1])
@@ -43,6 +44,19 @@ with wave.open(str(book_wave), "wb") as audio:
     audio.writeframes(bytes(44100 * 4 * 120))
 subprocess.run(["flac", "--silent", "--force", "--tag=TITLE=Home resume", "--tag=ALBUM=Home resume",
                 f"--output-name={audio_books / 'Home resume.flac'}", str(book_wave)], check=True)
+
+if os.environ.get("SONIX_UI_TEST_FEEDBACK"):
+    single = root / "card" / "Audiobooks" / "Feedback single.flac"
+    tags = ["--tag=TITLE=Feedback single", "--tag=ALBUM=Feedback single"]
+    for i in range(3):
+        tags += [f"--tag=CHAPTER{i+1:03}=00:{i*40//60:02}:{i*40%60:02}.000",
+                 f"--tag=CHAPTER{i+1:03}NAME=Chapter {i+1}"]
+    subprocess.run(["flac", "--silent", "--force", *tags, f"--output-name={single}", str(book_wave)], check=True)
+    parts = single.parent / "Feedback parts"
+    parts.mkdir()
+    for i in range(2):
+        subprocess.run(["flac", "--silent", "--force", "--tag=ALBUM=Feedback parts",
+                        f"--tag=TITLE=Part {i+1}", f"--output-name={parts / (str(i+1)+'.flac')}", str(book_wave)], check=True)
 
 books = root / "card" / "Ebook"
 books.mkdir(parents=True, exist_ok=True)

@@ -160,8 +160,8 @@ static void order_load(void) {
 	order_loaded = true;
 	in_use_n = 0;
 	hidden_n = 0;
-	in_use_n = parse_list(config_get("music", "tiles", ""), in_use);
-	hidden_n = parse_list(config_get("music", "tiles_hidden", ""), hidden);
+	in_use_n = parse_list(config_get_copy("music", "tiles", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE), in_use);
+	hidden_n = parse_list(config_get_copy("music", "tiles_hidden", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE), hidden);
 	// Whatever neither list names is in use, at the end, in the usual order.
 	for (int i = 0; i < MUSIC_TILE_COUNT; i++) {
 		if (!listed(in_use, in_use_n, (music_tile_t)i) && !listed(hidden, hidden_n, (music_tile_t)i)) {

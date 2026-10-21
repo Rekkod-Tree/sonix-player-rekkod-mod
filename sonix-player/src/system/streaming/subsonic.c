@@ -61,11 +61,11 @@ static void session_copy(session_t *out) {
 
 void subsonic_init(void) {
 	pthread_mutex_lock(&session_lock);
-	snprintf(session.server, sizeof(session.server), "%s", config_get("subsonic", "server", ""));
-	snprintf(session.user, sizeof(session.user), "%s", config_get("subsonic", "user", ""));
-	snprintf(session.salt, sizeof(session.salt), "%s", config_get("subsonic", "salt", ""));
-	snprintf(session.token, sizeof(session.token), "%s", config_get("subsonic", "token", ""));
-	snprintf(session.password_hex, sizeof(session.password_hex), "%s", config_get("subsonic", "password_hex", ""));
+	snprintf(session.server, sizeof(session.server), "%s", config_get_copy("subsonic", "server", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE));
+	snprintf(session.user, sizeof(session.user), "%s", config_get_copy("subsonic", "user", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE));
+	snprintf(session.salt, sizeof(session.salt), "%s", config_get_copy("subsonic", "salt", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE));
+	snprintf(session.token, sizeof(session.token), "%s", config_get_copy("subsonic", "token", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE));
+	snprintf(session.password_hex, sizeof(session.password_hex), "%s", config_get_copy("subsonic", "password_hex", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE));
 	pthread_mutex_unlock(&session_lock);
 
 	quality = (int)config_get_int("subsonic", "quality", SUBSONIC_QUALITY_ORIGINAL);

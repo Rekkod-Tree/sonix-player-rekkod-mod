@@ -9,10 +9,11 @@
 
 #include <errno.h>
 #include <netdb.h>
-#include <pthread.h>
-#include <resolv.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <pthread.h>
+#include <resolv.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -505,10 +506,11 @@ typedef struct {
 	size_t used;
 	size_t cap;
 	size_t limit;
+	bool failed;
 } body_t;
 
 static bool body_reserve(body_t *b, size_t extra) {
-	if (b->used + extra + 1 <= b->cap) {
+	if (extra <= b->cap - b->used) {
 		return true;
 	}
 	if (b->cap >= b->limit) {
@@ -516,7 +518,9 @@ static bool body_reserve(body_t *b, size_t extra) {
 	}
 
 	size_t want = b->cap ? b->cap : 16 * 1024;
-	while (want < b->used + extra + 1) {
+	if (want > b->limit)
+		want = b->limit;
+	while (want < b->used + extra) {
 		want *= 2;
 		if (want >= b->limit) {
 			want = b->limit;
@@ -526,6 +530,7 @@ static bool body_reserve(body_t *b, size_t extra) {
 
 	char *grown = realloc(b->data, want + 1);
 	if (!grown) {
+		b->failed = true;
 		return false;
 	}
 	b->data = grown;
@@ -585,7 +590,7 @@ static bool read_length(conn_t *c, body_t *b, size_t content_length) {
 			// limit is still usable because the URL it wants is at the top.
 			// Only the case above is a failure: the server stopped short of
 			// what it promised.
-			return true;
+			return !b->failed;
 		}
 	}
 	return true;
@@ -634,16 +639,15 @@ static bool source_read_line(source_t *src, char *out, size_t out_size) {
 		if (!source_read_exact(src, &c, 1)) {
 			return false;
 		}
-		if (c == '\n') {
-			while (n > 0 && (out[n - 1] == '\r')) {
-				n--;
-			}
+		if (c == '\r') {
+			if (!source_read_exact(src, &c, 1) || c != '\n')
+				return false;
 			out[n] = '\0';
 			return true;
 		}
-		if (n + 1 < out_size) {
-			out[n++] = c;
-		}
+		if (c == '\n' || c == '\0' || n + 1 >= out_size)
+			return false;
+		out[n++] = c;
 	}
 }
 
@@ -653,39 +657,61 @@ static bool source_read_line(source_t *src, char *out, size_t out_size) {
 // The API's own answers are not chunked, but a proxy in front of one of the
 // mirrors may chunk a long reply -- and a long reply is exactly what a list of
 // stations is.
-static void read_chunked(source_t *src, body_t *b) {
-	char line[64];
+static bool read_chunked(source_t *src, body_t *b) {
+	char line[1024];
 	for (;;) {
 		if (!source_read_line(src, line, sizeof(line))) {
-			return;
+			return false;
 		}
 
-		// The length may carry chunk extensions after a ';'.
-		char *semi = strchr(line, ';');
-		if (semi) {
-			*semi = '\0';
+		// Parse only hexadecimal digits: strtol also accepts signs and junk.
+		size_t len = 0;
+		const char *p = line;
+		for (;;) {
+			int digit = *p >= '0' && *p <= '9' ? *p - '0' : *p >= 'a' && *p <= 'f' ? *p - 'a' + 10 : *p >= 'A' && *p <= 'F' ? *p - 'A' + 10 : -1;
+			if (digit < 0)
+				break;
+			if (len > (SIZE_MAX - (size_t)digit) / 16)
+				return false;
+			len = len * 16 + (size_t)digit;
+			p++;
 		}
-		long len = strtol(line, NULL, 16);
-		if (len <= 0) {
-			return; // the last chunk (trailers, if any, are of no interest)
+		if (p == line || (*p && *p != ';'))
+			return false;
+		if (len == 0) {
+			// Consume the trailer section through its empty terminating line.
+			size_t trailers = 0;
+			do {
+				if (!source_read_line(src, line, sizeof(line)))
+					return false;
+				trailers += strlen(line) + 2;
+				if (trailers > HTTP_HEADER_BUFFER || (line[0] && !strchr(line, ':')))
+					return false;
+			} while (line[0]);
+			return true;
 		}
 
 		char buf[8192];
 		size_t left = (size_t)len;
 		while (left > 0) {
+			// An explicit caller limit permits a prefix (radio playlists).
+			if (b->used >= b->limit)
+				return !b->failed;
 			size_t want = left > sizeof(buf) ? sizeof(buf) : left;
+			if (want > b->limit - b->used)
+				want = b->limit - b->used;
 			if (!source_read_exact(src, buf, want)) {
-				return;
+				return false;
 			}
 			if (!body_append(b, buf, want)) {
-				return;
+				return false;
 			}
 			left -= want;
 		}
 
 		char crlf[2];
-		if (!source_read_exact(src, crlf, 2)) {
-			return;
+		if (!source_read_exact(src, crlf, 2) || crlf[0] != '\r' || crlf[1] != '\n') {
+			return false;
 		}
 	}
 }
@@ -819,7 +845,12 @@ static bool get_once(const url_t *u, const http_req_t *req, char **out, size_t *
 
 	if (chunked) {
 		source_t src = {.conn = &conn, .lead = lead, .lead_len = (size_t)lead_len, .lead_pos = 0};
-		read_chunked(&src, &body);
+		if (!read_chunked(&src, &body)) {
+			outcome_fail(HTTP_FAIL_BROKEN);
+			conn_close(&conn);
+			free(body.data);
+			return false;
+		}
 	} else {
 		if (lead_len > 0 && !body_append(&body, lead, (size_t)lead_len)) {
 			conn_close(&conn);
@@ -845,6 +876,10 @@ static bool get_once(const url_t *u, const http_req_t *req, char **out, size_t *
 	}
 
 	conn_close(&conn);
+	if (body.failed) {
+		free(body.data);
+		return false;
+	}
 
 	if (!body.data) {
 		// An empty 200 is not an answer to anything asked here, except for

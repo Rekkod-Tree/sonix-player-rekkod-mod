@@ -832,7 +832,10 @@ static bool pump_file(download_t *d, long until, bool *finished) {
 		// Push out what was written before announcing it: without the fflush a
 		// reader would go looking on the card for bytes still sitting in the
 		// stdio buffer.
-		fflush(d->f);
+		if (fflush(d->f) != 0) {
+			fprintf(stderr, "tidalcache: flush failed (card full?)\n");
+			return false;
+		}
 		d->done += n;
 		growfile_progress(d->path, d->done);
 		if (d->resumes && d->done - d->resumed_at >= STREAM_RESUME_GOOD_BYTES) {
@@ -909,7 +912,10 @@ static bool pump_dash(download_t *d, int count, bool *finished) {
 			return false;
 		}
 
-		fflush(d->f);
+		if (fflush(d->f) != 0) {
+			fprintf(stderr, "tidalcache: flush failed (card full?)\n");
+			return false;
+		}
 		d->done = d->unwrap.written;
 		growfile_progress(d->path, d->done);
 

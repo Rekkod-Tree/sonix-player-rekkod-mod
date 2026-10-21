@@ -95,7 +95,7 @@ const char *zvuk_stream_headers(void) { return browser_headers; }
 
 static void session_path(char *out, size_t size) {
 	out[0] = '\0';
-	const char *cfg = config_path();
+	const char *cfg = config_path_copy((char[512]){0}, 512);
 	if (!cfg || !cfg[0]) {
 		return;
 	}
@@ -293,12 +293,12 @@ static void build_headers(void) {
 }
 
 void zvuk_init(void) {
-	snprintf(base_url, sizeof(base_url), "%s", config_get("zvuk", "base_url", ZVUK_BASE_DEFAULT));
+	snprintf(base_url, sizeof(base_url), "%s", config_get_copy("zvuk", "base_url", ZVUK_BASE_DEFAULT, (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE));
 	size_t n = strlen(base_url);
 	if (n > 0 && base_url[n - 1] == '/') {
 		base_url[n - 1] = '\0';
 	}
-	snprintf(user_agent, sizeof(user_agent), "%s", config_get("zvuk", "user_agent", ZVUK_UA_DEFAULT));
+	snprintf(user_agent, sizeof(user_agent), "%s", config_get_copy("zvuk", "user_agent", ZVUK_UA_DEFAULT, (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE));
 	build_headers();
 	pthread_mutex_lock(&session_lock);
 	load_session();
@@ -1680,7 +1680,7 @@ static const char *const QUALITY_NAMES[ZVUK_QUALITY_COUNT] = {"flac", "high", "m
 static const char *const QUALITY_SHOWN[ZVUK_QUALITY_COUNT] = {"FLAC", "MP3 320 kbps", "MP3 128 kbps"};
 
 zvuk_quality_t zvuk_get_quality(void) {
-	const char *v = config_get("zvuk", "quality", "flac");
+	const char *v = config_get_copy("zvuk", "quality", "flac", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE);
 	for (int q = 0; q < ZVUK_QUALITY_COUNT; q++) {
 		if (strcmp(v, QUALITY_NAMES[q]) == 0) {
 			return (zvuk_quality_t)q;
@@ -1848,7 +1848,7 @@ static void probe_file(const char *url, char *out, size_t size) {
 // the whole way -- profile, GraphQL, CDN -- passes the anti-bot filter with
 // the firmware's TLS; a sign-in is when it is asked for the first time.
 static void probe_after_sign_in(void) {
-	const char *id = config_get("zvuk", "check_track", "");
+	const char *id = config_get_copy("zvuk", "check_track", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE);
 	if (!id[0]) {
 		id = CHECK_TRACK_DEFAULT;
 	}
@@ -1898,7 +1898,7 @@ bool zvuk_check_connection(char *report, size_t size) {
 		SAY("\n");
 	}
 	if (zvuk_logged_in()) {
-		const char *id = config_get("zvuk", "check_track", "");
+		const char *id = config_get_copy("zvuk", "check_track", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE);
 		char liked_id[ZVUK_ID_MAX] = "";
 		pthread_mutex_lock(&liked_lock);
 		if (!id[0] && liked[ZVUK_ITEM_TRACK].count > 0) {

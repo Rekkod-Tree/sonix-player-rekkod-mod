@@ -3,8 +3,8 @@
 
 #include "src/system/decode/mp4.h"
 #include "src/system/library/id3chap.h"
-#include "src/system/library/vorbischap.h"
 #include "src/system/library/metadata.h"
+#include "src/system/library/vorbischap.h"
 #include "src/system/playback/playlist.h"
 
 #include <ctype.h>
@@ -59,6 +59,8 @@ static bool outdated;
 // Unlike `generation`, nothing else moves it, so a write queued against one
 // card can tell that it would now land on another.
 static unsigned card_epoch;
+
+unsigned audiobookdb_card_epoch(void) { return __atomic_load_n(&card_epoch, __ATOMIC_ACQUIRE); }
 
 static void position_queue_drain(void);
 
@@ -176,6 +178,8 @@ bool audiobookdb_open(const char *db_path) {
 	// a rescan may forget.
 	exec("CREATE TABLE IF NOT EXISTS AUDIOBOOK_FINISHED("
 		 "path TEXT PRIMARY KEY, finished_at INT DEFAULT 0)");
+	exec("CREATE TABLE IF NOT EXISTS AUDIOBOOK_CHAPTER_DONE("
+		 "book TEXT, file TEXT, start_ms INTEGER, PRIMARY KEY(book,file,start_ms))");
 
 	// The bookmarks, for the same reason in a table of their own: a rescan
 	// leaves them alone. Here on the card with the books they point into, so
@@ -551,9 +555,14 @@ typedef struct {
 	double seconds;
 	unsigned epoch;
 	unsigned long long seq;
+	bool chapter_done;
+	long long chapter_start_ms;
 } queued_position_t;
 
 static queued_position_t queued;
+#define CHAPTER_WRITE_QUEUE 16
+static queued_position_t chapter_writes[CHAPTER_WRITE_QUEUE];
+static int chapter_head, chapter_count;
 
 // Under db_lock.
 static void write_position_locked(const char *book_path, const char *file, double seconds, unsigned long long seq) {
@@ -578,7 +587,19 @@ static void write_position_locked(const char *book_path, const char *file, doubl
 static void write_queued(const queued_position_t *entry) {
 	pthread_mutex_lock(&db_lock);
 	if (entry->epoch == __atomic_load_n(&card_epoch, __ATOMIC_ACQUIRE)) {
-		write_position_locked(entry->book, entry->file, entry->seconds, entry->seq);
+		if (entry->chapter_done && db) {
+			sqlite3_stmt *stmt = NULL;
+			if (sqlite3_prepare_v2(db, "INSERT OR IGNORE INTO AUDIOBOOK_CHAPTER_DONE(book,file,start_ms) VALUES(?,?,?)", -1, &stmt, NULL) == SQLITE_OK) {
+				sqlite3_bind_text(stmt, 1, entry->book, -1, SQLITE_TRANSIENT);
+				sqlite3_bind_text(stmt, 2, entry->file, -1, SQLITE_TRANSIENT);
+				sqlite3_bind_int64(stmt, 3, entry->chapter_start_ms);
+				if (sqlite3_step(stmt) != SQLITE_DONE)
+					fprintf(stderr, "audiobooks: chapter history write failed: %s\n", sqlite3_errmsg(db));
+			}
+			sqlite3_finalize(stmt);
+		} else if (!entry->chapter_done) {
+			write_position_locked(entry->book, entry->file, entry->seconds, entry->seq);
+		}
 	}
 	pthread_mutex_unlock(&db_lock);
 }
@@ -586,21 +607,24 @@ static void write_queued(const queued_position_t *entry) {
 static void *queue_thread_func(void *arg) {
 	(void)arg;
 	thread_be_background("book positions");
-	queued_position_t *entry = malloc(sizeof(*entry));
-	if (!entry) {
-		return NULL;
-	}
+	queued_position_t entry;
 	for (;;) {
 		pthread_mutex_lock(&queue_lock);
-		while (!queued.pending) {
+		while (!queued.pending && chapter_count == 0) {
 			pthread_cond_wait(&queue_cond, &queue_lock);
 		}
-		*entry = queued;
-		queued.pending = false;
+		if (chapter_count > 0) {
+			entry = chapter_writes[chapter_head];
+			chapter_head = (chapter_head + 1) % CHAPTER_WRITE_QUEUE;
+			chapter_count--;
+		} else {
+			entry = queued;
+			queued.pending = false;
+		}
 		queue_busy = true;
 		pthread_mutex_unlock(&queue_lock);
 
-		write_queued(entry);
+		write_queued(&entry);
 
 		pthread_mutex_lock(&queue_lock);
 		queue_busy = false;
@@ -608,6 +632,37 @@ static void *queue_thread_func(void *arg) {
 		pthread_mutex_unlock(&queue_lock);
 	}
 	return NULL;
+}
+
+// queue_lock held. History shares the existing checkpoint worker.
+static bool start_writer_locked(void) {
+	if (!queue_started) {
+		queue_started = pthread_create(&queue_thread, NULL, queue_thread_func, NULL) == 0;
+		if (queue_started)
+			pthread_detach(queue_thread);
+	}
+	return queue_started;
+}
+
+void audiobookdb_queue_chapter_done(const char *book, const char *file, long long start_ms) {
+	if (!book || !book[0] || !file || !file[0] || start_ms < -1)
+		return;
+	queued_position_t entry = {.chapter_done = true, .chapter_start_ms = start_ms};
+	snprintf(entry.book, sizeof(entry.book), "%s", book);
+	snprintf(entry.file, sizeof(entry.file), "%s", file);
+	entry.epoch = __atomic_load_n(&card_epoch, __ATOMIC_ACQUIRE);
+	pthread_mutex_lock(&queue_lock);
+	if (!start_writer_locked() || chapter_count == CHAPTER_WRITE_QUEUE) {
+		pthread_mutex_unlock(&queue_lock);
+		// Only thread-start failure or a stalled card fills this small queue.
+		// Preserve the mark, as the position writer's synchronous fallback does.
+		write_queued(&entry);
+		return;
+	}
+	chapter_writes[(chapter_head + chapter_count) % CHAPTER_WRITE_QUEUE] = entry;
+	chapter_count++;
+	pthread_cond_signal(&queue_cond);
+	pthread_mutex_unlock(&queue_lock);
 }
 
 void audiobookdb_save_position(const char *book_path, const char *file, double seconds) {
@@ -635,13 +690,7 @@ void audiobookdb_queue_position(const char *book_path, const char *file, double 
 	}
 
 	pthread_mutex_lock(&queue_lock);
-	if (!queue_started) {
-		queue_started = pthread_create(&queue_thread, NULL, queue_thread_func, NULL) == 0;
-		if (queue_started) {
-			pthread_detach(queue_thread);
-		}
-	}
-	if (!queue_started) {
+	if (!start_writer_locked()) {
 		pthread_mutex_unlock(&queue_lock);
 		audiobookdb_save_position(book_path, file, seconds);
 		return;
@@ -662,21 +711,29 @@ void audiobookdb_queue_position(const char *book_path, const char *file, double 
 // nothing queued against the current card is left behind when it closes.
 static void position_queue_drain(void) {
 	pthread_mutex_lock(&queue_lock);
-	bool have = queued.pending;
-	queued_position_t *entry = have ? malloc(sizeof(*entry)) : NULL;
-	if (entry) {
-		*entry = queued;
-	}
-	queued.pending = false;
-	while (queue_busy) {
+	pthread_cond_signal(&queue_cond);
+	while (queued.pending || chapter_count > 0 || queue_busy) {
 		pthread_cond_wait(&queue_cond, &queue_lock);
 	}
 	pthread_mutex_unlock(&queue_lock);
+}
 
-	if (entry) {
-		write_queued(entry);
-		free(entry);
+void audiobookdb_chapter_history(const char *book, audiobook_chapter_done_cb cb, void *user) {
+	if (!book || !book[0] || !cb)
+		return;
+	position_queue_drain();
+	pthread_mutex_lock(&db_lock);
+	sqlite3_stmt *stmt = NULL;
+	if (db && sqlite3_prepare_v2(db, "SELECT file,start_ms FROM AUDIOBOOK_CHAPTER_DONE WHERE book=?", -1, &stmt, NULL) == SQLITE_OK) {
+		sqlite3_bind_text(stmt, 1, book, -1, SQLITE_TRANSIENT);
+		while (sqlite3_step(stmt) == SQLITE_ROW) {
+			const char *file = (const char *)sqlite3_column_text(stmt, 0);
+			if (!cb(file ? file : "", sqlite3_column_int64(stmt, 1), user))
+				break;
+		}
 	}
+	sqlite3_finalize(stmt);
+	pthread_mutex_unlock(&db_lock);
 }
 
 bool audiobookdb_get_position(const char *book_path, char *file_out, size_t file_size, double *seconds_out) {
@@ -1093,9 +1150,7 @@ bool audiobookdb_folder_normalise(const char *in, char *out, size_t size) {
 	return used > 0;
 }
 
-bool audiobookdb_folder_matches(const char *wanted, const char *rel) {
-	return wanted && rel && wanted[0] && strcasecmp(wanted, rel) == 0;
-}
+bool audiobookdb_folder_matches(const char *wanted, const char *rel) { return wanted && rel && wanted[0] && strcasecmp(wanted, rel) == 0; }
 
 // Call with folder_lock held.
 static void folder_load_locked(void) {
@@ -1103,13 +1158,12 @@ static void folder_load_locked(void) {
 		return;
 	}
 	folder_loaded = true;
-	const char *saved = config_get("audiobook", "folder", NULL);
+	const char *saved = config_get_copy("audiobook", "folder", NULL, (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE);
 	if (!saved || !audiobookdb_folder_normalise(saved, folder, sizeof(folder))) {
 		// Never chosen, or something hand-written that names no folder the
 		// player could use: the folder there always was.
 		if (saved && saved[0]) {
-			fprintf(stderr, "audiobooks: [audiobook] folder = %s is not a folder on the card; using %s\n", saved,
-					AUDIOBOOKDB_FOLDER);
+			fprintf(stderr, "audiobooks: [audiobook] folder = %s is not a folder on the card; using %s\n", saved, AUDIOBOOKDB_FOLDER);
 		}
 		snprintf(folder, sizeof(folder), "%s", AUDIOBOOKDB_FOLDER);
 	}

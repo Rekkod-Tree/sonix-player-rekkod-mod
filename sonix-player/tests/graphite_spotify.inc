@@ -23,7 +23,7 @@ static void spotify_states(void) {
 		player_refresh_now_playing();
 		config_set_int("audio", "replaygain", REPLAYGAIN_TRACK);
 		{
-			char path[1024]; const char *config = config_path(); const char *slash = strrchr(config, '/'); assert(slash);
+			char path[1024]; const char *config = config_path_copy((char[512]){0}, 512); const char *slash = strrchr(config, '/'); assert(slash);
 			snprintf(path, sizeof(path), "%.*s/spotify", (int)(slash - config), config); assert(mkdir(path,0700)==0);
 			strcat(path,"/credentials.json"); FILE *file=fopen(path,"w"); assert(file); assert(!fchmod(fileno(file),0600));
 			fputs("{\"username\":\"fixture\",\"auth_type\":1,\"auth_data\":\"AA==\"}",file); fclose(file);

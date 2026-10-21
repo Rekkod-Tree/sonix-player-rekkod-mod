@@ -742,7 +742,10 @@ static bool download_pump(download_t *d, long until, bool *finished) {
 
 		// Flush before announcing the progress: without it a reader would go
 		// looking on disk for bytes still sitting in the stdio buffer.
-		fflush(d->f);
+		if (fflush(d->f) != 0) {
+			fprintf(stderr, "qobuzcache: flush failed (card full?)\n");
+			return false;
+		}
 		d->done += n;
 		growfile_progress(d->path, d->done);
 		if (d->resumes && d->done - d->resumed_at >= STREAM_RESUME_GOOD_BYTES) {

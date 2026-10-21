@@ -75,7 +75,7 @@ static bool valid_id(const char *id) {
 }
 
 static void paths_init(void) {
-	const char *cfg = config_path();
+	const char *cfg = config_path_copy((char[512]){0}, 512);
 	const char *slash = cfg ? strrchr(cfg, '/') : NULL;
 	if (slash)
 		snprintf(directory, sizeof(directory), "%.*s/spotify", (int)(slash - cfg), cfg);

@@ -281,7 +281,9 @@ static int list_from_tracks(const yandex_track_t *tracks, int got) {
 	for (int i = 0; result_list && i < got; i++) {
 		yandexlist_add_track(result_list, &tracks[i]);
 	}
-	if (!result_list) {
+	if (!result_list || yandexlist_count(result_list) != got) {
+		yandexlist_free(result_list);
+		result_list = NULL;
 		snprintf(result_error, sizeof(result_error), "%s", tr("out_of_memory"));
 		return -1;
 	}
@@ -294,6 +296,12 @@ static int list_from_refs(int got, const char *what) {
 	if (got < 0 || !result_list) {
 		yandexlist_free(result_list);
 		result_list = NULL;
+		return -1;
+	}
+	if (yandexlist_count(result_list) != got) {
+		yandexlist_free(result_list);
+		result_list = NULL;
+		snprintf(result_error, sizeof(result_error), "%s", tr("out_of_memory"));
 		return -1;
 	}
 	if (got > 0 && !yandexlist_page_ready(result_list, 0) && yandexlist_fetch_page(result_list, 0) < 0) {

@@ -1,3 +1,4 @@
+#include "src/system/core/config.h"
 // Desktop check of the polyphase converters (src/system/audio/resample.c),
 // 44.1 -> 48 kHz and 48 -> 44.1 kHz: the gain of tones across the audible
 // band, what is left besides the tone (images, aliases, rounding), that a
@@ -20,11 +21,15 @@
 #include "src/system/audio/resample.h"
 
 // resample.c reads its setting through the configuration; not needed here.
-const char *config_get(const char *section, const char *key, const char *fallback) {
+const char *stub_config_get(const char *section, const char *key, const char *fallback) {
 	(void)section;
 	(void)key;
 	return fallback;
 }
+const char *config_get_copy(const char *section, const char *key, const char *fallback, char *out, size_t size) {
+ const char *v=stub_config_get(section,key,fallback); if(v && size) snprintf(out,size,"%s",v); return v ? out : NULL;
+}
+
 
 static int failures;
 

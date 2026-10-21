@@ -43,8 +43,6 @@ bool podcast_configured(void) { return streamkeys_podcast_key() && streamkeys_po
 // not that of a single on-screen page.
 #define PODCAST_API_MAX 1000
 
-static const char *api_base(void) { return config_get("podcast", "api_base", PODCAST_API_DEFAULT); }
-
 // The ISO code of the interface language, so a user running the player in
 // Italian does not get an all-English chart. The directory takes a
 // comma-separated list: the regional tags many Brazilian and Chinese feeds
@@ -116,7 +114,7 @@ static char *api_get(const char *path) {
 			 key, now, signature);
 
 	char url[PODCAST_URL_MAX + 256];
-	snprintf(url, sizeof(url), "%s%s", api_base(), path);
+	snprintf(url, sizeof(url), "%s%s", config_get_copy("podcast", "api_base", PODCAST_API_DEFAULT, (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE), path);
 
 	char *body = NULL;
 	size_t len = 0;

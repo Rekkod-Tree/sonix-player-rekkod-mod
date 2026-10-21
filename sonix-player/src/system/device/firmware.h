@@ -36,7 +36,7 @@
 // The name of this model's update file without ".upt": [firmware] name in
 // the config when set, otherwise the model table's update_stem ("r3proii",
 // "r1"). NULL when system-info.json names no model this build knows.
-const char *firmware_update_stem(void);
+const char *firmware_update_stem(char *buffer, size_t size);
 
 // Looks for the update file on the card. Returns true and fills `out` with its
 // full path when one is there. The name must be the device's own --

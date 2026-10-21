@@ -1482,7 +1482,7 @@ static bool sheet_prepare(void) {
 	centre = 0;
 	if (!remembered_loaded) {
 		remembered_loaded = true;
-		snprintf(remembered, sizeof(remembered), "%s", config_get("library", "coverflow_album", ""));
+		snprintf(remembered, sizeof(remembered), "%s", config_get_copy("library", "coverflow_album", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE));
 	}
 	int at = remembered[0] ? library_index_find_name(albums, remembered) : -1;
 	if (at > 0 && at < album_count) {

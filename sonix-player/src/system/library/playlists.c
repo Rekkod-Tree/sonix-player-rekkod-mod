@@ -881,9 +881,9 @@ int playlists_importable(playlists_candidate_t *out, int max) {
 	return count;
 }
 
-// A playlist longer than this is not one somebody wrote. The cap is on what is
-// held while importing: a path, a title and a little per entry.
-#define IMPORT_MAX_ENTRIES 5000
+// Keep imports bounded on R1; allocate entries only as the file needs them.
+// An over-limit import fails before any playlist is replaced.
+#define IMPORT_MAX_ENTRIES 20000
 
 typedef struct {
 	char *path;	  // where the entry points, or where the track was found
@@ -951,12 +951,14 @@ bool playlists_import(const char *source_path, bool overwrite, playlists_import_
 		return false;
 	}
 
-	import_entry_t *entries = calloc(IMPORT_MAX_ENTRIES, sizeof(*entries));
+	int room = 128;
+	import_entry_t *entries = calloc((size_t)room, sizeof(*entries));
 	if (!entries) {
 		fclose(f);
 		return false;
 	}
 	int count = 0;
+	bool read_ok = true;
 
 	// Relative entries are read against the folder the file is in.
 	char source_dir[512];
@@ -973,7 +975,7 @@ bool playlists_import(const char *source_path, bool overwrite, playlists_import_
 	char pending_title[512] = {0};
 	long pending_seconds = -1;
 
-	while (count < IMPORT_MAX_ENTRIES && read_line(f, line, sizeof(line))) {
+	while (read_line(f, line, sizeof(line))) {
 		char *text = line_body(line);
 		if (!text[0] || is_marker_line(text)) {
 			continue;
@@ -985,6 +987,21 @@ bool playlists_import(const char *source_path, bool overwrite, playlists_import_
 				snprintf(pending_title, sizeof(pending_title), "%s", comma ? comma + 1 : "");
 			}
 			continue;
+		}
+
+		if (count == IMPORT_MAX_ENTRIES) {
+			read_ok = false;
+			break;
+		}
+		if (count == room) {
+			int next = room * 2 < IMPORT_MAX_ENTRIES ? room * 2 : IMPORT_MAX_ENTRIES;
+			import_entry_t *grown = realloc(entries, (size_t)next * sizeof(*entries));
+			if (!grown) {
+				read_ok = false;
+				break;
+			}
+			entries = grown;
+			room = next;
 		}
 
 		char resolved[1024];
@@ -1005,21 +1022,26 @@ bool playlists_import(const char *source_path, bool overwrite, playlists_import_
 		}
 
 		import_entry_t *entry = &entries[count];
+		*entry = (import_entry_t){0};
 		entry->path = strdup(resolved);
 		entry->found = found;
 		entry->title = pending_title[0] ? strdup(pending_title) : NULL;
 		entry->seconds = pending_seconds;
-		pending_title[0] = '\0';
-		pending_seconds = -1;
-		if (!entry->path) {
+		if (!entry->path || (pending_title[0] && !entry->title)) {
+			free(entry->path);
+			free(entry->title);
+			read_ok = false;
 			break;
 		}
+		pending_title[0] = '\0';
+		pending_seconds = -1;
 		count++;
 	}
+	read_ok = read_ok && !ferror(f);
 	fclose(f);
 
 	out->total = count;
-	if (count == 0) {
+	if (!read_ok || count == 0) {
 		import_entries_free(entries, count);
 		return false;
 	}
@@ -1027,6 +1049,12 @@ bool playlists_import(const char *source_path, bool overwrite, playlists_import_
 	// --- the rest, by file name, in one pass over the index -------------------
 	const char **names = calloc((size_t)count, sizeof(*names));
 	char **hits = calloc((size_t)count, sizeof(*hits));
+	if (!names || !hits) {
+		free(names);
+		free(hits);
+		import_entries_free(entries, count);
+		return false;
+	}
 	if (names && hits) {
 		int wanted = 0;
 		for (int i = 0; i < count; i++) {

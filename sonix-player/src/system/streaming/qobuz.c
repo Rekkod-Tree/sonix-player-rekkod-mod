@@ -62,7 +62,7 @@ void qobuz_init(void) {
 	// it even when Qobuz is not configured.
 	qobuzsync_register_provider();
 
-	snprintf(base_url, sizeof(base_url), "%s", config_get("qobuz", "base_url", QOBUZ_BASE_DEFAULT));
+	snprintf(base_url, sizeof(base_url), "%s", config_get_copy("qobuz", "base_url", QOBUZ_BASE_DEFAULT, (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE));
 
 	const char *id = streamkeys_qobuz_app_id();
 	const char *secret = streamkeys_qobuz_app_secret();
@@ -71,8 +71,8 @@ void qobuz_init(void) {
 
 	// The token only, never the password: when it expires it is asked for once,
 	// and meanwhile nothing on disk is worth an account login.
-	snprintf(auth_token, sizeof(auth_token), "%s", config_get("qobuz", "token", ""));
-	snprintf(display_name, sizeof(display_name), "%s", config_get("qobuz", "user", ""));
+	snprintf(auth_token, sizeof(auth_token), "%s", config_get_copy("qobuz", "token", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE));
+	snprintf(display_name, sizeof(display_name), "%s", config_get_copy("qobuz", "user", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE));
 
 	format_id = (int)config_get_int("qobuz", "format", QOBUZ_FORMAT_HIRES192);
 	if (format_id != QOBUZ_FORMAT_MP3 && format_id != QOBUZ_FORMAT_CD && format_id != QOBUZ_FORMAT_HIRES96 &&

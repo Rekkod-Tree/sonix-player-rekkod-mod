@@ -45,7 +45,9 @@
 // log, with the file's name, never its contents.
 //
 // Thread contract: register at start-up (main thread, before the first
-// check). The rest may be called from any thread and never blocks: the
+// check). The rest may be called from any thread. set_root(NULL) waits for
+// a short filesystem commit to finish, but never waits for validation/network.
+// The
 // attempts run on a thread of their own, one at a time, started on the first
 // check that finds a file -- a player with no such file never has it. The
 // validate callbacks and the listener run on that thread.

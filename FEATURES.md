@@ -1,5 +1,28 @@
 ﻿# Features
 
+## Alpha22 reliability candidate
+
+- Card-import generations and source-file checks revoke late SD mutations.
+- HTTP rejects incomplete/malformed chunked bodies while retaining bounded prefixes.
+- Podcast checkpoints drain in-flight writes and reject previous-card jobs.
+- Config reads use caller-owned snapshots; revision-aware saves check durable replacement.
+- Graphic-EQ drags update audio immediately and save on release instead of each step.
+- Qobuz/Tidal/Subsonic publish growing-file bytes only after successful flush.
+- See `RELIABILITY_FIXES_2026-10-21.md` for contracts and verification limits.
+
+## Playback feedback candidate after alpha21
+
+- Play/pause taps stay within visible artwork; seek misses preserve playback.
+- Book artwork swipes select chapters/parts; the queue action opens chapters.
+  Shared rows show the current chapter and persistent natural-completion
+  marks. Seeks never infer earlier completion. The existing position worker
+  handles bounded, card-scoped history writes; no new timer/thread is added.
+- Repeated Previous has an eight-second restart window for headset holds.
+- M3U import accepts 20,000 entries with incremental allocation and rejects
+  oversized/failed reads before replacement. Yandex compact lists and bounded
+  page caches are tested beyond 5,000; construction failures are reported.
+- See `PLAYBACK_FEEDBACK_2026-10-21.md` for tests and remaining limits.
+
 ## Spotify integration candidate
 
 - The alpha21 R1 image omits the Spotify transport to stay within its fixed

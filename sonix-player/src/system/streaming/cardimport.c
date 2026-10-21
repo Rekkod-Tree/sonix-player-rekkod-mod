@@ -1,5 +1,6 @@
 #include "cardimport.h"
 
+#include <fcntl.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -35,6 +36,7 @@ static entry_t entries[SERVICES_MAX];
 static int entry_count;
 static char root[400];
 static bool worker_started;
+static unsigned long card_epoch;
 #define LISTENERS_MAX 4
 static cardimport_listener_t listeners[LISTENERS_MAX];
 static int listener_count;
@@ -49,10 +51,15 @@ void cardimport_register(const char *service, const char *file_name, cardimport_
 }
 
 void cardimport_add_listener(cardimport_listener_t l) {
-	if (!l || listener_count >= LISTENERS_MAX) {
+	if (!l)
+		return;
+	pthread_mutex_lock(&lock);
+	if (listener_count >= LISTENERS_MAX) {
+		pthread_mutex_unlock(&lock);
 		return;
 	}
 	listeners[listener_count++] = l;
+	pthread_mutex_unlock(&lock);
 	// An attempt made at start-up, before the interface was there to hear
 	// it: told now, so "signed in as..." is not lost to the boot.
 	for (int i = 0; i < entry_count; i++) {
@@ -102,18 +109,33 @@ static bool find_file(const char *card, const entry_t *e, char *out, size_t size
 
 // The non-empty lines of the file, trimmed: a BOM at its head, "\r", spaces
 // and tabs at both ends of a line. -1 when it cannot be read or is too big.
-static int read_lines(const char *path, char lines[][CARDIMPORT_LINE_MAX]) {
+static int read_lines(const char *path, char lines[][CARDIMPORT_LINE_MAX], struct stat *identity, char *original, size_t *original_size) {
 	struct stat st;
 	if (stat(path, &st) != 0 || st.st_size > CARDIMPORT_MAX_BYTES) {
 		return -1;
 	}
-	FILE *f = fopen(path, "rb");
+	int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+	FILE *f = fd >= 0 ? fdopen(fd, "rb") : NULL;
+	if (!f && fd >= 0)
+		close(fd);
 	if (!f) {
+		return -1;
+	}
+	if (fstat(fileno(f), identity) != 0 || !S_ISREG(identity->st_mode) || identity->st_size > CARDIMPORT_MAX_BYTES) {
+		fclose(f);
 		return -1;
 	}
 	char buf[CARDIMPORT_MAX_BYTES + 1];
 	size_t n = fread(buf, 1, CARDIMPORT_MAX_BYTES, f);
-	fclose(f);
+	bool ok = !ferror(f);
+	if (fclose(f) != 0)
+		ok = false;
+	if (!ok || n != (size_t)identity->st_size) {
+		memset(buf, 0, sizeof(buf));
+		return -1;
+	}
+	memcpy(original, buf, n);
+	*original_size = n;
 	buf[n] = '\0';
 	char *p = buf;
 	if (n >= 3 && (unsigned char)p[0] == 0xEF && (unsigned char)p[1] == 0xBB && (unsigned char)p[2] == 0xBF) {
@@ -147,15 +169,26 @@ static const char *result_name(cardimport_result_t r) {
 	return (unsigned)r < sizeof(NAMES) / sizeof(NAMES[0]) ? NAMES[r] : "?";
 }
 
-static void attempt(entry_t *e, const char *card, bool asked) {
+static void attempt(entry_t *e, const char *card, bool asked, unsigned long epoch) {
 	char path[600];
-	if (!card[0] || !find_file(card, e, path, sizeof(path))) {
+	pthread_mutex_lock(&lock);
+	if (epoch != card_epoch || !card[0] || !find_file(card, e, path, sizeof(path))) {
+		pthread_mutex_unlock(&lock);
 		return;
 	}
 	char message[256] = "";
 	cardimport_result_t result;
 	char(*lines)[CARDIMPORT_LINE_MAX] = calloc(CARDIMPORT_MAX_LINES, CARDIMPORT_LINE_MAX);
-	int count = lines ? read_lines(path, lines) : -1;
+	struct stat identity = {0};
+	char original[CARDIMPORT_MAX_BYTES];
+	size_t original_size = 0;
+	int count = lines ? read_lines(path, lines, &identity, original, &original_size) : -1;
+	pthread_mutex_unlock(&lock);
+	if (count < 0) {
+		free(lines);
+		memset(original, 0, sizeof(original));
+		return;
+	}
 	if (count <= 0) {
 		result = CARDIMPORT_INVALID;
 	} else if (!streamerr_online()) {
@@ -179,40 +212,65 @@ static void attempt(entry_t *e, const char *card, bool asked) {
 	} else if (!message[0] && result == CARDIMPORT_INVALID) {
 		snprintf(message, sizeof(message), tr("streaming_import_invalid"), file);
 	}
+	// set_root(NULL) waits for this short filesystem commit, never for the
+	// network validation. No storage/card lock is acquired under import lock.
+	pthread_mutex_lock(&lock);
+	struct stat now;
+	bool same = epoch == card_epoch && lstat(path, &now) == 0 && S_ISREG(now.st_mode) && now.st_dev == identity.st_dev && now.st_ino == identity.st_ino && now.st_size == identity.st_size;
+	if (same && original_size) {
+		char check[CARDIMPORT_MAX_BYTES + 1];
+		int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+		struct stat opened;
+		same = fd >= 0 && fstat(fd, &opened) == 0 && opened.st_dev == identity.st_dev && opened.st_ino == identity.st_ino && read(fd, check, sizeof(check)) == (ssize_t)original_size && memcmp(check, original, original_size) == 0;
+		if (fd >= 0)
+			close(fd);
+		memset(check, 0, sizeof(check));
+	}
+	memset(original, 0, sizeof(original));
+	if (!same) {
+		pthread_mutex_unlock(&lock);
+		return;
+	}
+	bool mutated = false;
 	switch (result) {
 	case CARDIMPORT_OK:
-		// The account is in internal storage now: the secret leaves the card.
-		if (unlink(path) != 0) {
-			fprintf(stderr, "cardimport: could not delete %s\n", path);
-		}
-		sync();
+		mutated = unlink(path) == 0;
 		break;
 	case CARDIMPORT_REFUSED:
 	case CARDIMPORT_INVALID: {
 		char bad[640];
 		snprintf(bad, sizeof(bad), "%s.bad", path);
-		remove(bad);
-		if (rename(path, bad) != 0) {
-			fprintf(stderr, "cardimport: could not rename %s\n", path);
-		}
-		sync();
+		// rename replaces the old .bad atomically; no separate removal.
+		mutated = rename(path, bad) == 0;
 		break;
 	}
 	case CARDIMPORT_OFFLINE:
 	case CARDIMPORT_BLOCKED:
-		break; // the file stays, tried again next time
+		break;
+	}
+	if (!mutated && (result == CARDIMPORT_OK || result == CARDIMPORT_REFUSED || result == CARDIMPORT_INVALID)) {
+		fprintf(stderr, "cardimport: could not remove or rename %s\n", path);
+	}
+	if (mutated) {
+		int fd = open(card, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+		if (fd >= 0) {
+			fsync(fd);
+			close(fd);
+		}
 	}
 	// An attempt nobody asked for that only found no network says nothing:
 	// a player started with Wi-Fi off would greet the user with it.
-	pthread_mutex_lock(&lock);
 	e->has_last = true;
 	e->undelivered = listener_count == 0;
 	e->last_asked = asked;
 	e->last = result;
 	snprintf(e->last_message, sizeof(e->last_message), "%s", message);
+	cardimport_listener_t notify[LISTENERS_MAX];
+	int n = listener_count;
+	memcpy(notify, listeners, n * sizeof(*notify));
 	pthread_mutex_unlock(&lock);
-	for (int i = 0; i < listener_count && (result != CARDIMPORT_OFFLINE || asked); i++) {
-		listeners[i](e->service, result, message);
+	for (int i = 0; i < n && (result != CARDIMPORT_OFFLINE || asked); i++) {
+		notify[i](e->service, result, message);
 	}
 }
 
@@ -236,11 +294,12 @@ static void *worker_main(void *arg) {
 		bool asked = e->asked;
 		e->pending = e->asked = false;
 		e->running = true;
+		unsigned long epoch = card_epoch;
 		char card[400];
 		snprintf(card, sizeof(card), "%s", root);
 		pthread_mutex_unlock(&lock);
 
-		attempt(e, card, asked);
+		attempt(e, card, asked, epoch);
 
 		pthread_mutex_lock(&lock);
 		e->running = false;
@@ -287,6 +346,9 @@ static void queue_checks(const char *only, bool asked) {
 
 void cardimport_set_root(const char *sd_root) {
 	pthread_mutex_lock(&lock);
+	card_epoch++;
+	for (int i = 0; i < entry_count; i++)
+		entries[i].pending = entries[i].asked = false;
 	snprintf(root, sizeof(root), "%s", sd_root ? sd_root : "");
 	pthread_mutex_unlock(&lock);
 	queue_checks(NULL, false);

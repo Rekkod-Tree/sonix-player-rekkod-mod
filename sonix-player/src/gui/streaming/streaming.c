@@ -174,7 +174,7 @@ static void tiles_save(void) {
 
 static void tiles_load(void) {
 	added_n = 0;
-	const char *saved = config_get("streaming", "tiles", NULL);
+	const char *saved = config_get_copy("streaming", "tiles", NULL, (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE);
 	if (saved) {
 		const char *at = saved;
 		while (*at && added_n < SVC_COUNT) {

@@ -640,9 +640,9 @@ void clock_init(void) {
 
 	// The located zone's rule as this build knows it, which may be newer than
 	// the one written down; the written one when the name is not in the table.
-	snprintf(zone_name, sizeof(zone_name), "%s", config_get("clock", "zone", ""));
+	snprintf(zone_name, sizeof(zone_name), "%s", config_get_copy("clock", "zone", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE));
 	const char *rule = tzrules_lookup(zone_name);
-	snprintf(zone_rule, sizeof(zone_rule), "%s", rule ? rule : (zone_name[0] ? config_get("clock", "zone_rule", "") : ""));
+	snprintf(zone_rule, sizeof(zone_rule), "%s", rule ? rule : (zone_name[0] ? config_get_copy("clock", "zone_rule", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE) : ""));
 
 	if (clock_utc_offset_known()) {
 		tz_refresh();

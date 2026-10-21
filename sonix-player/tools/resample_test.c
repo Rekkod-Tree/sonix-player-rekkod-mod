@@ -1,3 +1,4 @@
+#include "src/system/core/config.h"
 // Host test for src/system/audio/resample.c (44.1 -> 48 kHz polyphase).
 //
 //   gcc -O2 -I. -o /tmp/resample_test tools/resample_test.c src/system/audio/resample.c -lm && /tmp/resample_test
@@ -20,11 +21,15 @@
 #include "src/system/audio/resample.h"
 
 // resample.c reads its setting through config.h; the test has no config.
-const char *config_get(const char *section, const char *key, const char *fallback) {
+const char *stub_config_get(const char *section, const char *key, const char *fallback) {
 	(void)section;
 	(void)key;
 	return fallback;
 }
+const char *config_get_copy(const char *section, const char *key, const char *fallback, char *out, size_t size) {
+ const char *v=stub_config_get(section,key,fallback); if(v && size) snprintf(out,size,"%s",v); return v ? out : NULL;
+}
+
 
 #define IN_RATE 44100
 #define OUT_RATE 48000

@@ -1,3 +1,4 @@
+#include "src/system/core/config.h"
 /* Real scanner and SQLite resume persistence; metadata readers are fixtures.
  * cc -std=gnu11 -O1 -Wall -Wextra -I. -ffunction-sections -fdata-sections
  * tests/audiobook_import_resume_test.c build_host/system/db/sqlite3_impl.o
@@ -6,12 +7,16 @@
 #include "src/system/library/audiobookdb.c"
 #include <assert.h>
 
-const char *config_get(const char *section, const char *key, const char *fallback) {
+const char *stub_config_get(const char *section, const char *key, const char *fallback) {
 	(void)section;
 	(void)key;
 	(void)fallback;
 	return "Books/Audio";
 }
+const char *config_get_copy(const char *section, const char *key, const char *fallback, char *out, size_t size) {
+ const char *v=stub_config_get(section,key,fallback); if(v && size) snprintf(out,size,"%s",v); return v ? out : NULL;
+}
+
 void file_identity_read(const char *path, file_identity_t *out) {
 	(void)path;
 	memset(out, 0, sizeof(*out));

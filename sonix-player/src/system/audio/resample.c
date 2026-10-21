@@ -210,4 +210,4 @@ int resample_s32(resampler_t *r, const int32_t *in, int in_frames, int32_t *out)
 	}
 }
 
-bool resample_quality_wanted(void) { return strcmp(config_get("bluetooth", "resampler", "quality"), "fast") != 0; }
+bool resample_quality_wanted(void) { return strcmp(config_get_copy("bluetooth", "resampler", "quality", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE), "fast") != 0; }

@@ -2080,10 +2080,10 @@ static void open_login_cb(lv_event_t *e) {
 	char server[SUBSONIC_SERVER_MAX];
 	subsonic_server(server, sizeof(server));
 	if (!server[0]) {
-		snprintf(server, sizeof(server), "%s", config_get("subsonic", "server", ""));
+		snprintf(server, sizeof(server), "%s", config_get_copy("subsonic", "server", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE));
 	}
 	lv_textarea_set_text(server_field, server);
-	lv_textarea_set_text(user_field, config_get("subsonic", "user", ""));
+	lv_textarea_set_text(user_field, config_get_copy("subsonic", "user", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE));
 	lv_textarea_set_text(password_field, "");
 	lv_textarea_set_password_mode(password_field, true);
 	password_eye_refresh();
