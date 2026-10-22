@@ -41,6 +41,11 @@
   Cached profile hits avoid network and cache rewrites; cold transfers fail early
   when the required card write is impossible. Index staging uses bounded internal
   disk storage, without a RAM fallback or a new background polling timer.
+- EQ, PEQ and MSEB rebuild from a coherent settings snapshot, preventing a GUI
+  edit during rebuild from leaving old coefficients marked as current. Audio
+  retains its previous complete snapshot when publication is busy; it does not
+  wait for GUI or file IO. Filter math and preset formats remain unchanged.
+  See `EQ_SETTINGS_2026-10-22.md` for verification and measured overhead.
 
 ## Palette controls, search and playlist safety (alpha25)
 
