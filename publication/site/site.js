@@ -43,11 +43,19 @@ $('#expand-features').addEventListener('click',()=>{
   $('#expand-features').textContent=open?'Свернуть найденные':'Развернуть найденные';
 });
 function revealHash(){
+  const sectionIds=['appearance','screens','gestures','setup','install','engineering'];
+  if(sectionIds.some(id=>location.hash==='#'+id)){
+    const panel=document.querySelector(location.hash+' > .section-panel');if(panel)panel.open=true;
+  }
   if(!location.hash.startsWith('#feature-'))return;
   const target=document.getElementById(location.hash.slice(1));
   if(target?.classList.contains('feature')){resetFilters();target.closest('.catalog-group').open=true;target.open=true;requestAnimationFrame(()=>target.scrollIntoView({block:'start',behavior:'instant'}));}
 }
 window.addEventListener('hashchange',revealHash);
+all('a[href^="#"]').forEach(link=>link.addEventListener('click',()=>{
+  const id=link.getAttribute('href').slice(1);
+  if(['appearance','screens','gestures','setup','install','engineering'].includes(id))document.getElementById(id).querySelector(':scope > .section-panel').open=true;
+}));
 filterFeatures();revealHash();
 
 const gestureSets={
@@ -65,9 +73,9 @@ function renderGestures(){
 $('#gesture-context').addEventListener('change',renderGestures);renderGestures();
 
 const upgradeNotes={
-  sonix:['Полный дифф относительно Sonix 1.3.0: собственный интерфейс, Яндекс Музыка, Звук, OpenSubsonic и офлайн-книги.','Свои главная, палитры, жесты и доработки звука, очереди, карты и фоновой работы.','В каталоге отдельно обозначены собственные изменения и функции Sonix, перенесённые с адаптацией.'],
-  alpha10:['После alpha10: настраиваемая главная, продолжение книги и быстрые действия Яндекса.','Офлайн-книги Яндекса/Звука, подкасты, названия ленивых треков и общий таймер сна.','Дополнительные палитры, большие плейлисты, новая системная база и текущая доводка v1.4.0.'],
-  alpha20:['После alpha20: восемь дополнительных палитр и независимые настройки обложек и заглушек.','Быстрое продолжение книги, свайпы глав, крупные плейлисты и сохранение места в каталогах.','К v1.4.0: компактный мини-плеер, доработки AutoEQ, EQ, поиска, OTA и фоновой работы. Промежуточные alpha не считаются релизами.']
+  sonix:['Весь дифф от Sonix 1.3.0. Свои изменения и адаптации отмечены отдельно.'],
+  alpha10:['Главная с ярлыками, продолжение книги, быстрые действия Яндекса.','Офлайн-книги, подкасты, общий сон, палитры, большие плейлисты и новая системная база.'],
+  alpha20:['Палитры, обложки, главы книг, большие плейлисты и возврат в каталоги.','К v1.4.0: компактный мини-плеер, AutoEQ, EQ, поиск, OTA и фоновые задачи.']
 };
 function renderUpgrade(){const selected=$('#upgrade-origin')?.value;if(selected)$('#upgrade-notes').innerHTML=upgradeNotes[selected].map(text=>`<li>${escapeHTML(text)}</li>`).join('');}
 $('#upgrade-origin')?.addEventListener('change',renderUpgrade);renderUpgrade();

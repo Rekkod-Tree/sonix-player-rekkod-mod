@@ -12,6 +12,7 @@ const docs='https://github.com/Rekkod-Tree/sonix-player-rekkod-mod/blob/main/';
 const ids=new Set();
 const origins={mod:'Доработка мода',adapted:'Адаптация Sonix'};
 const states={available:'Реализовано',preparing:'Дорабатывается'};
+const categoryNotes={ui:'Темы, палитры, обложки, мини-плеер',home:'Ярлыки, продолжение книги, жесты, сон',services:'Яндекс Музыка, Звук, Subsonic, скачивание',books:'Офлайн-книги, главы, прогресс, выпуски',library:'Поиск, очередь, плейлисты, сортировка',audio:'Профили, кодеки, AutoEQ, обработка',storage:'USB, загрузки, сохранение, recovery',performance:'LTO, PGO, фоновые задачи, перерисовки',system:'HiBy 2.0, библиотеки, OTA, запуск',upstream:'История, RSS, тексты, зарядка, теги'};
 const renderedFeatures=data.features.map(row=>{
   const [id,category,title,body,origin,status,source]=row;
   if(row.length!==7||ids.has(id)||!data.categories[category]||!origins[origin]||!states[status]||!existsSync(join(repo,source)))throw new Error(`Invalid feature: ${id}`);
@@ -20,7 +21,7 @@ const renderedFeatures=data.features.map(row=>{
 });
 const features=Object.entries(data.categories).map(([category,name],index)=>{
   const entries=renderedFeatures.filter((_,i)=>data.features[i][1]===category);
-  return `<details class="catalog-group" data-group="${category}"><summary><span class="group-index">${String(index+1).padStart(2,'0')}</span><span class="group-title">${esc(name)}</span><span class="group-count">${entries.length} пунктов</span><span class="disclosure" aria-hidden="true">+</span></summary><div class="group-items">${entries.join('\n')}</div></details>`;
+  return `<details class="catalog-group" data-group="${category}"><summary><span class="group-index">${String(index+1).padStart(2,'0')}</span><span class="group-title">${esc(name)}<small>${esc(categoryNotes[category])}</small></span><span class="group-count">${entries.length} пунктов</span><span class="disclosure" aria-hidden="true">+</span></summary><div class="group-items">${entries.join('\n')}</div></details>`;
 }).join('\n');
 const gallery=[
  ['r1-home.png','Главная под себя','Пять ярлыков и постоянное «Ещё».'],
