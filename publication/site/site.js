@@ -72,14 +72,6 @@ function renderGestures(){
 }
 $('#gesture-context').addEventListener('change',renderGestures);renderGestures();
 
-const upgradeNotes={
-  sonix:['Весь дифф от Sonix 1.3.0. Свои изменения и адаптации отмечены отдельно.'],
-  alpha10:['Главная с ярлыками, продолжение книги, быстрые действия Яндекса.','Офлайн-книги, подкасты, общий сон, палитры, большие плейлисты и новая системная база.'],
-  alpha20:['Палитры, обложки, главы книг, большие плейлисты и возврат в каталоги.','К v1.4.0: компактный мини-плеер, AutoEQ, EQ, поиск, OTA и фоновые задачи.']
-};
-function renderUpgrade(){const selected=$('#upgrade-origin')?.value;if(selected)$('#upgrade-notes').innerHTML=upgradeNotes[selected].map(text=>`<li>${escapeHTML(text)}</li>`).join('');}
-$('#upgrade-origin')?.addEventListener('change',renderUpgrade);renderUpgrade();
-
 const rgbHex=hex=>[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)/255);
 const toHex=rgb=>'#'+rgb.map(c=>Math.round(c*255).toString(16).padStart(2,'0')).join('');
 const mixHex=(a,b,t)=>toHex(rgbHex(a).map((v,i)=>v*(1-t)+rgbHex(b)[i]*t));
