@@ -2,6 +2,7 @@
 #define GUI_SX_TOAST_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #include "lvgl/lvgl.h"
 
@@ -51,6 +52,11 @@ void sx_toast_glyph(const lv_image_dsc_t *glyph, lv_color_t colour, const char *
 void sx_toast_busy(const char *text, bool dismissable);
 void sx_toast_busy_end(void);
 bool sx_toast_busy_showing(void);
+
+// UI thread only. A replacement/dismissal invalidates the returned owner ID.
+// Ending an old owner leaves a newer toast untouched; existing APIs are unchanged.
+uint64_t sx_toast_busy_owned(const char *text, bool dismissable);
+bool sx_toast_busy_end_owned(uint64_t owner);
 
 // Takes whatever is up away now (no undo).
 void sx_toast_dismiss(void);

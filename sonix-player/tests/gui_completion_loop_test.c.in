@@ -1,0 +1,81 @@
+#include <assert.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+#include <poll.h>
+#include <pthread.h>
+#define MAIN_LOOP_MAX_SLEEP_MS 250
+#define GUI_POST_MAX 32
+#define GUI_LATEST_MAX 4
+typedef struct {void(*cb)(void*);void *user;} gui_post_t;
+static pthread_mutex_t post_lock=PTHREAD_MUTEX_INITIALIZER;
+static gui_post_t post_ring[GUI_POST_MAX],post_latest[GUI_LATEST_MAX];
+static int post_head,post_count,post_wake_fd=-1;
+@ACTUAL_BRIDGE@
+static void a(void*p){(void)p;}static void b(void*p){(void)p;}static void c(void*p){(void)p;}static void d(void*p){(void)p;}
+
+typedef struct {bool ready,closing;int services,delivered,disposed,shutdowns;} module_t;
+static module_t modules[3];
+static bool lcd_on,late_publish,timer_paused=true;
+static int lcd_wakes,lazy_init_calls,passes,polls,bridge_services,touch_errors,touch_events,wakes;
+static int phase,expected_ticks=5;
+static volatile bool running=true;
+static unsigned ui_heartbeat;
+static void module_service(int id) {
+    module_t*m=&modules[id];assert(!m->closing);assert(phase==id);phase++;
+    m->services++;if(m->ready){m->ready=false;m->delivered++;}
+}
+static void module_close(int id) {module_t*m=&modules[id];assert(!m->closing);m->closing=true;m->shutdowns++;if(m->ready){m->ready=false;m->disposed++;}}
+void gearboypage_service_completion(void){module_service(0);} void ebookcovers_service_completion(void){module_service(1);} void peqautoeq_service_completion(void){module_service(2);}
+void gearboypage_shutdown_completions(void){module_close(0);}void ebookcovers_shutdown_completions(void){module_close(1);}void peqautoeq_shutdown_completions(void){module_close(2);}
+@ACTUAL_GUI_COMPLETION_HOOKS@
+static void perfstat_pass_begin(void){phase=0;}
+static uint32_t lv_timer_handler(void){assert(completions_closing||phase==3);passes++;if(late_publish&&passes==1){for(int i=0;i<3;i++)modules[i].ready=true;assert(!gui_post(a,NULL));}return timer_paused?UINT32_MAX:7;}
+static void perfstat_pass_end(void){}
+static int gui_post_wake_fd(void){return post_wake_fd;}
+static int touch_poll_fd(void){return -1;}
+static void perfstat_woke(bool a_,bool b_){(void)a_;(void)b_;wakes++;}
+static void touch_give_up_events(void){touch_errors++;}
+static void touch_wake(void){touch_events++;}
+static void gui_post_service(void){bridge_services++;}
+// Any accidental common-hook expansion into these facilities is observable.
+static __attribute__((unused)) void gui_init_rest(void){lazy_init_calls++;}
+static __attribute__((unused)) void power_wake(void){lcd_wakes++;lcd_on=true;}
+int poll(struct pollfd *fds,nfds_t count,int timeout){
+    assert(count==2&&passes==polls+1);assert(timeout==(timer_paused?250:7));
+    assert(!completions_closing?phase==3:true);polls++;
+    if(polls>=expected_ticks)running=false;
+    if(post_wake_fd<0)return 0;
+    if(polls==1){fds[0].revents=POLLIN;return 1;}
+    if(polls==2){fds[1].revents=POLLHUP;return 1;}
+    if(polls==3){fds[1].revents=POLLIN;return 1;}
+    if(polls==4)return -1;
+    return 0;
+}
+static void actual_main_loop(void){
+@ACTUAL_MAIN_WHILE@
+@ACTUAL_MAIN_SHUTDOWN@
+}
+int main(int argc,char **argv){
+    assert(argc==2);
+    for(int i=0;i<32;i++)assert(gui_post(a,NULL));assert(gui_post_latest(a,NULL));assert(gui_post_latest(b,NULL));assert(gui_post_latest(c,NULL));assert(gui_post_latest(d,NULL));
+    if(!strcmp(argv[1],"awake-branches")){post_wake_fd=7;lcd_on=true;timer_paused=false;}
+    if(!strcmp(argv[1],"late-while-blank"))late_publish=true;
+    else for(int i=0;i<3;i++)modules[i].ready=true;
+    if(!strcmp(argv[1],"zero-loop-exit"))running=false;
+    bool original_lcd=lcd_on;actual_main_loop();
+    for(int i=0;i<3;i++){
+        assert(modules[i].shutdowns==1&&modules[i].closing);
+        if(!strcmp(argv[1],"zero-loop-exit")){assert(modules[i].services==0&&modules[i].disposed==1&&!modules[i].delivered);}
+        else assert(modules[i].services==expected_ticks&&modules[i].delivered==1&&!modules[i].disposed);
+    }
+    assert(lcd_on==original_lcd&&!lcd_wakes&&!lazy_init_calls);
+    assert(post_count==GUI_POST_MAX);for(int i=0;i<4;i++)assert(post_latest[i].cb);
+    if(!strcmp(argv[1],"awake-branches"))assert(bridge_services==1&&touch_errors==1&&touch_events==1&&wakes==5);
+    else assert(!bridge_services&&!touch_errors&&!touch_events);
+    int calls=modules[0].services;gui_shutdown_completions();gui_service_completions();
+    assert(modules[0].services==calls&&modules[0].shutdowns==1);
+    puts("PASS actual loop/common hooks: both queues full, pre-LVGL drain, blank/paused/noeventfd, branches, closing/idempotence, no new LCD wake/lazy init");
+}

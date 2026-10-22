@@ -36,3 +36,7 @@ void toast_busy_end(void) { sx_toast_busy_end(); }
 void toast_busy_dismissable(const char *text) { sx_toast_busy(text ? tr(text) : "", true); }
 
 bool toast_busy_showing(void) { return sx_toast_busy_showing(); }
+
+uint64_t toast_busy_owned(const char *text) { return sx_toast_busy_owned(text ? tr(text) : "", false); }
+
+bool toast_busy_end_owned(uint64_t owner) { return sx_toast_busy_end_owned(owner); }

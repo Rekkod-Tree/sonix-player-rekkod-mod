@@ -2634,6 +2634,9 @@ int main(int argc, char **argv) {
 	while (running) {
 		ui_heartbeat++;
 		perfstat_pass_begin();
+		// Owned terminal results must not depend on a paused drain timer or
+		// message capacity. Apply before LVGL computes its next frame/wait.
+		gui_service_completions();
 		uint32_t time_till_next = lv_timer_handler();
 		perfstat_pass_end();
 		if (time_till_next > MAIN_LOOP_MAX_SLEEP_MS) {
@@ -2665,6 +2668,9 @@ int main(int argc, char **argv) {
 		}
 	}
 
+	// Stop new module work before ending GUI service. Existing detached work
+	// may finish/dispose privately; process exit is not a proven bounded join.
+	gui_shutdown_completions();
 	printf("\n");
 
 	return 0;

@@ -1,0 +1,49 @@
+#include <assert.h>
+#include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include "src/system/gearboy/gbdb.h"
+
+static void *owned[256];static int live,realloc_calls,fail_realloc,fail_calloc,fail_malloc;
+static void add(void *p) { if(!p)return;for(int i=0;i<256;i++)if(!owned[i]){owned[i]=p;live++;return;}assert(0); }
+static void remove_owner(void *p) { if(!p)return;for(int i=0;i<256;i++)if(owned[i]==p){owned[i]=NULL;live--;return;}assert(0); }
+static void *test_malloc(size_t n) { if(fail_malloc){errno=ENOMEM;return NULL;}void*p=malloc(n);add(p);return p; }
+static void *test_calloc(size_t n,size_t s) { if(fail_calloc){errno=ENOMEM;return NULL;}void*p=calloc(n,s);add(p);return p; }
+static void *test_realloc(void *p,size_t n) { if(++realloc_calls==fail_realloc){errno=ENOMEM;return NULL;}void *old=p;remove_owner(old);void *q=realloc(p,n);if(!q){add(old);return NULL;}add(q);return q; }
+static void test_free(void *p) { remove_owner(p);free(p); }
+#define malloc test_malloc
+#define calloc test_calloc
+#define realloc test_realloc
+#define free test_free
+#include "@ACTUAL_GBDB_C@"
+#undef malloc
+#undef calloc
+#undef realloc
+#undef free
+
+static void make_rom(const char *root,int i) {
+    char path[1024];snprintf(path,sizeof(path),"%s/Games/GB/game_%d.gb",root,i);
+    FILE*f=fopen(path,"wb");assert(f);char buf[1024]={0};for(int k=0;k<32;k++)assert(fwrite(buf,1,sizeof(buf),f)==sizeof(buf));assert(!fclose(f));
+}
+int main(int argc,char**argv) {
+    assert(argc==2);gbrom_t *list=(gbrom_t*)1;
+    gbdb_set_root(NULL);assert(gbdb_scan(&list,NULL,NULL)==-1&&!list&&!live);
+    const char *root=argv[1];char path[1024];
+    snprintf(path,sizeof(path),"%s/Games",root);assert(!mkdir(path,0700));snprintf(path,sizeof(path),"%s/Games/GB",root);assert(!mkdir(path,0700));
+    gbdb_set_root(root);assert(gbdb_scan(&list,NULL,NULL)==0&&!list&&!live);
+    make_rom(root,0);
+    fail_realloc=1;realloc_calls=0;assert(gbdb_scan(&list,NULL,NULL)==-ENOMEM&&!list&&!live);
+    fail_realloc=0;fail_calloc=1;assert(gbdb_scan(&list,NULL,NULL)==-ENOMEM&&!list&&!live);fail_calloc=0;
+    fail_malloc=1;assert(gbdb_scan(&list,NULL,NULL)==-ENOMEM&&!list&&!live);fail_malloc=0;
+    // Fresh-cache allocation happens after the candidate list allocation.
+    fail_realloc=2;realloc_calls=0;assert(gbdb_scan(&list,NULL,NULL)==-ENOMEM&&!list&&!live);fail_realloc=0;
+    assert(gbdb_scan(&list,NULL,NULL)==1&&list&&live==1);assert(!strcmp(list[0].name,"game 0"));test_free(list);assert(!live);
+    // Loading the existing cache allocates independently of the ROM list.
+    fail_realloc=2;realloc_calls=0;assert(gbdb_scan(&list,NULL,NULL)==-ENOMEM&&!list&&!live);fail_realloc=0;
+    for(int i=1;i<33;i++)make_rom(root,i);
+    fail_realloc=2;realloc_calls=0;assert(gbdb_scan(&list,NULL,NULL)==-ENOMEM&&!list&&!live);fail_realloc=0;
+    assert(gbdb_scan(&list,NULL,NULL)==33&&list);test_free(list);assert(!live);
+    puts("PASS actual gbdb: missing root/empty valid, list growth/wanted/CRC/cache OOM terminal, no partial success/leak");
+}

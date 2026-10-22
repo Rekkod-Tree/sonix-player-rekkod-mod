@@ -129,6 +129,7 @@ uint32_t gbdb_crc32_file(const char *path) {
 	uint8_t *buf = malloc(CRC_CHUNK);
 	if (!buf) {
 		fclose(f);
+		errno = ENOMEM;
 		return 0;
 	}
 
@@ -199,13 +200,13 @@ static void cache_path(char *out, size_t size, const char *root) {
 	snprintf(out, size, "%s/%s/%s", root, CACHE_DIR, CACHE_FILE);
 }
 
-static void cache_load(cache_t *c, const char *root) {
+static bool cache_load(cache_t *c, const char *root) {
 	char path[WORK_PATH_MAX];
 	cache_path(path, sizeof(path), root);
 
 	FILE *f = fopen(path, "r");
 	if (!f) {
-		return;
+		return errno != ENOMEM;
 	}
 
 	// Twice GBROM_PATH_MAX plus a name covers any line cache_save() can have
@@ -244,12 +245,14 @@ static void cache_load(cache_t *c, const char *root) {
 		snprintf(e.path, sizeof(e.path), "%s", field[3]);
 		snprintf(e.name, sizeof(e.name), "%s", field[4]);
 
-		if (e.path[0]) {
-			cache_push(c, &e);
+		if (e.path[0] && !cache_push(c, &e)) {
+			fclose(f);
+			return false;
 		}
 	}
 
 	fclose(f);
+	return true;
 }
 
 // mkdir -p for the two levels needed: .local almost always exists already (the
@@ -470,17 +473,21 @@ static bool romlist_push(romlist_t *l, const gbrom_t *r) {
 
 // Lists the candidate files in one directory, without CRC or name. The
 // expensive work comes later, and only for the ones the cache does not cover.
-static void collect_dir(romlist_t *list, const char *root, const char *subdir, bool color_dir) {
+static bool collect_dir(romlist_t *list, const char *root, const char *subdir, bool color_dir) {
 	char dir[WORK_PATH_MAX];
 	snprintf(dir, sizeof(dir), "%s/%s", root, subdir);
 
 	DIR *d = opendir(dir);
 	if (!d) {
-		return;
+		return errno != ENOMEM;
 	}
 
 	struct dirent *de;
-	while ((de = readdir(d)) != NULL) {
+	for (;;) {
+		errno = 0;
+		de = readdir(d);
+		if (!de)
+			break;
 		if (de->d_name[0] == '.') {
 			continue;
 		}
@@ -510,10 +517,15 @@ static void collect_dir(romlist_t *list, const char *root, const char *subdir, b
 			continue;
 		}
 
-		romlist_push(list, &r);
+		if (!romlist_push(list, &r)) {
+			closedir(d);
+			return false;
+		}
 	}
 
+	bool complete = errno != ENOMEM;
 	closedir(d);
+	return complete;
 }
 
 static int compare_by_name(const void *a, const void *b) {
@@ -533,8 +545,10 @@ int gbdb_scan(gbrom_t **out, bool (*progress)(int done, int total, void *user), 
 	}
 
 	romlist_t list = {0};
-	collect_dir(&list, root, DIR_GB, false);
-	collect_dir(&list, root, DIR_GBC, true);
+	if (!collect_dir(&list, root, DIR_GB, false) || !collect_dir(&list, root, DIR_GBC, true)) {
+		free(list.items);
+		return -ENOMEM;
+	}
 
 	// Logged on every scan, not only on failure: "nothing found" and "looking
 	// in the wrong place" are the same empty screen, and without this line they
@@ -547,12 +561,21 @@ int gbdb_scan(gbrom_t **out, bool (*progress)(int done, int total, void *user), 
 	}
 
 	cache_t cache = {0};
-	cache_load(&cache, root);
+	if (!cache_load(&cache, root)) {
+		cache_free(&cache);
+		free(list.items);
+		return -ENOMEM;
+	}
 
 	// First pass: entries answered by the cache are done; the rest are read
 	// through to compute their CRC. This is the only expensive part, and the
 	// one `progress` reports on.
 	wanted_t *wanted = calloc((size_t)list.count, sizeof(*wanted));
+	if (!wanted) {
+		cache_free(&cache);
+		free(list.items);
+		return -ENOMEM;
+	}
 	int wanted_count = 0;
 	bool stopped = false;
 
@@ -579,7 +602,14 @@ int gbdb_scan(gbrom_t **out, bool (*progress)(int done, int total, void *user), 
 			break;
 		}
 
+		errno = 0;
 		r->crc = gbdb_crc32_file(r->path);
+		if (!r->crc && errno == ENOMEM) {
+			free(wanted);
+			cache_free(&cache);
+			free(list.items);
+			return -ENOMEM;
+		}
 		if (r->crc && wanted) {
 			wanted[wanted_count].crc = r->crc;
 			wanted_count++;
@@ -623,6 +653,7 @@ int gbdb_scan(gbrom_t **out, bool (*progress)(int done, int total, void *user), 
 	// so the next scan picks them up.
 	{
 		cache_t fresh = {0};
+		bool complete = true;
 		for (int i = 0; i < list.count; i++) {
 			const gbrom_t *r = &list.items[i];
 			if (!r->crc) {
@@ -639,7 +670,16 @@ int gbdb_scan(gbrom_t **out, bool (*progress)(int done, int total, void *user), 
 			e.mtime = (long long)st.st_mtime;
 			snprintf(e.path, sizeof(e.path), "%s", r->path);
 			snprintf(e.name, sizeof(e.name), "%s", r->from_db ? r->name : "");
-			cache_push(&fresh, &e);
+			if (!cache_push(&fresh, &e)) {
+				complete = false;
+				break;
+			}
+		}
+		if (!complete) {
+			cache_free(&fresh);
+			cache_free(&cache);
+			free(list.items);
+			return -ENOMEM;
 		}
 		cache_save(&fresh, root);
 		cache_free(&fresh);

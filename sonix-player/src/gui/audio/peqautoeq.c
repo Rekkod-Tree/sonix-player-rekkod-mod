@@ -60,6 +60,8 @@ typedef struct {
 	char cache[768];
 	char *profile_text;
 	size_t profile_size;
+	uint64_t request_generation;
+	uint64_t toast_owner;
 } job_t;
 
 static gui_config_t *cfg;
@@ -78,6 +80,15 @@ static int result_count;
 static void (*reload_cb)(void);
 static pthread_mutex_t job_lock = PTHREAD_MUTEX_INITIALIZER;
 static bool job_busy;
+static bool job_closing;
+static job_t *ready_job;
+// GUI-owned page/request state, never read by the worker.
+static uint64_t search_generation;
+static uint64_t pending_results_generation;
+// Matches the existing longest combined profile-applied message, without allocation.
+static char pending_notice[512];
+static bool pending_notice_error;
+static uint64_t pending_notice_generation;
 
 static void job_done(void *user);
 static void result_clicked(lv_event_t *event);
@@ -171,7 +182,7 @@ static char *read_file(const char *path, size_t max_size, size_t *size_out) {
 
 static bool begin_job(void) {
 	pthread_mutex_lock(&job_lock);
-	bool ok = !job_busy;
+	bool ok = !job_busy && !job_closing && !ready_job;
 	if (ok) {
 		job_busy = true;
 	}
@@ -581,6 +592,29 @@ static bool download_profile(job_t *job) {
 	return true;
 }
 
+static void free_job(job_t *job) {
+	if (!job)
+		return;
+	free(job->profile_text);
+	free(job);
+}
+
+static void report_status(const char *text, bool error, bool announce, uint64_t request_generation) {
+	if (job_closing)
+		return;
+	if (announce && !toast_busy_showing()) {
+		pending_notice[0] = '\0';
+		if (error)
+			toast_error(text);
+		else
+			toast_success(text);
+	} else {
+		snprintf(pending_notice, sizeof(pending_notice), "%s", text);
+		pending_notice_error = error;
+		pending_notice_generation = request_generation;
+	}
+}
+
 static void *worker(void *user) {
 	job_t *job = user;
 	thread_be_background("autoeq");
@@ -597,40 +631,52 @@ static void *worker(void *user) {
 		download_profile(job);
 	}
 
-	if (!gui_post(job_done, job)) {
-		free(job->profile_text);
-		free(job);
-		end_job();
+	pthread_mutex_lock(&job_lock);
+	if (job_closing) {
+		job_busy = false;
+		pthread_mutex_unlock(&job_lock);
+		free_job(job);
+		return NULL;
 	}
+	ready_job = job;
+	pthread_mutex_unlock(&job_lock);
+	// The notification owns no payload. Direct GUI service also works if full.
+	(void)gui_post(job_done, NULL);
 	return NULL;
 }
 
 static bool start_job(job_t *job, const char *busy_text) {
+	if (!job)
+		return false;
 	if (!begin_job()) {
-		free(job);
+		free_job(job);
 		return false;
 	}
-	toast_busy(busy_text);
+	pending_notice[0] = '\0';
+	pending_results_generation = 0;
+	if (job->action == JOB_SEARCH)
+		job->request_generation = ++search_generation;
+	job->toast_owner = toast_busy_owned(busy_text);
 
 	pthread_t thread;
 	if (pthread_create(&thread, NULL, worker, job) != 0) {
 		end_job();
-		free(job);
-		toast_busy_end();
-		toast_error(tr("peq_autoeq_error_start"));
+		bool owned = toast_busy_end_owned(job->toast_owner);
+		report_status(tr("peq_autoeq_error_start"), true, owned, job->request_generation);
+		free_job(job);
 		return false;
 	}
 	pthread_detach(thread);
 	return true;
 }
 
-static bool save_and_apply(job_t *job) {
+static bool save_and_apply(job_t *job, bool announce) {
 	char peq_dir[600];
 	char stage_name[40];
 	char stage_path[700];
 	char preset_path[700];
 	if (!cfg || !cfg->sd_root_path || !cfg->sd_root_path[0] || !path_join(peq_dir, sizeof(peq_dir), cfg->sd_root_path, "PEQ") || !make_dir(peq_dir)) {
-		toast_error(tr("peq_autoeq_error_peq_folder"));
+		report_status(tr("peq_autoeq_error_peq_folder"), true, announce, 0);
 		return false;
 	}
 
@@ -639,7 +685,7 @@ static bool save_and_apply(job_t *job) {
 	int n = snprintf(stage_path, sizeof(stage_path), "%s/%s.txt", peq_dir, stage_name);
 	int p = snprintf(preset_path, sizeof(preset_path), "%s/%s.txt", peq_dir, job->preset);
 	if (n < 0 || (size_t)n >= sizeof(stage_path) || p < 0 || (size_t)p >= sizeof(preset_path) || !write_file(stage_path, job->profile_text, job->profile_size)) {
-		toast_error(tr("peq_autoeq_error_save_profile"));
+		report_status(tr("peq_autoeq_error_save_profile"), true, announce, 0);
 		return false;
 	}
 
@@ -648,19 +694,19 @@ static bool save_and_apply(job_t *job) {
 	int ignored = 0;
 	if (!peq_preset_load(stage_name, &ignored)) {
 		remove(stage_path);
-		toast_error(tr("peq_autoeq_error_unsupported_profile"));
+		report_status(tr("peq_autoeq_error_unsupported_profile"), true, announce, 0);
 		return false;
 	}
 	struct stat existing;
 	bool replaced = stat(preset_path, &existing) == 0;
 	if (!replaced && errno != ENOENT) {
 		remove(stage_path);
-		toast_error(tr("peq_autoeq_error_save_preset"));
+		report_status(tr("peq_autoeq_error_save_preset"), true, announce, 0);
 		return false;
 	}
 	if (rename(stage_path, preset_path) != 0) {
 		remove(stage_path);
-		toast_error(tr("peq_autoeq_error_save_preset"));
+		report_status(tr("peq_autoeq_error_save_preset"), true, announce, 0);
 		return false;
 	}
 
@@ -669,22 +715,26 @@ static bool save_and_apply(job_t *job) {
 	if (reload_cb) {
 		reload_cb();
 	}
+	if (job_closing)
+		return true;
 	if (replaced && ignored) {
 		char message[512];
 		snprintf(message, sizeof(message), "%s %s", tr("peq_autoeq_unsupported_filters"), tr("peq_autoeq_profile_applied_replaced"));
-		toast_success(message);
+		report_status(message, false, announce, 0);
 	} else if (replaced) {
-		toast_success(tr("peq_autoeq_profile_applied_replaced"));
+		report_status(tr("peq_autoeq_profile_applied_replaced"), false, announce, 0);
 	} else if (ignored) {
-		toast_success(tr("peq_autoeq_unsupported_filters"));
+		report_status(tr("peq_autoeq_unsupported_filters"), false, announce, 0);
 	} else {
-		toast_success(tr("peq_autoeq_profile_applied"));
+		report_status(tr("peq_autoeq_profile_applied"), false, announce, 0);
 	}
-	switch_screen_return_to(peqpage_screen());
+	lv_obj_t *active = lv_screen_active();
+	if (announce && !toast_busy_showing() && (active == search_screen || active == results_screen))
+		switch_screen_return_to(peqpage_screen());
 	return true;
 }
 
-static void rebuild_results(job_t *job) {
+static void rebuild_results(job_t *job, bool navigate) {
 	result_count = job->result_count;
 	memcpy(result_items, job->results, sizeof(result_items));
 	lv_obj_clean(search_list);
@@ -697,27 +747,96 @@ static void rebuild_results(job_t *job) {
 	} else {
 		lv_obj_set_hidden(results_empty, false);
 	}
-	switch_screen(results_screen);
+	if (navigate)
+		switch_screen(results_screen);
+}
+
+static void service_deferred(void) {
+	if (job_closing)
+		return;
+	if (pending_notice_generation && pending_notice_generation != search_generation)
+		pending_notice[0] = '\0';
+	if (pending_results_generation != search_generation)
+		pending_results_generation = 0;
+	if (!pending_notice[0] && !pending_results_generation)
+		return;
+	lv_obj_t *active = lv_screen_active();
+	if (!active || (active != search_screen && active != results_screen) || toast_busy_showing())
+		return;
+	if (pending_notice[0]) {
+		if (pending_notice_error)
+			toast_error(pending_notice);
+		else
+			toast_success(pending_notice);
+		pending_notice[0] = '\0';
+	}
+	if (pending_results_generation && active == search_screen) {
+		pending_results_generation = 0;
+		switch_screen(results_screen);
+	}
+}
+
+void peqautoeq_service_completion(void) {
+	pthread_mutex_lock(&job_lock);
+	if (job_closing) {
+		pthread_mutex_unlock(&job_lock);
+		return;
+	}
+	job_t *job = ready_job;
+	ready_job = NULL;
+	if (job)
+		job_busy = false;
+	pthread_mutex_unlock(&job_lock);
+	if (!job) {
+		service_deferred();
+		return;
+	}
+	bool owned = toast_busy_end_owned(job->toast_owner);
+	bool current_search = job->request_generation == search_generation && search_screen && lv_screen_active() == search_screen;
+	if (job->action == JOB_SEARCH && !current_search) {
+		// Navigation invalidated this search, not a user-requested global apply.
+	} else if (job->error[0]) {
+		report_status(job->error, true, owned, job->request_generation);
+	} else if (job->action == JOB_SEARCH) {
+		bool navigate = owned && !toast_busy_showing();
+		rebuild_results(job, navigate);
+		if (!navigate)
+			pending_results_generation = job->request_generation;
+	} else if (job->action == JOB_UPDATE_DATABASE) {
+		report_status(tr("peq_autoeq_database_updated"), false, owned, 0);
+	} else {
+		save_and_apply(job, owned);
+	}
+	free_job(job);
+	service_deferred();
 }
 
 static void job_done(void *user) {
-	job_t *job = user;
-	end_job();
-	toast_busy_end();
+	(void)user;
+	peqautoeq_service_completion();
+}
 
-	if (job->error[0]) {
-		toast_error(job->error);
-	} else if (job->action == JOB_SEARCH) {
-		if (lv_screen_active() == search_screen) {
-			rebuild_results(job);
-		}
-	} else if (job->action == JOB_UPDATE_DATABASE) {
-		toast_success(tr("peq_autoeq_database_updated"));
-	} else {
-		save_and_apply(job);
-	}
-	free(job->profile_text);
-	free(job);
+void peqautoeq_shutdown_completions(void) {
+	pthread_mutex_lock(&job_lock);
+	job_closing = true;
+	job_t *job = ready_job;
+	ready_job = NULL;
+	if (job)
+		job_busy = false;
+	pthread_mutex_unlock(&job_lock);
+	free_job(job);
+	search_generation++;
+	pending_results_generation = 0;
+	pending_notice[0] = '\0';
+}
+
+static void search_left(lv_event_t *event) {
+	search_generation++;
+	pending_results_generation = 0;
+	if (pending_notice_generation)
+		pending_notice[0] = '\0';
+	if (lv_event_get_code(event) == LV_EVENT_DELETE)
+		search_screen = NULL;
 }
 
 static void result_clicked(lv_event_t *event) {
@@ -858,6 +977,8 @@ void peqautoeq_init(gui_config_t *config) {
 	search_screen = lv_obj_create(NULL);
 	results_screen = lv_obj_create(NULL);
 	gui_page_defer(search_screen, build_pages);
+	lv_obj_add_event_cb(search_screen, search_left, LV_EVENT_SCREEN_UNLOAD_START, NULL);
+	lv_obj_add_event_cb(search_screen, search_left, LV_EVENT_DELETE, NULL);
 }
 
 lv_obj_t *peqautoeq_screen(void) { return search_screen; }
@@ -865,6 +986,12 @@ lv_obj_t *peqautoeq_screen(void) { return search_screen; }
 void peqautoeq_set_reload_cb(void (*cb)(void)) { reload_cb = cb; }
 
 void peqautoeq_open(void) {
+	if (!search_screen || job_closing)
+		return;
+	search_generation++;
+	pending_results_generation = 0;
+	if (pending_notice_generation)
+		pending_notice[0] = '\0';
 	gui_page_ensure(search_screen); // the field below is filled before the switch
 	lv_textarea_set_text(search_field, "");
 	keyboard_reset(search_keyboard);

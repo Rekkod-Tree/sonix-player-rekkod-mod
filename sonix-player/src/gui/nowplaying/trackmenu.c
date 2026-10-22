@@ -479,7 +479,9 @@ static void queue_layout(void) {
 	char text[320];
 	if (queue_mode == QUEUE_MODE_IDLE) {
 		lv_obj_set_height(queue_body, 1);
+		lv_obj_update_layout(queue_list);
 		queue_rebind_all();
+		lv_obj_readjust_scroll(queue_list, LV_ANIM_OFF);
 		return;
 	}
 	if (queue_mode == QUEUE_MODE_QUEUE) {
@@ -514,6 +516,7 @@ static void queue_layout(void) {
 	lv_obj_set_height(queue_body, y + QUEUE_PAD_BOTTOM);
 	lv_obj_update_layout(queue_list);
 	queue_rebind_all();
+	lv_obj_readjust_scroll(queue_list, LV_ANIM_OFF);
 }
 
 // The layout again, one tick later: from inside a row's own gesture, which

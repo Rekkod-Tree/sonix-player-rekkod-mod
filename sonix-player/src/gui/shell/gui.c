@@ -19,6 +19,7 @@
 #include "src/gui/bluetooth/btaudio.h"
 #include "src/gui/bluetooth/btreceiverpage.h"
 #include "src/gui/bluetooth/btsettings.h"
+#include "src/gui/ebook/ebookcovers.h"
 #include "src/gui/ebook/ebookmarkspage.h"
 #include "src/gui/ebook/ebookpage.h"
 #include "src/gui/ebook/ebookreader.h"
@@ -101,6 +102,27 @@
 #include "lvgl/lvgl.h"
 #include "lvgl/src/display/lv_display_private.h"
 #include "src/system/core/lang.h"
+
+// GUI-thread-only, process-lifetime completion ownership. The three modules
+// have static locks/default-null jobs, so idle service does not build lazy pages.
+static bool completions_closing;
+
+void gui_service_completions(void) {
+	if (completions_closing)
+		return;
+	gearboypage_service_completion();
+	ebookcovers_service_completion();
+	peqautoeq_service_completion();
+}
+
+void gui_shutdown_completions(void) {
+	if (completions_closing)
+		return;
+	completions_closing = true;
+	gearboypage_shutdown_completions();
+	ebookcovers_shutdown_completions();
+	peqautoeq_shutdown_completions();
+}
 
 // Long enough for a whole sentence: a notice truncated mid-word is a puzzle
 // rather than a warning.

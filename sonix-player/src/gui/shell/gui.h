@@ -86,6 +86,16 @@ int gui_post_wake_fd(void);
 // of waiting for its period to elapse.
 void gui_post_service(void);
 
+// GUI thread, once per existing main-loop pass before LVGL/wait. Services the
+// three module-owned terminal slots even with full message queues or a blank
+// panel; does not build lazy pages, wake the LCD, or add a timer/worker.
+void gui_service_completions(void);
+
+// GUI thread, idempotent normal process-exit hook. Closes admission and cancels
+// pending module completions without joining disk/network work. This alone
+// does not permit live-process LVGL teardown while detached workers remain.
+void gui_shutdown_completions(void);
+
 void gui_notify_popup(const char *text);
 
 // Whether the card is there and ours. False while it is exported to a computer

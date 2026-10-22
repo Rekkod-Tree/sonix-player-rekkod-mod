@@ -1,0 +1,148 @@
+#include <assert.h>
+#include <errno.h>
+#include <pthread.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include "lvgl/lvgl.h"
+#include "src/gui/gearboy/gearboypage.h"
+#include "src/gui/gearboy/gearboyplay.h"
+#include "src/gui/gearboy/gearboysettings.h"
+#include "src/gui/nowplaying/player.h"
+#include "src/gui/shell/settingsrow.h"
+#include "src/gui/shell/switcher.h"
+#include "src/gui/shell/theme.h"
+#include "src/system/core/lang.h"
+#include "src/system/gearboy/gbdb.h"
+
+static pthread_t gui_thread;
+static pthread_mutex_t fixture_lock=PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t fixture_cond=PTHREAD_COND_INITIALIZER;
+static int entered,released,starts,joined,fail_thread,fail_wrapper,wrapper_calls;
+static int plan[32],freed[32],paint_calls,clean_calls,drawn_rows;
+static pthread_t threads[32];
+static char displayed[128];
+static void on_gui(void) { assert(pthread_equal(gui_thread,pthread_self())); }
+static void tracked_free(void *p) {
+    if(p) { gbrom_t *rom=p; pthread_mutex_lock(&fixture_lock);assert(rom->crc<32);freed[rom->crc]++;assert(freed[rom->crc]==1);pthread_mutex_unlock(&fixture_lock); }
+    free(p);
+}
+static __attribute__((unused)) void *transport_malloc(size_t n) { wrapper_calls++;return fail_wrapper ? NULL : malloc(n); }
+static int fixture_scan(gbrom_t **out,bool(*cb)(int,int,void*),void *u) {
+    (void)cb;(void)u;
+    pthread_mutex_lock(&fixture_lock);int id=++entered;pthread_cond_broadcast(&fixture_cond);
+    while(released<id)pthread_cond_wait(&fixture_cond,&fixture_lock);
+    int result=plan[id];pthread_mutex_unlock(&fixture_lock);
+    *out=NULL;if(result<0)return result;
+    if(result>0) { *out=calloc(1,sizeof(gbrom_t));assert(*out);(*out)->crc=(uint32_t)id;snprintf((*out)->name,sizeof((*out)->name),"ROM %d",id); }
+    return result;
+}
+static int fixture_create(pthread_t *t,const pthread_attr_t *a,void *(*fn)(void*),void *arg) {
+    if(fail_thread)return EAGAIN;
+    int result=pthread_create(t,a,fn,arg);if(!result)threads[starts++]=*t;return result;
+}
+static int fixture_detach(pthread_t t) { (void)t;return 0; }
+static void wait_entered(int n) { pthread_mutex_lock(&fixture_lock);while(entered<n)pthread_cond_wait(&fixture_cond,&fixture_lock);pthread_mutex_unlock(&fixture_lock); }
+static void release_through(int n) { pthread_mutex_lock(&fixture_lock);released=n;pthread_cond_broadcast(&fixture_cond);pthread_mutex_unlock(&fixture_lock); }
+static void join_through(int n) { while(joined<n) { assert(!pthread_join(threads[joined],NULL));joined++; } }
+
+// Actual bridge admission functions are injected by the runner. No eventfd or
+// drain timer exists in this fixture, so correctness requires direct service.
+#define GUI_POST_MAX 32
+#define GUI_LATEST_MAX 4
+typedef struct { void(*cb)(void*);void *user; } gui_post_t;
+static pthread_mutex_t post_lock=PTHREAD_MUTEX_INITIALIZER;
+static gui_post_t post_ring[GUI_POST_MAX],post_latest[GUI_LATEST_MAX];
+static int post_head,post_count,post_wake_fd=-1;
+@ACTUAL_GUI_POST_FUNCTIONS@
+static void empty(void *p) { (void)p; }
+static void a(void*p){(void)p;} static void b(void*p){(void)p;} static void c(void*p){(void)p;} static void d(void*p){(void)p;}
+static void fill_bridge(void) { for(int i=0;i<GUI_POST_MAX;i++)assert(gui_post(empty,NULL));assert(gui_post_latest(a,NULL));assert(gui_post_latest(b,NULL));assert(gui_post_latest(c,NULL));assert(gui_post_latest(d,NULL)); }
+static void clear_bridge(void) { post_head=post_count=0;memset(post_ring,0,sizeof(post_ring));memset(post_latest,0,sizeof(post_latest)); }
+
+// Real LVGL types/prototypes, inert GUI-thread-only drawing seams.
+void lv_label_set_text(lv_obj_t *o,const char *s) { (void)o;on_gui();paint_calls++;snprintf(displayed,sizeof(displayed),"%s",s); }
+void lv_obj_clean(lv_obj_t *o) { (void)o;on_gui();clean_calls++;drawn_rows=0; }
+void lv_obj_add_flag(lv_obj_t *o,lv_obj_flag_t f) { (void)o;(void)f;on_gui();paint_calls++; }
+void lv_obj_remove_flag(lv_obj_t *o,lv_obj_flag_t f) { (void)o;(void)f;on_gui();paint_calls++; }
+void lv_obj_set_hidden(lv_obj_t *o,bool hidden) { (void)o;(void)hidden;on_gui();paint_calls++; }
+void *lv_event_get_user_data(lv_event_t *e) { (void)e;return NULL; }
+void lv_obj_set_style_bg_color(lv_obj_t *o,lv_color_t c_,lv_style_selector_t s) { (void)o;(void)c_;(void)s;on_gui(); }
+void lv_obj_set_style_text_color(lv_obj_t *o,lv_color_t c_,lv_style_selector_t s) { (void)o;(void)c_;(void)s;on_gui(); }
+lv_color_t lv_color_white(void) { return (lv_color_t){255,255,255}; }
+void lv_obj_scroll_to_y(lv_obj_t *o,int32_t y,lv_anim_enable_t a_) { (void)o;(void)y;(void)a_;on_gui(); }
+lv_obj_t *lv_obj_get_child(const lv_obj_t *o,int32_t n) { (void)o;(void)n;return NULL; }
+void lv_obj_set_local_style_prop(lv_obj_t *o,lv_style_prop_t p,lv_style_value_t v,lv_style_selector_t s) { (void)o;(void)p;(void)v;(void)s;on_gui(); }
+const theme_palette_t *theme(void) { static theme_palette_t p;return &p; }
+const char *tr(const char *s) { return s; }
+lv_obj_t *settingsrow_action(lv_obj_t *o,const char *s,lv_event_cb_t cb,void *u) { (void)o;(void)s;(void)cb;(void)u;on_gui();drawn_rows++;return NULL; }
+bool switcher_back_drag_active(void) { return false; }
+bool player_sheet_drag_active(void) { return false; }
+void gearboyplay_open(const char *p,const char *n) { (void)p;(void)n;on_gui(); }
+
+#define gbdb_scan fixture_scan
+#define pthread_create fixture_create
+#define pthread_detach fixture_detach
+#define free tracked_free
+#define malloc transport_malloc
+#include "@ACTUAL_GEARBOYPAGE_C@"
+#undef free
+#undef malloc
+#undef pthread_create
+#undef pthread_detach
+#undef gbdb_scan
+
+int main(int argc,char **argv) {
+    gui_thread=pthread_self();list_box=(lv_obj_t*)1;status_label=(lv_obj_t*)2;gearboypage_screen=(lv_obj_t*)3;
+    if(argc>1 && !strcmp(argv[1],"closing-active")) {
+        plan[1]=1;screen_loaded_cb(NULL);wait_entered(1);int before=paint_calls;
+        gearboypage_shutdown_completions();assert(paint_calls==before);
+        release_through(1);join_through(1);gearboypage_service_completion();
+        assert(freed[1]==1&&!scan_terminal.active&&!scan_terminal.ready&&paint_calls==before&&post_count==0);
+        screen_loaded_cb(NULL);assert(starts==1&&paint_calls==before);puts("PASS closing while worker active");return 0;
+    }
+    if(argc>1 && !strcmp(argv[1],"delete-active")) {
+        plan[1]=1;screen_loaded_cb(NULL);wait_entered(1);screen_deleted_cb(NULL);int before=paint_calls;
+        release_through(1);join_through(1);gearboypage_service_completion();
+        assert(freed[1]==1&&!gearboypage_screen&&!scan_terminal.active&&paint_calls==before);
+        puts("PASS delete while worker active");return 0;
+    }
+    plan[1]=1;fill_bridge();fail_wrapper=1;screen_loaded_cb(NULL);wait_entered(1);assert(scanning&&scan_terminal.active);
+    release_through(1);join_through(1);
+    assert(scan_terminal.ready&&scanning&&wrapper_calls==0&&freed[1]==0);
+    gearboypage_service_completion();assert(!scanning&&!scan_terminal.active&&rom_count==1&&drawn_rows==1);
+    int paints=paint_calls;scan_done_cb(NULL);scan_done_cb(NULL);assert(paints==paint_calls&&freed[1]==0);
+    for(int i=0;i<10000;i++)gearboypage_service_completion();assert(paints==paint_calls&&starts==1);
+    clear_bridge();fail_wrapper=0;
+
+    // Unload before publication, then reenter while worker remains active.
+    screen_unloaded_cb(NULL);plan[2]=1;screen_loaded_cb(NULL);wait_entered(2);
+    screen_unloaded_cb(NULL);screen_loaded_cb(NULL);assert(starts==2&&rescan_requested);
+    plan[3]=1;release_through(2);join_through(2);gearboypage_service_completion();wait_entered(3);
+    assert(freed[2]==1&&rom_count==1&&scanning&&starts==3);
+    release_through(3);join_through(3);gearboypage_service_completion();assert(freed[1]==1&&roms->crc==3&&!scanning);
+    clear_bridge();
+
+    // Unload after READY discards once, without drawing a hidden page.
+    screen_unloaded_cb(NULL);plan[4]=1;screen_loaded_cb(NULL);wait_entered(4);release_through(4);join_through(4);
+    paints=paint_calls;screen_unloaded_cb(NULL);assert(freed[4]==1&&!scan_terminal.active&&paint_calls==paints);
+    scan_done_cb(NULL);assert(freed[4]==1&&paint_calls==paints);
+    clear_bridge();
+
+    // Explicit scanner allocation error is a terminal error, not empty success.
+    plan[5]=-ENOMEM;screen_loaded_cb(NULL);wait_entered(5);release_through(5);join_through(5);gearboypage_service_completion();
+    assert(!scanning&&scan_failed&&rom_count==0&&!strcmp(displayed,"gearboy_search_failed")&&freed[3]==1);
+    screen_unloaded_cb(NULL);fail_thread=1;screen_loaded_cb(NULL);assert(!scanning&&!scan_terminal.active&&scan_failed&&starts==5);
+    fail_thread=0;screen_unloaded_cb(NULL);plan[6]=0;screen_loaded_cb(NULL);wait_entered(6);release_through(6);join_through(6);gearboypage_service_completion();
+    assert(!scanning&&!scan_failed&&rom_count==0);
+    clear_bridge();
+
+    // Closing after READY and while a worker is still blocked.
+    screen_unloaded_cb(NULL);plan[7]=1;screen_loaded_cb(NULL);wait_entered(7);release_through(7);join_through(7);
+    paints=paint_calls;gearboypage_shutdown_completions();assert(freed[7]==1&&!scan_terminal.ready&&paint_calls==paints);
+    scan_done_cb(NULL);screen_loaded_cb(NULL);assert(starts==7&&paint_calls==paints); // Closing refuses drawing/admission.
+    free(roms);roms=NULL;
+    puts("PASS actual Gearboy module: bounded queues/terminal ownership/OOM/thread failure/unload/reentry/duplicates/closing");
+}

@@ -50,6 +50,7 @@ static lv_point_t press_at;
 static bool press_tracking;
 static bool held;
 static uint32_t generation;
+static uint64_t owner_generation;
 static uint32_t press_generation;
 static lv_obj_t *press_target;
 static lv_indev_t *press_indev;
@@ -68,6 +69,8 @@ static void invalidate_input(void) {
 	if (press_tracking && press_indev && lv_indev_get_state(press_indev) == LV_INDEV_STATE_PRESSED)
 		lv_indev_wait_release(press_indev);
 	generation++;
+	if (++owner_generation == 0)
+		owner_generation++;
 	press_tracking = false;
 	undo_ready = false;
 	press_indev = NULL;
@@ -406,4 +409,17 @@ void sx_toast_busy_end(void) {
 	if (busy) {
 		sx_toast_dismiss();
 	}
+}
+
+
+uint64_t sx_toast_busy_owned(const char *text, bool dismissable) {
+	sx_toast_busy(text, dismissable);
+	return owner_generation;
+}
+
+bool sx_toast_busy_end_owned(uint64_t owner) {
+	if (!owner || owner != owner_generation || !sx_toast_busy_showing())
+		return false;
+	sx_toast_busy_end();
+	return true;
 }

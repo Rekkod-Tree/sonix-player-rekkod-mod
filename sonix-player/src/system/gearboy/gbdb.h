@@ -54,7 +54,10 @@ void gbdb_set_root(const char *sd_root);
 // NULL; returning false from it stops the scan, and what has been done so far
 // is still written to the cache.
 //
-// Returns how many were found, or -1 when there is no root.
+// Returns how many were found, -1 when there is no root, or -ENOMEM on
+// allocation failure. Errors leave *out NULL and do not save a partial cache.
+// Missing catalogue entries and ordinary CRC/name lookup I/O failures retain
+// the filename fallback; a CRC buffer allocation failure is an error.
 int gbdb_scan(gbrom_t **out, bool (*progress)(int done, int total, void *user), void *user);
 
 // <card>/Games/Saves, where the games' battery-backed RAM and save states go.

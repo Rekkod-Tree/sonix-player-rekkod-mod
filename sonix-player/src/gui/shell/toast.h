@@ -2,6 +2,7 @@
 #define TOAST_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #include "src/gui/shell/gui.h"
 
@@ -37,6 +38,10 @@ void toast_glyph(const lv_image_dsc_t *glyph, const char *text);
 // toast replaces it.
 void toast_busy(const char *text);
 void toast_busy_end(void);
+
+// UI-thread owned busy instance; another toast or dismissal invalidates its ID.
+uint64_t toast_busy_owned(const char *text);
+bool toast_busy_end_owned(uint64_t owner);
 
 // The same for work that goes on in the background whether or not anybody
 // waits for it: a tap on it or a pull down puts it away, and the work carries
