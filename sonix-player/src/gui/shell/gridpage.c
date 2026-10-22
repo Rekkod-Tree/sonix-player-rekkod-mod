@@ -8,6 +8,7 @@
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/nowplaying/player.h"
 #include "src/gui/shell/settingsrow.h"
+#include "src/gui/shell/sx_card.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/sx_styles.h"
 #include "src/gui/shell/sx_tokens.h"
@@ -106,6 +107,7 @@ static void add_tile(lv_obj_t *grid, const grid_entry_t *entry, int width, int h
 	lv_obj_t *tile = lv_btn_create(grid);
 	lv_obj_set_size(tile, width, height);
 	lv_obj_add_style(tile, &sx_style_panel, 0);
+	sx_card_frame(tile);
 	lv_obj_add_style(tile, &sx_style_panel_press, LV_STATE_PRESSED);
 	lv_obj_add_style(tile, &sx_style_panel_press, LV_STATE_PRESSED);
 	lv_obj_set_style_radius(tile, TILE_RADIUS, 0);

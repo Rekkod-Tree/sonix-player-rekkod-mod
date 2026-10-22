@@ -186,6 +186,8 @@ static lv_obj_t *status_label;
 // mono line, built once and filled on every redraw, hidden with nothing joined.
 static lv_obj_t *current_card;
 static char current_ssid[WIFI_SSID_MAX];
+static wifi_status_t drawn_current_status;
+static bool drawn_current_valid, drawn_current_shown;
 static lv_obj_t *section_label;
 static lv_obj_t *list;
 static lv_obj_t *scan_btn;
@@ -557,25 +559,48 @@ static void link_line(const wifi_status_t *status, char *out, size_t size) {
 }
 
 // The plaque: the network joined, or being joined, with its figures.
-static void refresh_current_card(void) {
-	wifi_status_t status;
-	wifi_get_status(&status);
-	bool on = wifi_get_enabled() && wifi_available();
-	bool show = on && status.ssid[0] &&
-				(status.state == WIFI_STATE_CONNECTED || status.state == WIFI_STATE_CONNECTING);
+static bool status_has_current(const wifi_status_t *status) {
+	return status->ssid[0] &&
+		   (status->state == WIFI_STATE_CONNECTED || status->state == WIFI_STATE_CONNECTING);
+}
+
+static bool current_status_changed(const wifi_status_t *status) {
+	return !drawn_current_valid || status->state != drawn_current_status.state ||
+		   strcmp(status->ssid, drawn_current_status.ssid) != 0 ||
+		   status->signal != drawn_current_status.signal ||
+		   status->freq_mhz != drawn_current_status.freq_mhz ||
+		   status->link_mbps != drawn_current_status.link_mbps;
+}
+
+static void refresh_current_card(const wifi_status_t *status, bool force) {
+	bool show = wifi_get_enabled() && wifi_available() && status_has_current(status);
+	force = force || !drawn_current_valid || !drawn_current_shown;
+	bool title_changed = force || strcmp(current_ssid, status->ssid) != 0;
+	bool state_changed = force || status->state != drawn_current_status.state;
+	bool link_changed = state_changed || status->signal != drawn_current_status.signal ||
+						status->freq_mhz != drawn_current_status.freq_mhz ||
+						status->link_mbps != drawn_current_status.link_mbps;
 	lv_obj_set_hidden(current_card, !show);
+	drawn_current_status = *status;
+	drawn_current_valid = true;
+	drawn_current_shown = show;
 	if (!show) {
 		current_ssid[0] = '\0';
 		return;
 	}
-	snprintf(current_ssid, sizeof(current_ssid), "%s", status.ssid);
-	sx_card_title(current_card, status.ssid);
-	if (status.state == WIFI_STATE_CONNECTED) {
-		char line[96];
-		link_line(&status, line, sizeof(line));
-		sx_card_subtitle(current_card, line, true);
-		sx_card_value(current_card, tr("wifi_network_connected"));
-	} else {
+
+	snprintf(current_ssid, sizeof(current_ssid), "%s", status->ssid);
+	if (title_changed)
+		sx_card_title(current_card, status->ssid);
+	if (status->state == WIFI_STATE_CONNECTED) {
+		if (link_changed) {
+			char line[96];
+			link_line(status, line, sizeof(line));
+			sx_card_subtitle(current_card, line, true);
+		}
+		if (state_changed)
+			sx_card_value(current_card, tr("wifi_network_connected"));
+	} else if (state_changed) {
 		sx_card_subtitle(current_card, "", true);
 		sx_card_value(current_card, tr("connecting"));
 	}
@@ -619,7 +644,9 @@ static void add_placeholder(const char *text, bool spin) {
 
 static void rebuild_list(void) {
 	lv_obj_clean(list);
-	refresh_current_card();
+	wifi_status_t status;
+	wifi_get_status(&status);
+	refresh_current_card(&status, true);
 
 	bool on = wifi_get_enabled() && wifi_available();
 	lv_obj_set_hidden(section_label, !on);
@@ -641,9 +668,11 @@ static void rebuild_list(void) {
 	int shown = 0;
 	for (int i = 0; i < count; i++) {
 		// The network in use is the plaque above; so is one being joined.
-		if (networks[i].current || (current_ssid[0] && strcmp(networks[i].ssid, current_ssid) == 0)) {
+		if (current_ssid[0] && strcmp(networks[i].ssid, current_ssid) == 0) {
 			continue;
 		}
+		// The live status owns current identity; scan flags can outlive a link.
+		networks[i].current = false;
 		add_row(list, &networks[i]);
 		shown++;
 	}
@@ -717,13 +746,20 @@ static void poll_cb(lv_timer_t *timer) {
 
 	refresh_status_label();
 
+	wifi_status_t status;
+	wifi_get_status(&status);
+	const char *identity = on && wifi_available() && status_has_current(&status) ? status.ssid : "";
+	bool identity_changed = strcmp(current_ssid, identity) != 0;
 	uint32_t serial = wifi_networks_serial();
 	bool scanning = searching_now();
-	if (serial != drawn_serial || on != drawn_enabled || scanning != drawn_scanning) {
+	if (serial != drawn_serial || on != drawn_enabled || scanning != drawn_scanning || identity_changed) {
 		drawn_serial = serial;
 		drawn_enabled = on;
 		drawn_scanning = scanning;
 		rebuild_list();
+	} else if (current_status_changed(&status)) {
+		// State/link figures can change without a new scan. Preserve nearby rows.
+		refresh_current_card(&status, false);
 	}
 
 	// The scan button: dead while the radio is still coming up, faded while a

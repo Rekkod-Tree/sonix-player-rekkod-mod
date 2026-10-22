@@ -6,6 +6,7 @@
 #include "src/gui/nowplaying/player.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/switcher.h"
+#include "src/gui/shell/sx_palette.h"
 #include "src/gui/shell/sx_styles.h"
 #include "src/gui/shell/sx_tokens.h"
 #include "src/gui/shell/theme.h"
@@ -29,12 +30,41 @@ static void parts_free_cb(lv_event_t *e) { free(lv_event_get_user_data(e)); }
 
 static card_parts_t *parts_of(lv_obj_t *card) { return card ? lv_obj_get_user_data(card) : NULL; }
 
+static void frame_draw_cb(lv_event_t *e) {
+	int family = theme_get_palette();
+	if (family != 4 && family != 5)
+		return;
+	lv_obj_t *obj = lv_event_get_current_target_obj(e);
+	lv_obj_t *parent = lv_obj_get_parent(obj);
+	if (parent && lv_obj_get_user_flag(parent, 3))
+		return; // The navigation group owns the outer frame.
+	const sx_palette_t *p = sx_pal();
+	lv_draw_rect_dsc_t dsc;
+	lv_draw_rect_dsc_init(&dsc);
+	dsc.bg_opa = LV_OPA_TRANSP;
+	dsc.border_width = 1;
+	dsc.border_color = sx_mix(p->panel_text2, p->panel, 60);
+	dsc.border_opa = lv_obj_get_style_opa_recursive(obj, LV_PART_MAIN);
+	dsc.radius = lv_obj_get_style_radius(obj, LV_PART_MAIN);
+	lv_area_t area;
+	lv_obj_get_coords(obj, &area);
+	lv_draw_rect(lv_event_get_layer(e), &dsc, &area);
+}
+
+void sx_card_frame(lv_obj_t *obj) {
+	if (!obj)
+		return;
+	lv_obj_remove_event_cb(obj, frame_draw_cb);
+	lv_obj_add_event_cb(obj, frame_draw_cb, LV_EVENT_DRAW_POST, NULL);
+}
+
 lv_obj_t *sx_card_nav_group(lv_obj_t *parent) {
 	lv_obj_t *group = sx_box(parent);
 	lv_obj_set_size(group, lv_pct(100), LV_SIZE_CONTENT);
 	lv_obj_set_flex_flow(group, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_style_pad_row(group, 0, 0);
 	lv_obj_add_style(group, &sx_style_panel, 0);
+	sx_card_frame(group);
 	lv_obj_set_style_radius(group, SX_CARD_R, 0);
 	lv_obj_set_style_clip_corner(group, true, 0);
 	lv_obj_set_user_flag(group, 3, true);
@@ -65,6 +95,7 @@ void sx_card_style(lv_obj_t *obj) {
 	lv_obj_set_style_border_width(obj, 0, 0);
 	lv_obj_set_style_shadow_width(obj, 0, 0);
 	lv_obj_set_style_outline_width(obj, 0, 0);
+	sx_card_frame(obj);
 	lv_obj_set_style_pad_hor(obj, SX_CARD_PAD_H, 0);
 	lv_obj_set_style_pad_ver(obj, SX_CARD_PAD_V, 0);
 }
@@ -227,6 +258,8 @@ lv_obj_t *sx_card_create(lv_obj_t *parent) {
 		// lines in them: a row track is only as tall as its tallest child, so
 		// a minimum on the head alone would leave the text at its top.
 		p->text = sx_box(p->head);
+		// Allocate the remaining row width before wrapping the title.
+		lv_obj_set_width(p->text, 0);
 		lv_obj_set_height(p->text, LV_SIZE_CONTENT);
 		lv_obj_set_style_min_height(p->text, SX_CARD_MIN_H, 0);
 		lv_obj_set_flex_grow(p->text, 1);
@@ -307,6 +340,8 @@ lv_obj_t *sx_card_value(lv_obj_t *card, const char *text) {
 	}
 	if (!p->value) {
 		p->value = lv_label_create(p->head);
+		lv_obj_set_style_max_width(p->value, lv_pct(45), 0);
+		lv_label_set_long_mode(p->value, LV_LABEL_LONG_DOT);
 		lv_obj_set_style_text_font(p->value, &font_ui_22, 0);
 		lv_obj_add_style(p->value, &sx_style_panel_text2, 0);
 		// Before the chevron or the switch, if either is there already.

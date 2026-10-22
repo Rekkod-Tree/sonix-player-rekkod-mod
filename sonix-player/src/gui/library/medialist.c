@@ -4048,12 +4048,21 @@ static void head_large_cb(int64_t album_id, int size, const lv_image_dsc_t *dsc,
 // The page's colours: the gradient behind everything (made once per album),
 // the status bar in the colour of its top, the rows on it in their "lift"
 // look. Only while the album page is the page on screen and its hue pushed.
-static lv_color_t grad_drawn_top;
+static lv_color_t grad_drawn_stops[3];
 static void show_corner(lv_obj_t *btn, bool shown);
 
 static void album_paint(panel_t *p) {
 	const sx_palette_t *pal = sx_pal();
-	if (!p->grad && pal->tinted) {
+	// A flat family uses its exact solid RGB565 colour, without a dither strip.
+	bool gradient = pal->tinted && (!lv_color_eq(pal->album_grad[0], pal->album_grad[1]) ||
+									 !lv_color_eq(pal->album_grad[1], pal->album_grad[2]));
+	if (p->grad && (!gradient || !lv_color_eq(grad_drawn_stops[0], pal->album_grad[0]) ||
+					 !lv_color_eq(grad_drawn_stops[1], pal->album_grad[1]) || !lv_color_eq(grad_drawn_stops[2], pal->album_grad[2]))) {
+		lv_obj_remove_local_style_prop(p->screen, LV_STYLE_BG_IMAGE_SRC, 0);
+		sx_gradient_destroy(p->grad);
+		p->grad = NULL;
+	}
+	if (!p->grad && gradient) {
 		int h = (int)p->cfg->screen_height;
 		sx_grad_stop_t stops[3] = {
 			{pal->album_grad[0], 0},
@@ -4061,7 +4070,7 @@ static void album_paint(panel_t *p) {
 			{pal->album_grad[2], GRAD_Y2},
 		};
 		p->grad = sx_gradient_create(GRAD_STRIP_W, h, stops, 3);
-		grad_drawn_top = pal->album_grad[0];
+		memcpy(grad_drawn_stops, pal->album_grad, sizeof(grad_drawn_stops));
 	}
 	if (p->grad) {
 		lv_obj_set_style_bg_image_src(p->screen, p->grad, 0);
@@ -4129,11 +4138,6 @@ static void head_theme_refresh(void) {
 	}
 	if (!p->album_page || !p->hue_pushed) {
 		return;
-	}
-	if (p->grad && !lv_color_eq(grad_drawn_top, sx_pal()->album_grad[0])) {
-		lv_obj_remove_local_style_prop(p->screen, LV_STYLE_BG_IMAGE_SRC, 0);
-		sx_gradient_destroy(p->grad);
-		p->grad = NULL;
 	}
 	album_paint(p);
 }

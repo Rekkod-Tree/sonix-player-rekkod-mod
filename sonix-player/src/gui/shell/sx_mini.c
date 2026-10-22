@@ -338,12 +338,12 @@ void sx_mini_init(gui_config_t *cfg) {
 
 	// The progress line: 3 px along the card's bottom edge, 18 px in from
 	// each side, 4 px up.
-	progress_w = w - 2 * SX_MINI_MARGIN_SIDE;
+	progress_w = w - 2 * SX_MINI_MARGIN_SIDE - 2 * SX_MINI_PROGRESS_INSET;
 	lv_obj_t *track = sx_box(card);
 	progress_track = track;
 	lv_obj_set_ignore_layout(track, true);
 	lv_obj_set_size(track, progress_w, SX_MINI_PROGRESS_H);
-	lv_obj_align(track, LV_ALIGN_BOTTOM_LEFT, -12, 0);
+	lv_obj_align(track, LV_ALIGN_BOTTOM_MID, 0, -SX_MINI_PROGRESS_BOTTOM);
 	lv_obj_set_style_radius(track, 2, 0);
 	lv_obj_set_style_bg_color(track, lv_color_white(), 0);
 	lv_obj_set_style_bg_opa(track, LV_OPA_20, 0);

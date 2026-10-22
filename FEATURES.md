@@ -1,6 +1,6 @@
 ﻿# Features
 
-## Update discovery and search navigation (unreleased)
+## Release polish and responsiveness (unreleased)
 
 - Global search keeps its last selected source when going Back and reopening.
   Switching between input pages preserves the original opener and each source's
@@ -9,6 +9,22 @@
   description marker and compares UI generations and alpha/beta/rc iterations.
   See `RELEASING.md` for a numeric transition tag understood by older clients.
   Firmware assets, model, size and checksum validation remain mandatory.
+- Palette-aware keyboard backgrounds keep the LCD and terminal families coherent.
+  Caret colours follow theme changes beyond the first twelve fields; unchanged
+  key captions no longer reset their text buffers during recolouring.
+- Terminal palettes have subtle card frames; the mini-player progress stays
+  inside its rounded corners. Settings titles reserve room for their values.
+  Flat album backgrounds no longer allocate a dithered gradient strip.
+- Wi-Fi retains pending power/scan intent when its command queue is full and
+  preserves accepted connection ordering. Late association updates the current
+  network card in place; signal-only updates keep the list and its scroll.
+- Bluetooth metadata updates when a lazy track gains proper tags or duration
+  without changing its filename; unchanged snapshots are not republished.
+- Paused playback waits on its existing eventfd instead of polling after the
+  local PCM closes. Release deadlines and resume settling remain unchanged;
+  Resume, Seek and output handoff wake the same playback owner.
+- The optional performance-report signal is harmless when statistics are off;
+  it does not enable counters or add a background timer.
 
 ## Palette controls, search and playlist safety (alpha25)
 

@@ -12,6 +12,7 @@
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/onscreen.h"
+#include "src/gui/shell/sx_styles.h"
 #include "src/gui/shell/theme.h"
 #include "src/system/core/config.h"
 #include "src/system/core/lang.h"
@@ -174,9 +175,12 @@ static bool refresh_registered;
 // the accent changes at runtime (Appearance > Accent colour), so the fields
 // have to be reachable when it does -- LVGL repaints styles it owns, but this
 // caret is a set of local style properties on each field.
-#define KB_MAX_CARETS 12
-static lv_obj_t *caret_fields[KB_MAX_CARETS];
-static int caret_field_count;
+typedef struct caret_field_s {
+	lv_obj_t *field;
+	struct caret_field_s *next;
+} caret_field_t;
+static caret_field_t *caret_fields;
+static void kb_refresh_caret_color(lv_obj_t *field);
 
 static void kb_refresh_theme(void);
 
@@ -191,6 +195,9 @@ static void kb_register_refresh(void) {
 // near-white, so keys built straight out of those styles would be white on
 // white -- they have to sit on something darker.
 static lv_color_t kb_tray_color(void) {
+	if (theme_get_palette() != 0) {
+		return theme()->surface_pressed;
+	}
 	return theme()->dark ? lv_color_make(22, 22, 22) : lv_color_make(206, 209, 216);
 }
 
@@ -357,9 +364,9 @@ static void kb_layouts_cb(lv_event_t *e) {
 // Repaints the letter caps and the shift key for the current mode.
 static void kb_refresh_caps(keyboard_t *kb) {
 	for (int i = 0; i < kb->key_count; i++) {
-		lv_label_set_text(kb->letter_label[i], kb_key_text(kb, kb->key_row[i], kb->key_col[i]));
+		sx_set_text(kb->letter_label[i], kb_key_text(kb, kb->key_row[i], kb->key_col[i]));
 	}
-	lv_label_set_text(kb->mode_label, kb->symbols ? "abc" : "123");
+	sx_set_text(kb->mode_label, kb->symbols ? "abc" : "123");
 
 	// Shift wears the caps-lock icon while caps lock is on (set by a fast
 	// double tap), on both keyboards.
@@ -397,10 +404,10 @@ static void kb_refresh_caps(keyboard_t *kb) {
 				snprintf(cap + at, sizeof(cap) - at, "%s", kb_t9_step(kb, i, c));
 			}
 		}
-		lv_label_set_text(kb->t9_label[i], cap);
+		sx_set_text(kb->t9_label[i], cap);
 	}
 	if (kb->t9_mode_label) {
-		lv_label_set_text(kb->t9_mode_label, kb->t9_numbers ? "abc" : "123");
+		sx_set_text(kb->t9_mode_label, kb->t9_numbers ? "abc" : "123");
 	}
 	if (kb->t9_shift_btn && kb->t9_shift_icon) {
 		lv_image_set_src(kb->t9_shift_icon, kb->caps ? &icon_caps_lock : &icon_shift);
@@ -953,8 +960,8 @@ static void kb_refresh_theme(void) {
 		kb_refresh_caps(kb);
 	}
 
-	for (int i = 0; i < caret_field_count; i++) {
-		keyboard_style_caret(caret_fields[i]);
+	for (caret_field_t *entry = caret_fields; entry; entry = entry->next) {
+		kb_refresh_caret_color(entry->field);
 	}
 }
 
@@ -1290,6 +1297,24 @@ void keyboard_refresh_caret(lv_obj_t *field) {
 		kb_caret_blink_off(field);
 }
 
+static void kb_refresh_caret_color(lv_obj_t *field) {
+	for (unsigned i = 0; i < sizeof(kb_caret_parts) / sizeof(kb_caret_parts[0]); i++) {
+		lv_obj_set_style_border_color(field, theme()->accent, kb_caret_parts[i]);
+	}
+}
+
+static void kb_caret_field_deleted(lv_event_t *e) {
+	lv_obj_t *field = lv_event_get_target(e);
+	for (caret_field_t **entry = &caret_fields; *entry; entry = &(*entry)->next) {
+		if ((*entry)->field == field) {
+			caret_field_t *removed = *entry;
+			*entry = removed->next;
+			free(removed);
+			return;
+		}
+	}
+}
+
 void keyboard_style_caret(lv_obj_t *field) {
 	if (!field) {
 		return;
@@ -1300,15 +1325,23 @@ void keyboard_style_caret(lv_obj_t *field) {
 	// LVGL's own repaint knows to come back for it, so without this list the
 	// caret keeps the colour it was born with.
 	bool known = false;
-	for (int i = 0; i < caret_field_count; i++) {
-		if (caret_fields[i] == field) {
+	for (caret_field_t *entry = caret_fields; entry; entry = entry->next) {
+		if (entry->field == field) {
 			known = true;
 			break;
 		}
 	}
-	if (!known && caret_field_count < KB_MAX_CARETS) {
-		caret_fields[caret_field_count++] = field;
-		kb_register_refresh();
+	if (!known) {
+		caret_field_t *entry = malloc(sizeof(*entry));
+		if (entry && lv_obj_add_event_cb(field, kb_caret_field_deleted, LV_EVENT_DELETE, NULL)) {
+			entry->field = field;
+			entry->next = caret_fields;
+			caret_fields = entry;
+			kb_register_refresh();
+		} else {
+			free(entry);
+			fprintf(stderr, "keyboard: no room to track caret colour changes\n");
+		}
 	}
 
 	const lv_style_selector_t parts[] = {LV_PART_CURSOR, LV_PART_CURSOR | LV_STATE_FOCUSED};

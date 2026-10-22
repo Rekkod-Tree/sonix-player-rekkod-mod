@@ -2559,6 +2559,89 @@ static void playback_wake(void) {
 	}
 }
 
+static uint64_t paused_clock_ms(void) {
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	return (uint64_t)now.tv_sec * 1000U + (uint64_t)now.tv_nsec / 1000000U;
+}
+
+// Playback thread only. A flush is consumed after the actual local/held close,
+// including a coalesced request that arrived while the close was in progress.
+static void paused_release_due(snd_pcm_t **pcm, uint64_t paused_at_ms) {
+	pthread_mutex_lock(&audio_mutex);
+	bool flush = hold_flush_request;
+	pthread_mutex_unlock(&audio_mutex);
+	if (*pcm && (flush || atomic_load(&paused_release_wanted) ||
+				 paused_clock_ms() - paused_at_ms >= (uint64_t)paused_device_close_ms())) {
+		snd_pcm_close(*pcm);
+		*pcm = NULL;
+		pcm_device_open = false;
+		playback_follow(NULL);
+		fprintf(stderr, "audio[%ld]: device released while paused (DAC powered down)\n", log_ms());
+	}
+	pthread_mutex_lock(&audio_mutex);
+	flush = hold_flush_request;
+	pthread_mutex_unlock(&audio_mutex);
+	if (flush) {
+		gapless_release();
+		pthread_mutex_lock(&audio_mutex);
+		if (!*pcm && !gapless_holding()) {
+			hold_flush_request = false;
+		}
+		pthread_mutex_unlock(&audio_mutex);
+	}
+}
+
+// Waits, never owns a PCM. The eventfd retains commands between the predicate
+// check and poll. Its counter is a notification; the mailbox remains truth.
+static void paused_wait(bool local_pcm_open, uint64_t paused_at_ms) {
+	int timeout = -1;
+	if (local_pcm_open) {
+		uint64_t limit = (uint64_t)paused_device_close_ms();
+		uint64_t elapsed = paused_clock_ms() - paused_at_ms;
+		if (elapsed >= limit) {
+			return;
+		}
+		timeout = (int)(limit - elapsed);
+	}
+	pthread_mutex_lock(&audio_mutex);
+	bool pending = audio_command != AUDIO_CMD_PAUSE || play_request || seek_request || stop_thread ||
+				   resume_recover_pending || hold_flush_request ||
+				   (local_pcm_open && atomic_load(&paused_release_wanted));
+	pthread_mutex_unlock(&audio_mutex);
+	if (pending) {
+		return;
+	}
+	bool fallback = playback_wake_fd < 0;
+	if (!fallback) {
+		struct pollfd waiting = {.fd = playback_wake_fd, .events = POLLIN};
+		int ready = poll(&waiting, 1, timeout);
+		if (!ready || (ready < 0 && errno == EINTR)) {
+			return;
+		}
+		if (ready > 0 && (waiting.revents & POLLIN) &&
+			!(waiting.revents & (POLLERR | POLLHUP | POLLNVAL))) {
+			uint64_t count;
+			ssize_t got;
+			do {
+				got = read(playback_wake_fd, &count, sizeof(count));
+			} while (got < 0 && errno == EINTR);
+			if (got == (ssize_t)sizeof(count) || (got < 0 && errno == EAGAIN)) {
+				return;
+			}
+		}
+		static bool error_logged;
+		if (!error_logged) {
+			error_logged = true;
+			fprintf(stderr, "audio: pause wake failed; using bounded waits\n");
+		}
+		fallback = true;
+	}
+	if (fallback) {
+		usleep(local_pcm_open ? 50000 : 200000);
+	}
+}
+
 // One poll only: ALSA plugins can report readiness without actual PCM room.
 // A command takes precedence when both the PCM and the eventfd are ready.
 static int pcm_wait_or_wake(snd_pcm_t *pcm, int timeout_ms) {
@@ -2983,7 +3066,7 @@ static void play_wav_file(const char *filepath) {
 	health_start(&health);
 
 	int frame_bytes = info.channels * (info.out_bits / 8);
-	long paused_at_ms = 0; // when the current pause began (device power-down clock)
+	uint64_t paused_at_ms = 0; // monotonic pause anchor, including on MIPS o32
 	char *buffer = malloc(period_size * frame_bytes);
 	// What is read from the file, when it is not already what the device takes.
 	unsigned char *raw = NULL;
@@ -3023,7 +3106,7 @@ static void play_wav_file(const char *filepath) {
 	while (1) {
 		loop_turns++;
 		pthread_mutex_lock(&audio_mutex);
-		if (audio_command == AUDIO_CMD_STOP || play_request) {
+		if (audio_command == AUDIO_CMD_STOP || play_request || stop_thread) {
 			pthread_mutex_unlock(&audio_mutex);
 			break;
 		}
@@ -3111,21 +3194,10 @@ static void play_wav_file(const char *filepath) {
 			// can power down. The file stays open and the position stays
 			// where it is; the unpause below opens a fresh stream.
 			if (entering) {
-				paused_at_ms = log_ms();
+				paused_at_ms = paused_clock_ms();
 			}
-			if (pcm_handle && (paused_release_wanted || (log_ms() - paused_at_ms) >= paused_device_close_ms())) {
-				snd_pcm_close(pcm_handle);
-				pcm_handle = NULL;
-				pcm_device_open = false;
-				playback_follow(NULL);
-				fprintf(stderr, "audio[%ld]: device released while paused (DAC powered down)\n", log_ms());
-			}
-
-			// With the device handed back there is nothing to be quick about:
-			// a fifth of a second between checks instead of a twentieth means
-			// four fewer wake-ups a second for however many hours the player
-			// sits paused in a pocket. The unpause still feels instant.
-			usleep(pcm_handle ? 50000 : 200000);
+			paused_release_due(&pcm_handle, paused_at_ms);
+			paused_wait(pcm_handle != NULL, paused_at_ms);
 			continue;
 		} else {
 			// RESUME is a one-shot command: consumed here, back to
@@ -4296,7 +4368,7 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 
 	double bytes_per_sec = (double)sample_rate * channels * (out_bits / 8);
 	int frame_bytes = channels * (out_bits / 8);
-	long paused_at_ms = 0; // when the current pause began (device power-down clock)
+	uint64_t paused_at_ms = 0; // monotonic pause anchor, including on MIPS o32
 	// In the track's frames: one chunk decimated is one chunk at the device.
 	snd_pcm_uframes_t chunk_frames = decimated_chunk(period_size, out_rate, decim_factor);
 	void *buffer = malloc(chunk_frames * frame_bytes);
@@ -4338,7 +4410,7 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 	while (1) {
 		loop_turns++;
 		pthread_mutex_lock(&audio_mutex);
-		if (audio_command == AUDIO_CMD_STOP || play_request) {
+		if (audio_command == AUDIO_CMD_STOP || play_request || stop_thread) {
 			pthread_mutex_unlock(&audio_mutex);
 			break;
 		}
@@ -4493,21 +4565,10 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 			// power down. The decoder keeps its place; the unpause opens a
 			// fresh stream and carries on from the same frame.
 			if (entering) {
-				paused_at_ms = log_ms();
+				paused_at_ms = paused_clock_ms();
 			}
-			if (pcm_handle && (paused_release_wanted || (log_ms() - paused_at_ms) >= paused_device_close_ms())) {
-				snd_pcm_close(pcm_handle);
-				pcm_handle = NULL;
-				pcm_device_open = false;
-				playback_follow(NULL);
-				fprintf(stderr, "audio[%ld]: device released while paused (DAC powered down)\n", log_ms());
-			}
-
-			// With the device handed back there is nothing to be quick about:
-			// a fifth of a second between checks instead of a twentieth means
-			// four fewer wake-ups a second for however many hours the player
-			// sits paused in a pocket. The unpause still feels instant.
-			usleep(pcm_handle ? 50000 : 200000);
+			paused_release_due(&pcm_handle, paused_at_ms);
+			paused_wait(pcm_handle != NULL, paused_at_ms);
 			continue;
 		} else {
 			// RESUME is one-shot: consumed here, back to PLAY -- see the twin
@@ -5326,6 +5387,7 @@ void audio_notify_resume(void) {
 	pthread_mutex_lock(&audio_mutex);
 	resume_recover_pending = true;
 	pthread_mutex_unlock(&audio_mutex);
+	playback_wake();
 }
 
 // Everything down before mem. Reverse engineering of the stock binary shows
@@ -5342,6 +5404,7 @@ bool audio_suspend_quiesce(int timeout_ms) {
 	hold_flush_request = true;
 	pthread_cond_broadcast(&audio_cond);
 	pthread_mutex_unlock(&audio_mutex);
+	playback_wake();
 
 	for (int waited = 0; waited < timeout_ms; waited += 20) {
 		if (!pcm_device_open && !gapless_holding()) {
@@ -5461,6 +5524,7 @@ void audio_resume(void) {
 		playback_status = AUDIO_STATUS_PLAYING;
 	}
 	pthread_mutex_unlock(&audio_mutex);
+	playback_wake();
 }
 
 void audio_stop(void) {
@@ -5638,6 +5702,7 @@ void audio_set_output_device(const char *pcm) {
 
 	if (strcmp(before, after) != 0) {
 		fprintf(stderr, "audio[%ld]: the output moves from '%s' to '%s'\n", log_ms(), before, after);
+		playback_wake();
 	}
 }
 
@@ -5888,6 +5953,7 @@ bool audio_external_begin_yielding(int sample_rate, int channels, int bits, int 
 	pthread_mutex_unlock(&audio_mutex);
 	if (paused_holding) {
 		paused_release_wanted = true;
+		playback_wake();
 		for (int waited = 0; pcm_device_open && waited < EXTERNAL_YIELD_WAIT_MS; waited += 10) {
 			usleep(10 * 1000);
 		}

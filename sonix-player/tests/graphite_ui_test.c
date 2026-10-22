@@ -1459,8 +1459,12 @@ static void home_layout_states(void) {
 #include "graphite_import_mini.inc"
 #include "graphite_caret_park.inc"
 #include "graphite_search_scope.inc"
+#include "graphite_release_polish.inc"
+#include "graphite_pause_wait.inc"
 
 static void run(lv_timer_t *timer) {
+	if (getenv("SONIX_UI_TEST_PAUSE_WAIT")) { pause_wait_states(); return; }
+	if (getenv("SONIX_UI_TEST_RELEASE_POLISH")) { release_polish_states(); return; }
 	if (getenv("SONIX_UI_TEST_PLAYLIST_CONTENT")) { playlist_content_states(timer); return; }
 	if (getenv("SONIX_UI_TEST_IMPORT_MINI")) { import_mini_states(); return; }
 	if (getenv("SONIX_UI_TEST_CARET_PARK")) { caret_park_states(timer); return; }

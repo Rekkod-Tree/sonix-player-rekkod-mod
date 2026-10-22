@@ -23,6 +23,8 @@ with wave.open(str(wave_path), "wb") as audio:
     audio.setsampwidth(2)
     audio.setframerate(44100)
     audio.writeframes(bytes(44100 * 4 * 60))
+if os.environ.get("SONIX_UI_TEST_PAUSE_WAIT"):
+    shutil.copy2(wave_path, card / "Pause-WAV.wav")
 for filename, title, album, year in [
     ("Time", "Time", "The Dark Side of the Moon", "1973"),
     ("Echoes", "Echoes - Live at Wembley, 1974", "Meddle", "1971"),

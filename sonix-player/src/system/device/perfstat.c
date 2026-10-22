@@ -534,6 +534,11 @@ static void report_cb(lv_timer_t *timer) {
 }
 
 void perfstat_init(lv_display_t *disp) {
+	// The diagnostic trigger must be harmless even when collection is off.
+	// kill -USR2 <pid>: a report at once, which also starts a new window --
+	// two of them around something done on the screen measure just that.
+	signal(SIGUSR2, sigusr2_cb);
+
 	const char *env = getenv("SONIX_PERF");
 	long seconds = env && env[0] ? strtol(env, NULL, 10) : config_get_int("debug", "perf_stats", 0);
 	if (seconds <= 0 || !disp) {
@@ -550,10 +555,6 @@ void perfstat_init(lv_display_t *disp) {
 	lv_display_add_event_cb(disp, refr_event_cb, LV_EVENT_REFR_READY, NULL);
 	lv_display_add_event_cb(disp, refr_event_cb, LV_EVENT_FLUSH_START, NULL);
 	lv_display_add_event_cb(disp, refr_event_cb, LV_EVENT_FLUSH_FINISH, NULL);
-
-	// kill -USR2 <pid>: a report at once, which also starts a new window --
-	// two of them around something done on the screen measure just that.
-	signal(SIGUSR2, sigusr2_cb);
 
 	lv_timer_t *t = lv_timer_create(report_cb, report_ms, NULL);
 	perfstat_ignore_timer(t); // its own runs are not the player's

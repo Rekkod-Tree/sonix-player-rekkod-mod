@@ -79,6 +79,8 @@ void sx_swatch_set_active(lv_obj_t *swatch, bool active);
 // margins, pressed fill), a pill, a switch (68 x 36, 28 px knob, the accent
 // when on).
 void sx_card_style(lv_obj_t *obj);
+// Terminal-only frame drawn after children, without changing content bounds.
+void sx_card_frame(lv_obj_t *obj);
 void sx_pill_style(lv_obj_t *pill);
 void sx_switch_style(lv_obj_t *sw);
 
