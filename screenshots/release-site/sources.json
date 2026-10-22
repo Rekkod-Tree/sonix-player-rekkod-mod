@@ -1,0 +1,290 @@
+{
+  "note": "Unmodified physical R1 frames. The 22 October candidate captures were selected from recorded native runs; this task did not control the device. Dates identify capture sessions, not exact log-event timestamps. No images were recolored or composited.",
+  "images": [
+    {
+      "file": "r1-home.png",
+      "sha256": "d50bfa4ff1d43b4be64cdce2b0955b7677456ade5a7f46e1ab4173105918081d",
+      "synthetic_data": false,
+      "device": "HiBy R1",
+      "date": "2026-10-22",
+      "context": "Temporary native candidate program run; not a published final firmware",
+      "source": "output/alpha26-final-20261022/frames-completions/home-2.png",
+      "pair_sha256": [
+        "d50bfa4ff1d43b4be64cdce2b0955b7677456ade5a7f46e1ab4173105918081d",
+        "d50bfa4ff1d43b4be64cdce2b0955b7677456ade5a7f46e1ab4173105918081d"
+      ],
+      "pair_identical": true,
+      "difference_bbox": null,
+      "difference_explanation": null,
+      "raw_sha256": "84779d25ac29daf2ab5c618a9c1a3ce925dc43d5838bf649569696f843a96983",
+      "capture_metadata": {
+        "width": 480,
+        "height": 800,
+        "format": "rgb565le",
+        "yoffset": 0,
+        "stride": 960
+      },
+      "visually_inspected": true
+    },
+    {
+      "file": "r1-player.png",
+      "sha256": "630407a95f59ec7ebff752244a929ff6e783a2161f7fc579d571ca3f45843048",
+      "synthetic_data": false,
+      "device": "HiBy R1",
+      "date": "2026-10-22",
+      "context": "Temporary native candidate program run; not a published final firmware",
+      "source": "output/alpha26-final-20261022/frames-compact67/queue-back-player-2.png",
+      "pair_sha256": [
+        "34d53488dea85ab4426254dfe58b11ff69d63f9404062c8e8b30e4b0eb67026a",
+        "630407a95f59ec7ebff752244a929ff6e783a2161f7fc579d571ca3f45843048"
+      ],
+      "pair_identical": false,
+      "difference_bbox": [
+        42,
+        598,
+        366,
+        657
+      ],
+      "difference_explanation": "Only elapsed time and progress marker differ; both complete frames visually inspected.",
+      "raw_sha256": "f6244c56315324db3bc6e9d86121620fbf74b7b5c8459f9ae0e1f973c3ef5447",
+      "capture_metadata": {
+        "width": 480,
+        "height": 800,
+        "format": "rgb565le",
+        "yoffset": 0,
+        "stride": 960
+      },
+      "visually_inspected": true
+    },
+    {
+      "file": "r1-quick-panel.png",
+      "sha256": "01e3ef67f063b8486eb129a0f3b5e32fc9aea7e75bafe745de79aca636da13de",
+      "synthetic_data": false,
+      "device": "HiBy R1",
+      "date": "2026-10-22",
+      "context": "Temporary native candidate program run; not a published final firmware",
+      "source": "output/alpha26-final-20261022/frames-compact67/shade-for-settings-2.png",
+      "pair_sha256": [
+        "01e3ef67f063b8486eb129a0f3b5e32fc9aea7e75bafe745de79aca636da13de",
+        "01e3ef67f063b8486eb129a0f3b5e32fc9aea7e75bafe745de79aca636da13de"
+      ],
+      "pair_identical": true,
+      "difference_bbox": null,
+      "difference_explanation": null,
+      "raw_sha256": "d4ccfe134039cf0f43ae430cc116d274b864dd3784f6349ffae99d81924e2d12",
+      "capture_metadata": {
+        "width": 480,
+        "height": 800,
+        "format": "rgb565le",
+        "yoffset": 800,
+        "stride": 960
+      },
+      "visually_inspected": true
+    },
+    {
+      "file": "r1-album.png",
+      "sha256": "0ff33eb45a00128349114c2351d2ecd47a9b2a7db276fa125a8e561d2c886e8e",
+      "synthetic_data": false,
+      "device": "HiBy R1",
+      "date": "2026-10-22",
+      "context": "Temporary native candidate program run; not a published final firmware",
+      "source": "output/alpha26-final-20261022/frames-compact67/album-page-compact-2.png",
+      "pair_sha256": [
+        "0ff33eb45a00128349114c2351d2ecd47a9b2a7db276fa125a8e561d2c886e8e",
+        "0ff33eb45a00128349114c2351d2ecd47a9b2a7db276fa125a8e561d2c886e8e"
+      ],
+      "pair_identical": true,
+      "difference_bbox": null,
+      "difference_explanation": null,
+      "raw_sha256": "f5b612b3ee7c50c7afc83c92d6ff4b0fe945d62c364e48b5382c818d1a711aa7",
+      "capture_metadata": {
+        "width": 480,
+        "height": 800,
+        "format": "rgb565le",
+        "yoffset": 800,
+        "stride": 960
+      },
+      "visually_inspected": true
+    },
+    {
+      "file": "r1-local-search.png",
+      "sha256": "d7c080ddd72ed48709ed54f592f8c67099aca4902b1fbbc89aa2166a0baa782f",
+      "synthetic_data": false,
+      "device": "HiBy R1",
+      "date": "2026-10-22",
+      "context": "Temporary native candidate program run; not a published final firmware",
+      "source": "output/alpha26-final-20261022/frames-compact67/graphite-light-existing-field-2.png",
+      "pair_sha256": [
+        "d7c080ddd72ed48709ed54f592f8c67099aca4902b1fbbc89aa2166a0baa782f",
+        "d7c080ddd72ed48709ed54f592f8c67099aca4902b1fbbc89aa2166a0baa782f"
+      ],
+      "pair_identical": true,
+      "difference_bbox": null,
+      "difference_explanation": null,
+      "raw_sha256": "500ea3a45dc9cb8f512eb1c829f89cab896f3e654da8c332cfb6a3e21e5e3ee7",
+      "capture_metadata": {
+        "width": 480,
+        "height": 800,
+        "format": "rgb565le",
+        "yoffset": 800,
+        "stride": 960
+      },
+      "visually_inspected": true
+    },
+    {
+      "file": "r1-palettes.png",
+      "sha256": "9f71ab28c2bfd99918a46679982ec0ab9f1ed1139d6b039f58f4dc2e9ee0a566",
+      "synthetic_data": false,
+      "device": "HiBy R1",
+      "date": "2026-10-22",
+      "context": "Temporary native candidate program run; not a published final firmware",
+      "source": "output/alpha26-final-20261022/frames-compact67/graphite2-light-compact-2.png",
+      "pair_sha256": [
+        "9f71ab28c2bfd99918a46679982ec0ab9f1ed1139d6b039f58f4dc2e9ee0a566",
+        "9f71ab28c2bfd99918a46679982ec0ab9f1ed1139d6b039f58f4dc2e9ee0a566"
+      ],
+      "pair_identical": true,
+      "difference_bbox": null,
+      "difference_explanation": null,
+      "raw_sha256": "3430d89c21273beac96b3eaf4b792ccbf1b24d1060a45c61d72873cd178572fc",
+      "capture_metadata": {
+        "width": 480,
+        "height": 800,
+        "format": "rgb565le",
+        "yoffset": 800,
+        "stride": 960
+      },
+      "visually_inspected": true
+    },
+    {
+      "file": "r1-mini-compact.png",
+      "sha256": "00b74b832d4de758c0292d39b3241d67275da35c8a5eaf38e73164005edc5f62",
+      "synthetic_data": false,
+      "device": "HiBy R1",
+      "date": "2026-10-22",
+      "context": "Temporary native candidate program run; not a published final firmware",
+      "source": "output/alpha26-final-20261022/frames-compact67/compact-selected-2.png",
+      "pair_sha256": [
+        "00b74b832d4de758c0292d39b3241d67275da35c8a5eaf38e73164005edc5f62",
+        "00b74b832d4de758c0292d39b3241d67275da35c8a5eaf38e73164005edc5f62"
+      ],
+      "pair_identical": true,
+      "difference_bbox": null,
+      "difference_explanation": null,
+      "raw_sha256": "547ae7f95b1d129f86424124d1e9e4e5cca17086ed2109dc37b65ec914366721",
+      "capture_metadata": {
+        "width": 480,
+        "height": 800,
+        "format": "rgb565le",
+        "yoffset": 800,
+        "stride": 960
+      },
+      "visually_inspected": true
+    },
+    {
+      "file": "r1-autoeq.png",
+      "sha256": "0f6fd4537943355f4b9444ac3cc5a3caa45747f737cad485a5c011481c709bd7",
+      "synthetic_data": false,
+      "device": "HiBy R1",
+      "date": "2026-10-22",
+      "context": "Temporary native candidate program run; not a published final firmware",
+      "source": "output/alpha26-final-20261022/frames-autoeq/resultscroll-2.png",
+      "pair_sha256": [
+        "0f6fd4537943355f4b9444ac3cc5a3caa45747f737cad485a5c011481c709bd7",
+        "0f6fd4537943355f4b9444ac3cc5a3caa45747f737cad485a5c011481c709bd7"
+      ],
+      "pair_identical": true,
+      "difference_bbox": null,
+      "difference_explanation": null,
+      "raw_sha256": "78f999e5d0579cdccaf1269bcb27e869659e2219fac7f113d1e0f3f835d90aa3",
+      "capture_metadata": {
+        "width": 480,
+        "height": 800,
+        "format": "rgb565le",
+        "yoffset": 0,
+        "stride": 960
+      },
+      "visually_inspected": true
+    },
+    {
+      "file": "r1-peq.png",
+      "sha256": "29174a307c1569683bc14f39d73bc260743f7132098d30ed83f339d05e06528e",
+      "synthetic_data": false,
+      "device": "HiBy R1",
+      "date": "2026-10-22",
+      "context": "Temporary native candidate program run; not a published final firmware",
+      "source": "output/alpha26-final-20261022/frames-eq-snapshot/pause-2.png",
+      "pair_sha256": [
+        "29174a307c1569683bc14f39d73bc260743f7132098d30ed83f339d05e06528e",
+        "29174a307c1569683bc14f39d73bc260743f7132098d30ed83f339d05e06528e"
+      ],
+      "pair_identical": true,
+      "difference_bbox": null,
+      "difference_explanation": null,
+      "raw_sha256": "f52153f6f46411935fae7a487a7fff3f90377a6aec68375c0bd28bf133cc4272",
+      "capture_metadata": {
+        "width": 480,
+        "height": 800,
+        "format": "rgb565le",
+        "yoffset": 0,
+        "stride": 960
+      },
+      "visually_inspected": true
+    },
+    {
+      "file": "r1-album-list.png",
+      "sha256": "c253ba2c8ce2cc815a22c9fac42a7fa3ab3f52caf8de87547110166d33d6aff6",
+      "synthetic_data": false,
+      "device": "HiBy R1",
+      "date": "2026-10-22",
+      "context": "Temporary native candidate program run; not a published final firmware",
+      "source": "output/alpha26-final-20261022/frames-compact67/albums-compact-2.png",
+      "pair_sha256": [
+        "c253ba2c8ce2cc815a22c9fac42a7fa3ab3f52caf8de87547110166d33d6aff6",
+        "c253ba2c8ce2cc815a22c9fac42a7fa3ab3f52caf8de87547110166d33d6aff6"
+      ],
+      "pair_identical": true,
+      "difference_bbox": null,
+      "difference_explanation": null,
+      "raw_sha256": "cb6950a6ff5caef2605190d9742a82af6087a0639e7fd370a93b77971e1dd096",
+      "capture_metadata": {
+        "width": 480,
+        "height": 800,
+        "format": "rgb565le",
+        "yoffset": 0,
+        "stride": 960
+      },
+      "visually_inspected": true
+    },
+    {
+      "file": "r1-audiobook.png",
+      "sha256": "7bf2e37186d8b9e0a7e9f3b889946d534c8f0cd213f967499589d87da7099b11",
+      "synthetic_data": false,
+      "device": "HiBy R1",
+      "date": "2026-10-18",
+      "context": "Archival real-device capture; video poster matches archival screencast period",
+      "source": "screenshots/readme/r1-audiobook.png",
+      "origin": "alpha19 native R1 device run"
+    },
+    {
+      "file": "r1-home-editor.png",
+      "sha256": "401f719a45790e5f4948112caba27ea58a2ac59c108aec3bb5961f0eac6f5159",
+      "synthetic_data": false,
+      "device": "HiBy R1",
+      "date": "2026-10-18",
+      "context": "Archival real-device capture; video poster matches archival screencast period",
+      "source": "screenshots/readme/r1-home-editor.png",
+      "origin": "alpha19 native R1 device run"
+    },
+    {
+      "file": "video-poster.png",
+      "sha256": "241923a35e9b59c8e5f836de2c0e2fd4d766e5bdd0d05524286529f7721d9b7a",
+      "synthetic_data": false,
+      "device": "HiBy R1",
+      "date": "2026-10-18",
+      "context": "Archival real-device capture; video poster matches archival screencast period",
+      "source": "screenshots/readme/r1-home.png",
+      "origin": "User screenshot saved on R1"
+    }
+  ]
+}
