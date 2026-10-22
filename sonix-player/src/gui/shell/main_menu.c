@@ -31,6 +31,10 @@
 #include "src/system/core/lang.h"
 #include "src/system/library/audiobookdb.h"
 #include "src/system/net/wifi.h"
+#include "src/system/streaming/yandex.h"
+#ifdef SONIX_ZVUK
+#include "src/system/streaming/zvuk.h"
+#endif
 
 lv_obj_t *main_menu_screen;
 static gui_config_t *page_cfg;
@@ -40,6 +44,11 @@ static int order_n;
 static bool loaded;
 // UI-thread-only preference for this process; no configuration writes.
 static int last_search_scope = -1;
+static struct {
+	home_item_t source;
+	lv_obj_t *screen;
+} search_inputs[3];
+static int search_input_count;
 static const char *ids[] = {"music", "streaming", "networks", "audiobooks", "settings", "continue_book", "tidal", "qobuz", "radio", "podcasts", "subsonic", "yandex", "zvuk", "music_all", "music_albums", "music_artists", "music_album_artists", "music_genres", "music_years", "music_favourites", "music_most_played", "music_recent_added", "music_recent_played", "music_playlists", "music_browse", "search", "files", "yandex_wave", "yandex_liked", "spotify"};
 static const char *tags[] = {"music", "streaming", "wireless", "audiobooks", "settings", "home_resume_book", "tidal", "qobuz", "radio", "podcasts", "subsonic", "yandex", "zvuk", "music_all_tracks", "albums", "artists", "music_album_artists", "music_genres", "music_year", "favourites", "music_most_played", "music_recently_added", "music_recently_played", "playlists", "music_browse", "home_search", "file_explorer", "yandex_my_wave", "yandex_liked", "spotify"};
 static const lv_image_dsc_t *icons[] = {&icon_menu_music, &icon_menu_streaming, &icon_menu_wireless, &icon_menu_audiobooks, &icon_menu_settings, &icon_menu_audiobooks};
@@ -316,12 +325,52 @@ void main_menu_init(gui_config_t *cfg) {
 	shufflecard_attach(main_menu_screen, cfg);
 }
 
+static void search_scope_register(lv_obj_t *screen, home_item_t source) {
+	for (int i = 0; i < search_input_count; i++) {
+		if (search_inputs[i].source == source) {
+			search_inputs[i].screen = screen;
+			return;
+		}
+	}
+	if (search_input_count < (int)(sizeof(search_inputs) / sizeof(search_inputs[0]))) {
+		search_inputs[search_input_count].source = source;
+		search_inputs[search_input_count++].screen = screen;
+	}
+}
+
+static lv_obj_t *search_scope_screen(home_item_t source) {
+	for (int i = 0; i < search_input_count; i++)
+		if (search_inputs[i].source == source)
+			return search_inputs[i].screen;
+	return NULL;
+}
+
+static bool search_scope_is_input(lv_obj_t *screen) {
+	for (int i = 0; i < search_input_count; i++)
+		if (search_inputs[i].screen == screen)
+			return true;
+	return false;
+}
+
 static void search_scope_action(void *user) {
 	home_item_t source = (home_item_t)(intptr_t)user;
 	if (source != HOME_MUSIC && source != HOME_YANDEX && source != HOME_ZVUK)
 		return;
 	if (source != HOME_MUSIC && !main_menu_available(source))
 		return;
+	lv_obj_t *target = search_scope_screen(source);
+	bool ready = source == HOME_MUSIC || (source == HOME_YANDEX && yandex_logged_in());
+#ifdef SONIX_ZVUK
+	ready = ready || (source == HOME_ZVUK && zvuk_logged_in());
+#endif
+	if (target && ready && search_scope_is_input(lv_screen_active())) {
+		// Sources are alternatives within one search, not steps in its back-stack.
+		// Keep the original opener and each source's own query/caret untouched.
+		last_search_scope = source;
+		if (target != lv_screen_active())
+			switch_screen_no_history(target);
+		return;
+	}
 	last_search_scope = source;
 	if (source == HOME_YANDEX)
 		yandexpage_search_open();
@@ -388,6 +437,7 @@ static void search_scope_loaded(lv_event_t *e) {
 }
 
 void main_menu_search_header(lv_obj_t *screen, gui_config_t *cfg, home_item_t source) {
+	search_scope_register(screen, source);
 	lv_obj_t *title = settingsrow_title(screen, cfg, search_scope_tag(source));
 	lv_obj_set_user_data(title, (void *)(intptr_t)source);
 	lv_obj_set_style_pad_right(title, 36, 0);

@@ -1,5 +1,15 @@
 ﻿# Features
 
+## Update discovery and search navigation (unreleased)
+
+- Global search keeps its last selected source when going Back and reopening.
+  Switching between input pages preserves the original opener and each source's
+  own query; it does not add the previous source to navigation history.
+- OTA accepts the actual published release tags with an explicit `Sonix-Version`
+  description marker and compares UI generations and alpha/beta/rc iterations.
+  See `RELEASING.md` for a numeric transition tag understood by older clients.
+  Firmware assets, model, size and checksum validation remain mandatory.
+
 ## Palette controls, search and playlist safety (alpha25)
 
 - Eight optional palettes extend the existing Graphite 2 appearance. The legacy
