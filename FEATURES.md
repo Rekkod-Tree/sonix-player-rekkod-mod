@@ -34,6 +34,9 @@
   titles while preserving a gesture already under the pointer.
 - Bluetooth commits power, scan and operation state only with queue admission.
   A full queue retains the latest volume intent; OFF or a changed sink clears it.
+- Bluetooth discovers BlueALSA PCM streams that already exist when the player
+  starts, using the daemon's actual ObjectManager path. It no longer needs a
+  later reconnect signal to discover an already available headphone output.
 - AutoEQ binds index, profile-cache and preset writes to the card that admitted
   the request. It releases card descriptors during HTTP and validates the preset
   before publishing and applying it; failed required saves retain the active sound.

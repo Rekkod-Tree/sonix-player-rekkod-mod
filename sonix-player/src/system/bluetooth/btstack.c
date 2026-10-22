@@ -1339,7 +1339,7 @@ void btstack_refresh_audio(void) {
 		return;
 	}
 
-	dbus_call_begin(c, BALSA_SERVICE, "/", OBJMAN_IFACE, "GetManagedObjects", "");
+	dbus_call_begin(c, BALSA_SERVICE, BALSA_MANAGER_PATH, OBJMAN_IFACE, "GetManagedObjects", "");
 	if (!dbus_call_send(c, CALL_MS, NULL, 0)) {
 		// bluealsa not on the bus yet: no PCM can exist, which is exactly what
 		// an empty list says.
