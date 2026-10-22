@@ -2475,6 +2475,8 @@ static void index_build(panel_t *p, gui_config_t *cfg) {
 }
 
 // The lane ends where the bottom slot starts while the mini player is up.
+static void album_paint(panel_t *p);
+
 static void index_fit_slot(void) {
 	panel_t *panels[] = {&panel_names, &panel_tracks, &panel_artist_albums};
 	for (size_t i = 0; i < sizeof(panels) / sizeof(panels[0]); i++) {
@@ -2483,6 +2485,8 @@ static void index_fit_slot(void) {
 			int top = settingsrow_content_top(p->cfg);
 			lv_obj_set_height(p->index_bar, (int)p->cfg->screen_height - top - 8 - sx_frame_body_bottom());
 		}
+		if (p->album_page && p->cfg && p->screen == lv_screen_active())
+			album_paint(p);
 	}
 }
 
@@ -4091,7 +4095,7 @@ static void album_paint(panel_t *p) {
 	// the page); below that edge it is only the screen's last 88 px.
 	lv_obj_t *mini = sx_mini_obj();
 	if (mini) {
-		int y = (int)p->cfg->screen_height - SX_MINI_SLOT_H;
+		int y = (int)p->cfg->screen_height - sx_mini_slot_height();
 		int pct = y <= GRAD_Y1 ? 0 : y >= GRAD_Y2 ? 100 : (y - GRAD_Y1) * 100 / (GRAD_Y2 - GRAD_Y1);
 		lv_obj_set_style_bg_color(mini, sx_mix(pal->album_grad[2], pal->album_grad[1], (uint8_t)pct), 0);
 	}

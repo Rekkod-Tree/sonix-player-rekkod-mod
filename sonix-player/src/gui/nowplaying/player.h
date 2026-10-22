@@ -180,6 +180,8 @@ bool player_statusbar_always(void);
 // list queued from elsewhere): "Up next · X" and the "3/12" under the bar are
 // read again. Cheap; the poll catches anything not told.
 void player_queue_changed(void);
+// Refresh only mini-specific artwork demand after its display mode changes.
+void player_mini_mode_changed(void);
 
 // What plays outside the queue (the handoff's `ext`): a station, a book, a
 // phone over AirPlay, DLNA or the Bluetooth receiver. True with its title in

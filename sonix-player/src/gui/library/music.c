@@ -369,13 +369,23 @@ static void upgrade_repaint(void) {
 	settingsrow_pill_active(upgrade_later_pill, false);
 }
 
+static void music_fit_slot(void) {
+	if (!grid_cfg)
+		return;
+	int reserve = sx_frame_idle() ? SX_MINI_SLOT_H : sx_frame_body_bottom();
+	if (tile_grid)
+		lv_obj_set_style_pad_bottom(tile_grid, grid_cfg->padding + reserve, 0);
+	if (upgrade_card)
+		lv_obj_align(upgrade_card, LV_ALIGN_BOTTOM_MID, 0, -grid_cfg->padding - reserve);
+}
+
 static void upgrade_build(void) {
 	upgrade_card = lv_obj_create(music_screen);
 	lv_obj_set_width(upgrade_card, grid_cfg->screen_width - 2 * grid_cfg->padding);
 	lv_obj_set_height(upgrade_card, LV_SIZE_CONTENT);
 	// Above the bottom slot, which on this page always holds something: the
 	// mini player, or the "Shuffle all music" card while nothing has played.
-	lv_obj_align(upgrade_card, LV_ALIGN_BOTTOM_MID, 0, -grid_cfg->padding - SX_MINI_SLOT_H);
+	lv_obj_align(upgrade_card, LV_ALIGN_BOTTOM_MID, 0, -grid_cfg->padding - (sx_frame_idle() ? SX_MINI_SLOT_H : sx_frame_body_bottom()));
 	sx_frame_exempt(upgrade_card);
 	lv_obj_add_style(upgrade_card, &theme_style_card, 0);
 	lv_obj_set_style_radius(upgrade_card, 16, 0);
@@ -487,7 +497,8 @@ void music_init(gui_config_t *cfg) {
 	// or the "Shuffle all music" card while nothing has played -- so the last
 	// tiles can always be scrolled clear of it, whichever it is.
 	sx_frame_exempt(grid);
-	lv_obj_set_style_pad_bottom(grid, cfg->padding + SX_MINI_SLOT_H, 0);
+	music_fit_slot();
+	sx_frame_on_body_change(music_fit_slot);
 
 	// One button in the corner, so the heading has to be told to clear it.
 	settingsrow_title_corner_slots(settingsrow_title(music_screen, cfg, "music"), cfg, 1);

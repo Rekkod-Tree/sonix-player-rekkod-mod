@@ -14,6 +14,7 @@
 #include "src/gui/shell/sx_styles.h"
 #include "src/gui/shell/sx_tokens.h"
 #include "src/gui/shell/theme.h"
+#include "src/system/core/config.h"
 
 static lv_obj_t *slot;	   // the 128 px band; takes the gestures
 static lv_obj_t *card;	   // the 112 px accent card in it
@@ -21,6 +22,14 @@ static lv_obj_t *cover;	   // the tone plaque...
 static lv_obj_t *cover_img; // ...and the thumbnail over it
 static lv_obj_t *title;
 static lv_obj_t *artist;
+static lv_obj_t *text_box;
+static lv_obj_t *compact_line;
+static char title_text[512], artist_text[256];
+static int mini_mode;
+static int frame_width, frame_height;
+static lv_indev_t *mini_press_indev;
+static void apply_layout(void);
+static void cancel_press(void);
 static lv_obj_t *cover_glyph;
 static lv_obj_t *play_disc;
 static lv_obj_t *progress_track;
@@ -44,6 +53,28 @@ lv_obj_t *sx_mini_obj(void) { return slot; }
 bool sx_mini_visible(void) { return shown; }
 
 bool sx_mini_has_track(void) { return has_track; }
+
+int sx_mini_mode(void) { return mini_mode; }
+
+int sx_mini_slot_height(void) { return mini_mode == SX_MINI_COMPACT ? SX_MINI_COMPACT_SLOT_H : SX_MINI_SLOT_H; }
+
+bool sx_mini_wants_cover(void) { return mini_mode != SX_MINI_COMPACT; }
+
+bool sx_mini_set_mode(int mode) {
+	mode = mode == SX_MINI_COMPACT ? SX_MINI_COMPACT : SX_MINI_NORMAL;
+	if (mode == mini_mode)
+		return false;
+	cancel_press();
+	mini_mode = mode;
+	if (slot) {
+		apply_layout();
+		player_mini_mode_changed();
+		sx_frame_slot_changed();
+	}
+	config_set_int("ui", "mini_player", mode);
+	config_save();
+	return true;
+}
 
 static bool screen_hides_mini(lv_obj_t *screen) {
 	for (int i = 0; i < hidden_screen_count; i++) {
@@ -82,6 +113,8 @@ void sx_mini_update_visibility(void) {
 	if (want == shown) {
 		return;
 	}
+	if (!want)
+		cancel_press();
 	shown = want;
 	lv_obj_set_hidden(slot, !want);
 	sx_frame_slot_changed();
@@ -96,15 +129,45 @@ void sx_mini_player_shown(bool open) {
 // What it shows
 // ---------------------------------------------------------------------------
 
+static bool remember_text(char *stored, size_t size, const char *value) {
+	const char *source = value ? value : "";
+	size_t count = strlen(source);
+	if (count >= size) {
+		count = size - 1;
+		while (count && ((unsigned char)source[count] & 0xc0) == 0x80)
+			count--;
+	}
+	if (strlen(stored) == count && memcmp(stored, source, count) == 0)
+		return false;
+	memcpy(stored, source, count);
+	stored[count] = 0;
+	return true;
+}
+
+static void compact_text(void) {
+	if (!compact_line || mini_mode != SX_MINI_COMPACT)
+		return;
+	const char *name = title_text;
+	const char *by = artist_text;
+	// The source cache is canonical: LVGL DOT mode may alter display buffers.
+	char line[sizeof(title_text) + sizeof(artist_text) + 5];
+	snprintf(line, sizeof(line), "%s%s%s", name, name[0] && by[0] ? " \xC2\xB7 " : "", by);
+	sx_set_text(compact_line, line);
+}
+
 void sx_mini_set_text(const char *track_title, const char *track_artist) {
 	if (!slot) {
 		return;
 	}
-	if (has_track) {
-		lv_label_set_text(title, track_title ? track_title : "");
-	}
-	sx_set_text(artist, track_artist ? track_artist : "");
-	lv_obj_set_hidden(artist, !track_artist || !track_artist[0]);
+	bool title_changed = remember_text(title_text, sizeof(title_text), track_title);
+	bool artist_changed = remember_text(artist_text, sizeof(artist_text), track_artist);
+	if (title_changed)
+		lv_label_set_text(title, title_text);
+	if (artist_changed)
+		lv_label_set_text(artist, artist_text);
+	lv_obj_set_hidden(artist, mini_mode == SX_MINI_COMPACT || !artist_text[0]);
+	if (title_changed || artist_changed)
+		compact_text();
 }
 
 void sx_mini_set_track(const char *track_title, const char *track_path, const char *track_artist, bool is_live) {
@@ -153,7 +216,7 @@ void sx_mini_set_progress(double position, double total) {
 }
 
 void sx_mini_set_cover(const lv_image_dsc_t *thumbnail, uint32_t generation) {
-	if (!cover_img) {
+	if (!cover_img || (thumbnail && !sx_mini_wants_cover())) {
 		return;
 	}
 	if (thumbnail) {
@@ -178,6 +241,14 @@ void sx_mini_set_cover(const lv_image_dsc_t *thumbnail, uint32_t generation) {
 static lv_point_t press_at;
 static bool press_tracking;
 
+static void cancel_press(void) {
+	lv_indev_t *input = mini_press_indev;
+	press_tracking = false;
+	mini_press_indev = NULL;
+	if (input && lv_indev_get_state(input) == LV_INDEV_STATE_PRESSED)
+		lv_indev_wait_release(input);
+}
+
 static void open_player(void) {
 	if (!player_sheet_is_open()) {
 		switch_screen(player_screen);
@@ -196,9 +267,11 @@ static void slot_event_cb(lv_event_t *e) {
 	if (code == LV_EVENT_PRESSED) {
 		press_at = p;
 		press_tracking = true;
+		mini_press_indev = indev;
 		return;
 	}
 	if (code == LV_EVENT_PRESS_LOST) {
+		mini_press_indev = NULL;
 		press_tracking = false;
 		return;
 	}
@@ -206,6 +279,7 @@ static void slot_event_cb(lv_event_t *e) {
 		return;
 	}
 	press_tracking = false;
+	mini_press_indev = NULL;
 
 	int dx = p.x - press_at.x;
 	int dy = p.y - press_at.y;
@@ -222,7 +296,16 @@ static void slot_event_cb(lv_event_t *e) {
 
 static void play_clicked_cb(lv_event_t *e) {
 	(void)e;
-	player_key_play_pause();
+	if (shown && has_track)
+		player_key_play_pause();
+}
+
+static void play_press_cb(lv_event_t *e) {
+	lv_event_code_t code = lv_event_get_code(e);
+	if (code == LV_EVENT_PRESSED)
+		mini_press_indev = lv_indev_active();
+	else if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST)
+		mini_press_indev = NULL;
 }
 
 // ---------------------------------------------------------------------------
@@ -234,11 +317,50 @@ static void refresh_theme(void) {
 	sx_set_recolor(cover_glyph, sx_placeholder_ink(p->mini_cover_tone));
 	lv_obj_set_style_text_color(title, p->mini_ink, 0);
 	lv_obj_set_style_text_color(artist, p->mini_text2, 0);
+	lv_obj_set_style_text_color(compact_line, p->mini_ink, 0);
 	lv_obj_set_style_bg_color(play_disc, p->mini_ink, 0);
 	lv_obj_set_style_image_recolor(play_icon, p->mini_bg, 0);
 	lv_obj_set_style_border_color(cover, sx_mix(p->mini_ink, p->mini_bg, 65), 0);
 	lv_obj_set_style_bg_color(progress_track, p->mini_ink, 0);
 	lv_obj_set_style_bg_color(progress_fill, p->mini_ink, 0);
+}
+
+static void apply_layout(void) {
+	bool compact = mini_mode == SX_MINI_COMPACT;
+	int slot_h = sx_mini_slot_height();
+	int card_h = compact ? SX_MINI_COMPACT_H : SX_MINI_H;
+	lv_obj_set_size(slot, frame_width, slot_h);
+	lv_obj_set_y(slot, frame_height - slot_h);
+	lv_obj_set_height(card, card_h);
+	lv_obj_set_height(text_box, card_h);
+	lv_obj_set_flex_grow(text_box, compact ? 0 : 1);
+	lv_obj_set_width(text_box, compact ? frame_width - 2 * SX_MINI_MARGIN_SIDE - 24 - SX_MINI_COMPACT_TARGET : 0);
+	lv_obj_set_hidden(cover, compact);
+	lv_obj_set_hidden(title, compact);
+	lv_obj_set_hidden(artist, compact || !artist_text[0]);
+	lv_obj_set_hidden(compact_line, !compact);
+	if (compact) {
+		// The full 64 px pause target stays inside the reserved 72 px band.
+		lv_obj_set_parent(play_area, slot);
+		lv_obj_set_ignore_layout(play_area, true);
+		lv_obj_set_size(play_area, SX_MINI_COMPACT_TARGET, SX_MINI_COMPACT_TARGET);
+		lv_obj_set_pos(play_area, frame_width - 2 * SX_MINI_MARGIN_SIDE - SX_MINI_COMPACT_TARGET,
+					  (SX_MINI_COMPACT_SLOT_H - SX_MINI_COMPACT_TARGET) / 2 - SX_MINI_MARGIN_TOP);
+	} else {
+		// DOT mode may alter a label's display buffer; restore canonical text.
+		lv_label_set_text(title, title_text);
+		lv_label_set_text(artist, artist_text);
+		lv_obj_set_parent(play_area, card);
+		lv_obj_set_ignore_layout(play_area, false);
+		lv_obj_set_pos(play_area, 0, 0);
+		lv_obj_set_size(play_area, SX_MINI_PLAY_TARGET, SX_MINI_H);
+		lv_obj_move_to_index(progress_track, -1);
+	}
+	int disc_h = compact ? SX_MINI_COMPACT_PLAY : SX_MINI_PLAY;
+	lv_obj_set_size(play_disc, disc_h, disc_h);
+	lv_obj_center(play_disc);
+	lv_obj_center(play_icon);
+	compact_text();
 }
 
 void sx_mini_init(gui_config_t *cfg) {
@@ -247,6 +369,9 @@ void sx_mini_init(gui_config_t *cfg) {
 	}
 	int w = (int)cfg->screen_width;
 	int h = (int)cfg->screen_height;
+	frame_width = w;
+	frame_height = h;
+	mini_mode = config_get_int("ui", "mini_player", SX_MINI_NORMAL) == SX_MINI_COMPACT ? SX_MINI_COMPACT : SX_MINI_NORMAL;
 
 	slot = sx_box(lv_layer_top());
 	lv_obj_set_size(slot, w, SX_MINI_SLOT_H);
@@ -260,6 +385,7 @@ void sx_mini_init(gui_config_t *cfg) {
 	// The slot takes the presses: the margins around the card are part of the
 	// target, and nothing under the slot is reachable while it is up anyway.
 	lv_obj_set_clickable(slot, true);
+	lv_obj_set_press_lock(slot, true);
 	lv_obj_set_event_bubble(slot, false);
 	lv_obj_add_event_cb(slot, slot_event_cb, LV_EVENT_PRESSED, NULL);
 	lv_obj_add_event_cb(slot, slot_event_cb, LV_EVENT_RELEASED, NULL);
@@ -300,6 +426,7 @@ void sx_mini_init(gui_config_t *cfg) {
 	lv_obj_set_hidden(cover_img, true);
 
 	lv_obj_t *text = sx_box(card);
+	text_box = text;
 	lv_obj_set_height(text, SX_MINI_H);
 	lv_obj_set_flex_grow(text, 1);
 	lv_obj_set_style_pad_hor(text, 12, 0);
@@ -314,13 +441,20 @@ void sx_mini_init(gui_config_t *cfg) {
 	artist = sx_label(text, &font_ui_22, NULL);
 	lv_obj_set_width(artist, lv_pct(100));
 
-	// The disc sits in a 68 px wide target that takes its own presses.
+	compact_line = sx_label(text, &font_ui_22, NULL);
+	lv_obj_set_width(compact_line, lv_pct(100));
+	lv_obj_set_hidden(compact_line, true);
+
+	// The disc sits in its own target; the standard geometry stays unchanged.
 	play_area = lv_obj_create(card);
 	lv_obj_remove_style_all(play_area);
 	lv_obj_set_size(play_area, SX_MINI_PLAY_TARGET, SX_MINI_H);
 	lv_obj_set_scrollable(play_area, false);
 	lv_obj_set_event_bubble(play_area, false);
 	lv_obj_add_event_cb(play_area, play_clicked_cb, LV_EVENT_CLICKED, NULL);
+	lv_obj_add_event_cb(play_area, play_press_cb, LV_EVENT_PRESSED, NULL);
+	lv_obj_add_event_cb(play_area, play_press_cb, LV_EVENT_RELEASED, NULL);
+	lv_obj_add_event_cb(play_area, play_press_cb, LV_EVENT_PRESS_LOST, NULL);
 
 	lv_obj_t *disc = sx_box(play_area);
 	play_disc = disc;
@@ -354,6 +488,7 @@ void sx_mini_init(gui_config_t *cfg) {
 	lv_obj_set_style_radius(progress_fill, 2, 0);
 	lv_obj_set_hidden(progress_fill, true);
 
+	apply_layout();
 	refresh_theme();
 	theme_register_refresh(refresh_theme);
 }

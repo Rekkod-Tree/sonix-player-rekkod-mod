@@ -3808,6 +3808,7 @@ static void refresh_now_playing(void) {
 // refresh_now_playing(): that throws the decoded cover away and asks for it
 // again, which for a station whose icon has not changed is work for nothing.
 static void refresh_live_texts(const device_state_t *state) {
+	sx_mini_set_text(state->metadata.title, state->metadata.artist);
 	scrolltext_set(song_title_label, state->metadata.title);
 	scrolltext_set(song_artist_label, state->metadata.artist);
 	lyrics_head_sync();
@@ -4329,6 +4330,9 @@ static void update_progress(void) {
 		handle_track_finished();
 	}
 
+	// Read the revision before its snapshot so a later change stays pending.
+	unsigned serial = radio_now_serial();
+
 	device_state_t state;
 	device_state_get(&state);
 
@@ -4345,7 +4349,6 @@ static void update_progress(void) {
 	{
 		static bool was_live;
 		static unsigned last_serial;
-		unsigned serial = radio_now_serial();
 
 		if (state.live != was_live) {
 			was_live = state.live;
@@ -5584,6 +5587,14 @@ static int64_t mini_thumb_album; // what mini_thumb_buf holds, 0 nothing
 static cover_image_t mini_cover_copy;
 
 static void np_mini_thumb_refresh(void) {
+	if (!sx_mini_wants_cover()) {
+		// Cover-derived colours still need the shared engine, not a hidden
+		// mini-thumbnail read or a private scaled copy.
+		float h, c, l;
+		if (np_album_id && !covertone_for_album(np_album_id, &h, &c, &l))
+			covertone_request(np_album_id);
+		return;
+	}
 	if (np_album_id == 0) {
 		if (mini_thumb_album) {
 			sx_mini_set_cover(NULL, 0);
@@ -5610,7 +5621,7 @@ static void np_mini_thumb_refresh(void) {
 // A track outside the library: the mini player gets the picture the player
 // decoded, at its size. Once per picture, 6 KB.
 static void np_mini_from_cover(void) {
-	if (np_album_id != 0 || mini_thumb_album != 0) {
+	if (!sx_mini_wants_cover() || np_album_id != 0 || mini_thumb_album != 0) {
 		return;
 	}
 	sx_mini_set_cover(NULL, 0);
@@ -5618,6 +5629,18 @@ static void np_mini_from_cover(void) {
 	if (current_cover.pixels && cover_scaled_copy(&current_cover, SX_MINI_COVER, &mini_cover_copy)) {
 		mini_cover_copy.dsc.data = mini_cover_copy.pixels;
 		sx_mini_set_cover(&mini_cover_copy.dsc, mini_cover_copy.display_generation);
+	}
+}
+
+// UI preference only: release the mini-specific image, preserving the shared
+// cover/tone engine and full-player artwork/requests.
+void player_mini_mode_changed(void) {
+	sx_mini_set_cover(NULL, 0);
+	mini_thumb_album = 0;
+	sx_artview_release_cover(&mini_cover_copy);
+	if (sx_mini_wants_cover()) {
+		np_mini_thumb_refresh();
+		np_mini_from_cover();
 	}
 }
 

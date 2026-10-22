@@ -238,6 +238,7 @@ static s24_scratch_t playback_s24;
 static s24_scratch_t external_s24;
 
 static pthread_mutex_t output_lock = PTHREAD_MUTEX_INITIALIZER;
+static bool output_device_set_if(const char *expected, const char *pcm);
 
 static pthread_t playback_thread;
 static pthread_mutex_t audio_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -873,10 +874,12 @@ static char bt_converted_device[sizeof(output_pcm)];
 
 // The device name a handle was opened for: the route, for the converted plug.
 static const char *pcm_device_name(snd_pcm_t *pcm) {
-	if (pcm && pcm == bt_converted_pcm) {
+	const char *name = pcm ? snd_pcm_name(pcm) : NULL;
+	// A closed converted handle's address can be reused by a hardware PCM.
+	if (pcm && pcm == bt_converted_pcm && name && strcmp(name, BT_CONVERTED_PCM) == 0) {
 		return bt_converted_device;
 	}
-	return pcm ? snd_pcm_name(pcm) : NULL;
+	return name;
 }
 static int held_route;
 // When the PCM was taken into hold, so the log says how long the next track
@@ -1347,124 +1350,164 @@ static void release_page_cache(void) {
 #endif
 }
 
+static uint64_t paused_clock_ms(void);
+
+typedef struct {
+	char device[sizeof(output_pcm)];
+	bool bluetooth;
+	int mode;
+	unsigned convert_to, generation;
+} pcm_open_route_t;
+
+// Retry boundaries only: no D-Bus call or lock is held across ALSA.
+static bool pcm_open_route_refresh(pcm_open_route_t *route, int sample_rate, bool follow_track_rate) {
+	pcm_open_route_t next = {0};
+	audio_get_output_device(next.device, sizeof(next.device));
+	next.bluetooth = strncmp(next.device, "bluealsa", 8) == 0;
+	if (next.bluetooth && !bluetooth_audio_active()) {
+		if (output_device_set_if(next.device, NULL)) {
+			fprintf(stderr, "audio: '%s' has no sink any more; the jack takes it back\n", next.device);
+		}
+		// A failed conditional reset means a newer selection must be respected.
+		audio_get_output_device(next.device, sizeof(next.device));
+		next.bluetooth = strncmp(next.device, "bluealsa", 8) == 0;
+	}
+	next.mode = next.bluetooth ? SND_PCM_NONBLOCK : 0;
+	if (next.bluetooth) {
+		next.generation = bluetooth_output_generation();
+		if (!follow_track_rate) {
+			unsigned rate = bluetooth_sink_rate();
+			if (rate > 0 && rate != (unsigned)sample_rate)
+				next.convert_to = rate;
+		}
+	}
+	bool changed = strcmp(route->device, next.device) != 0 || route->bluetooth != next.bluetooth ||
+				   route->mode != next.mode || route->convert_to != next.convert_to || route->generation != next.generation;
+	if (changed && next.convert_to)
+		fprintf(stderr, "audio: the headphones stay at %u Hz; the %d Hz track is converted to it\n", next.convert_to, sample_rate);
+	*route = next;
+	return changed;
+}
+
 static snd_pcm_t *open_pcm_device_now(int channels, int sample_rate, int bits_per_sample, snd_pcm_uframes_t *period_size_out) {
 	snd_pcm_t *pcm_handle = NULL;
-
-	// Not on the card while the route re-init after mem is powering it up.
 	alsa_wait_output_reinit();
-
 	release_external_output();
 
-	// A track change closes the old PCM and opens a new one back to back. On
-	// real hardware the close is not always instantaneous -- the driver can
-	// report EBUSY for a moment while the old stream is torn down -- and one
-	// failed open here means the new track silently never starts. So the open
-	// is retried briefly instead of being given up on the first attempt.
-	char device[sizeof(output_pcm)];
-	audio_get_output_device(device, sizeof(device));
-
-	// bluealsa reports the same race differently. Where a card driver says EBUSY
-	// while the old stream is torn down, the plugin has to re-acquire the A2DP
-	// transport over D-Bus first and answers ENODEV, EIO or ETIMEDOUT until it
-	// has -- so on Bluetooth those count as "not yet" too, since the link can
-	// need a few hundred milliseconds.
-	bool bluetooth = strncmp(device, "bluealsa", 8) == 0;
-
-	// A bluealsa name is worth opening only while there is something on the
-	// other end of it. When there is not, opening it is at best two seconds of
-	// retries per track and at worst a wait inside the plugin, which talks to
-	// the bluealsa daemon over D-Bus and has no deadline of its own -- and all
-	// of that happens before the fallback below is ever reached, so a dropped
-	// link would leave nothing playing at all, jack included.
-	//
-	// Asked of bluetooth.c and not guessed: it is the side that hears the
-	// AudioSink notifications, and its answer is a read of two booleans.
-	if (bluetooth && !bluetooth_audio_active()) {
-		fprintf(stderr, "audio: '%s' has no sink any more; the jack takes it back\n", device);
-		audio_set_output_device(NULL);
-		snprintf(device, sizeof(device), "%s", AUDIO_DEFAULT_PCM);
-		bluetooth = false;
-	}
-
-	// Non-blocking, over Bluetooth only. It is what lets pcm_write_bluetooth()
-	// put a deadline on a write that would otherwise wait for room that may
-	// never come again. A sound card keeps a blocking handle: there the clock
-	// guarantees the room.
-	int mode = bluetooth ? SND_PCM_NONBLOCK : 0;
-
-	// How long an open is given before the fallback below takes over.
-	//
-	// Two seconds is right for a sound card: what holds it is a driver tearing
-	// down the previous stream. A bluealsa open is a different thing -- the
-	// plugin has to make bluealsa take the A2DP transport back from bluez over
-	// D-Bus, and on one core, with an encoder thread of its own at real-time
-	// priority, that round trip is not bounded by anything this player controls.
-	//
-	// And the cost of giving up early is paid in the wrong place: the fallback
-	// plays the track out of the jack, which with the headphones still on the
-	// listener's head is silence, one track at a time until an open happens to
-	// finish in time.
-	//
-	// So while the radio still says there is a sink, wait for it.
-	// See open_bluetooth_at_rate().
-	unsigned convert_to = 0;
-	if (bluetooth && !config_get_int("bluetooth", "follow_track_rate", 0)) {
-		unsigned sink_rate = bluetooth_sink_rate();
-		if (sink_rate > 0 && sink_rate != (unsigned)sample_rate) {
-			convert_to = sink_rate;
-			fprintf(stderr, "audio: the headphones stay at %u Hz; the %d Hz track is converted to it\n", sink_rate,
-					sample_rate);
+	pcm_open_route_t route = {0};
+	audio_get_output_device(route.device, sizeof(route.device));
+	route.bluetooth = strncmp(route.device, "bluealsa", 8) == 0;
+	// A caller may already hold DoP frames even if the selected name just became BT.
+	// Only an ordinary PCM open that began on BT gains the new retarget policy.
+	bool retarget = route.bluetooth && !pcm_exact_rate;
+	bool follow_track_rate = route.bluetooth && config_get_int("bluetooth", "follow_track_rate", 0);
+	if (retarget) {
+		pcm_open_route_refresh(&route, sample_rate, follow_track_rate);
+	} else {
+		// Preserve the existing non-BT/DoP open and fallback policy.
+		if (route.bluetooth && !bluetooth_audio_active()) {
+			fprintf(stderr, "audio: '%s' has no sink any more; the jack takes it back\n", route.device);
+			audio_set_output_device(NULL);
+			snprintf(route.device, sizeof(route.device), "%s", AUDIO_DEFAULT_PCM);
+			route.bluetooth = false;
+		}
+		route.mode = route.bluetooth ? SND_PCM_NONBLOCK : 0;
+		if (route.bluetooth && !follow_track_rate) {
+			unsigned rate = bluetooth_sink_rate();
+			if (rate > 0 && rate != (unsigned)sample_rate) {
+				route.convert_to = rate;
+				fprintf(stderr, "audio: the headphones stay at %u Hz; the %d Hz track is converted to it\n", rate, sample_rate);
+			}
 		}
 	}
 
-	int err = -EBUSY;
-	int attempts = 0;
-	int budget = (bluetooth && bluetooth_audio_active()) ? 160 : 40; // eight seconds, or two
-	for (; attempts < budget; attempts++) {
-		err = convert_to ? open_bluetooth_at_rate(&pcm_handle, device, convert_to, mode)
-						 : snd_pcm_open(&pcm_handle, device, SND_PCM_STREAM_PLAYBACK, mode);
-		if (err >= 0) {
+	// One total budget; neither endpoint churn nor daemon replacement restarts it.
+	int budget = (route.bluetooth && bluetooth_audio_active()) ? 160 : 40;
+	int err = -EBUSY, attempts = 0;
+	bool fallback_attempted = false, route_changed = false, used_default = false;
+	char opened_device[sizeof(output_pcm)];
+	snprintf(opened_device, sizeof(opened_device), "%s", route.device);
+	// One set of stack parameter buffers, also across a late route retry.
+	snd_pcm_hw_params_t *hw_params, *unsized;
+	snd_pcm_hw_params_alloca(&hw_params);
+	snd_pcm_hw_params_alloca(&unsized);
+	snd_pcm_sw_params_t *sw_params;
+	snd_pcm_sw_params_alloca(&sw_params);
+	uint64_t began = paused_clock_ms();
+retry_open:
+	for (; attempts < budget;) {
+		if (retarget)
+			pcm_open_route_refresh(&route, sample_rate, follow_track_rate);
+		used_default = false;
+		bool attempted_bt = route.bluetooth;
+		snprintf(opened_device, sizeof(opened_device), "%s", route.device);
+		attempts++;
+		err = route.convert_to ? open_bluetooth_at_rate(&pcm_handle, route.device, route.convert_to, route.mode)
+						   : snd_pcm_open(&pcm_handle, route.device, SND_PCM_STREAM_PLAYBACK, route.mode);
+		route_changed = retarget && pcm_open_route_refresh(&route, sample_rate, follow_track_rate);
+		if (err >= 0 && !route_changed)
 			break;
+		if (err >= 0) {
+			// A successful obsolete handle is still owned by this attempt alone.
+			snd_pcm_close(pcm_handle);
+			pcm_handle = NULL;
+			err = -EAGAIN;
+			usleep(150 * 1000);
+			continue;
 		}
-		bool transient = (err == -EBUSY || err == -EAGAIN) ||
-						 (bluetooth && (err == -ENODEV || err == -EIO || err == -ETIMEDOUT || err == -ECONNREFUSED));
-		if (!transient) {
-			break; // a real error, not a teardown race: no point retrying
-		}
+		bool transient = err == -EBUSY || err == -EAGAIN ||
+			(attempted_bt && (err == -ENODEV || err == -EIO || err == -ETIMEDOUT || err == -ECONNREFUSED));
+		if (!route_changed && !transient)
+			break;
 		usleep(50 * 1000);
 	}
 
-	// Headphones that walked out of range take their PCM with them, and a
-	// track that refuses to start is a worse outcome than one coming out of
-	// the wrong hole. Fall back to the jack, and say so in the log.
-	if (err < 0 && strcmp(device, AUDIO_DEFAULT_PCM) != 0) {
-		fprintf(stderr, "audio: '%s' would not open (%s); falling back to " AUDIO_DEFAULT_PCM "\n", device,
-				snd_strerror(err));
+	if (err < 0 && retarget && pcm_open_route_refresh(&route, sample_rate, follow_track_rate)) {
+		route_changed = true;
+		if (attempts < budget)
+			goto retry_open;
+	}
+	// At most the existing one default fallback. Do not use an obsolete failure
+	// to fall back over a newer desired route after the shared budget ran out.
+	if (err < 0 && !route_changed && !fallback_attempted && strcmp(route.device, AUDIO_DEFAULT_PCM) != 0) {
+		char failed_device[sizeof(output_pcm)];
+		snprintf(failed_device, sizeof(failed_device), "%s", route.device);
+		bool failed_bt = route.bluetooth;
+		fprintf(stderr, "audio: '%s' would not open (%s); falling back to " AUDIO_DEFAULT_PCM "\n", failed_device, snd_strerror(err));
+		fallback_attempted = true;
+		snprintf(opened_device, sizeof(opened_device), "%s", AUDIO_DEFAULT_PCM);
+		attempts++;
 		err = snd_pcm_open(&pcm_handle, AUDIO_DEFAULT_PCM, SND_PCM_STREAM_PLAYBACK, 0);
-
-		// And stop asking for it, so the dead name does not stay installed and
-		// cost every following track the same wait while the interface, the
-		// volume curve and the power rules all believe the sound is leaving
-		// over Bluetooth. Only when the radio agrees the sink is gone: a link
-		// that is merely busy for a moment must keep its route, or one failed
-		// open would move the listener to the jack for good.
-		if (err >= 0 && bluetooth && !bluetooth_audio_active()) {
-			audio_set_output_device(NULL);
+		if (retarget && pcm_open_route_refresh(&route, sample_rate, follow_track_rate) && strcmp(route.device, AUDIO_DEFAULT_PCM) != 0) {
+			route_changed = true;
+			if (err >= 0) {
+				snd_pcm_close(pcm_handle);
+				pcm_handle = NULL;
+				usleep(150 * 1000);
+			}
+			err = -EAGAIN;
+			if (attempts < budget)
+				goto retry_open;
+		} else if (err >= 0) {
+			if (failed_bt && !bluetooth_audio_active()) {
+				if (retarget)
+					output_device_set_if(failed_device, NULL);
+				else
+					audio_set_output_device(NULL);
+			}
+			used_default = retarget;
 		}
 	}
-
 	if (err < 0) {
-		fprintf(stderr, "Audio: Cannot open PCM device '%s': %s (after %d attempts)\n", device, snd_strerror(err),
-				attempts);
+		fprintf(stderr, "Audio: Cannot open PCM device '%s': %s (after %d attempts)\n", opened_device, snd_strerror(err), attempts);
 		return NULL;
 	}
-	if (attempts > 0) {
-		fprintf(stderr, "audio[%ld]: opening '%s' took %d attempts (%d ms)\n", log_ms(), device, attempts,
-				attempts * 50);
-	}
+	if (attempts > 1)
+		fprintf(stderr, "audio[%ld]: opening '%s' used %d attempts in %llu ms\n", log_ms(), opened_device, attempts,
+				(unsigned long long)(paused_clock_ms() - began));
+	const char *device = used_default ? AUDIO_DEFAULT_PCM : route.device;
+	bool bluetooth = route.bluetooth && !used_default;
 
-	snd_pcm_hw_params_t *hw_params;
-	snd_pcm_hw_params_alloca(&hw_params);
 	snd_pcm_hw_params_any(pcm_handle, hw_params);
 	snd_pcm_hw_params_set_access(pcm_handle, hw_params, SND_PCM_ACCESS_RW_INTERLEAVED);
 
@@ -1580,8 +1623,6 @@ static snd_pcm_t *open_pcm_device_now(int channels, int sample_rate, int bits_pe
 	// The space as it stands before the buffer is sized, for the retry below:
 	// once a size has been asked for, the parameters hold that one value and
 	// nothing else.
-	snd_pcm_hw_params_t *unsized;
-	snd_pcm_hw_params_alloca(&unsized);
 	snd_pcm_hw_params_copy(unsized, hw_params);
 
 	// Two ways of asking for a buffer, selected by a config key. The default is
@@ -1653,7 +1694,7 @@ static snd_pcm_t *open_pcm_device_now(int channels, int sample_rate, int bits_pe
 		// The device name belongs on this line: without it the log cannot tell
 		// a track that went to the headphones from one that went to the jack,
 		// since the two otherwise print identically.
-		fprintf(stderr, "audio[%ld]: PCM open on '%s': %u Hz %s %u ch (asked for %d Hz / %d bit)\n", log_ms(), device,
+		fprintf(stderr, "audio[%ld]: PCM open on '%s': %u Hz %s %u ch (asked for %d Hz / %d bit)\n", log_ms(), opened_device,
 				actual_rate, snd_pcm_format_name(actual_format), actual_channels, sample_rate, bits_per_sample);
 	}
 
@@ -1699,8 +1740,6 @@ static snd_pcm_t *open_pcm_device_now(int channels, int sample_rate, int bits_pe
 		snd_pcm_uframes_t buffer_frames = 0;
 		snd_pcm_hw_params_get_buffer_size(hw_params, &buffer_frames);
 
-		snd_pcm_sw_params_t *sw_params;
-		snd_pcm_sw_params_alloca(&sw_params);
 		if (snd_pcm_sw_params_current(pcm_handle, sw_params) >= 0) {
 			snd_pcm_sw_params_set_avail_min(pcm_handle, sw_params, period_size);
 			// Start threshold = the whole buffer (see above).
@@ -1713,6 +1752,19 @@ static snd_pcm_t *open_pcm_device_now(int channels, int sample_rate, int bits_pe
 
 	log_pcm_chain(pcm_handle);
 
+	// Configuration can also outlive a route change. Do not publish that PCM.
+	if (retarget && pcm_open_route_refresh(&route, sample_rate, follow_track_rate) &&
+		(!used_default || strcmp(route.device, AUDIO_DEFAULT_PCM) != 0)) {
+		fprintf(stderr, "audio: output moved while configuring '%s'; reopening the current route\n", opened_device);
+		snd_pcm_close(pcm_handle);
+		pcm_handle = NULL;
+		usleep(150 * 1000);
+		err = -EAGAIN;
+		route_changed = true;
+		if (attempts < budget)
+			goto retry_open;
+		return NULL;
+	}
 	*period_size_out = period_size;
 	pcm_device_open = true;
 	return pcm_handle;
@@ -5683,8 +5735,12 @@ void audio_seek(double seconds) {
 // where the sound goes
 // ---------------------------------------------------------------------------
 
-void audio_set_output_device(const char *pcm) {
+static bool output_device_set_if(const char *expected, const char *pcm) {
 	pthread_mutex_lock(&output_lock);
+	if (expected && strcmp(output_pcm, expected) != 0) {
+		pthread_mutex_unlock(&output_lock);
+		return false;
+	}
 	char before[sizeof(output_pcm)];
 	snprintf(before, sizeof(before), "%s", output_pcm);
 	if (pcm && pcm[0]) {
@@ -5704,7 +5760,10 @@ void audio_set_output_device(const char *pcm) {
 		fprintf(stderr, "audio[%ld]: the output moves from '%s' to '%s'\n", log_ms(), before, after);
 		playback_wake();
 	}
+	return true;
 }
+
+void audio_set_output_device(const char *pcm) { (void)output_device_set_if(NULL, pcm); }
 
 void audio_get_output_device(char *out, size_t out_size) {
 	if (!out || out_size == 0) {

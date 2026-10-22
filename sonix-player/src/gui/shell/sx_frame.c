@@ -8,6 +8,7 @@
 
 static gui_config_t *frame_cfg;
 static int body_bottom;
+static bool body_idle = true;
 
 #define BODY_CBS_MAX 16
 static sx_frame_cb_t body_cbs[BODY_CBS_MAX];
@@ -138,17 +139,19 @@ placed:
 	place_idle_cards(lv_screen_active());
 }
 
-bool sx_frame_slot_occupied(void) {
+int sx_frame_slot_height(void) {
 	if (sx_mini_visible()) {
-		return true;
+		return sx_mini_slot_height();
 	}
 	for (int i = 0; i < idle_card_count; i++) {
 		if (!lv_obj_is_hidden(idle_cards[i].card)) {
-			return true;
+			return SX_MINI_SLOT_H;
 		}
 	}
-	return false;
+	return 0;
 }
+
+bool sx_frame_slot_occupied(void) { return sx_frame_slot_height() > 0; }
 
 // ---------------------------------------------------------------------------
 // The way in
@@ -220,9 +223,11 @@ void sx_frame_page_shown(lv_obj_t *screen) {
 }
 
 void sx_frame_slot_changed(void) {
-	int now = sx_mini_visible() ? SX_MINI_SLOT_H : 0;
-	if (now != body_bottom) {
+	int now = sx_mini_visible() ? sx_mini_slot_height() : 0;
+	bool idle = sx_frame_idle();
+	if (now != body_bottom || idle != body_idle) {
 		body_bottom = now;
+		body_idle = idle;
 		for (int i = 0; i < follower_count; i++) {
 			apply_follower(&followers[i]);
 		}

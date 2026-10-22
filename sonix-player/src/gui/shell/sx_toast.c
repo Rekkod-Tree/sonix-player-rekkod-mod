@@ -15,7 +15,6 @@
 // control panel, over the bottom slot when something is in it, else near the
 // edge (the handoff's 318 / 98 / 16).
 #define BOTTOM_OVER_PLAYER (SX_NP_PANEL_H + 6)
-#define BOTTOM_OVER_SLOT (SX_MINI_SLOT_H + 10)
 #define BOTTOM_PLAIN 16
 
 // A glyph at the start of the line is drawn no larger than this.
@@ -300,7 +299,7 @@ static void place(void) {
 	if (player_sheet_is_open()) {
 		bottom = BOTTOM_OVER_PLAYER;
 	} else if (sx_frame_slot_occupied()) {
-		bottom = BOTTOM_OVER_SLOT;
+		bottom = sx_frame_slot_height() + 10;
 	}
 	lv_obj_align(toast, LV_ALIGN_BOTTOM_MID, 0, -bottom);
 }

@@ -87,6 +87,10 @@
 // ---------- The mini player ----------
 #define SX_MINI_SLOT_H 128
 #define SX_MINI_H 112
+#define SX_MINI_COMPACT_SLOT_H 72
+#define SX_MINI_COMPACT_H 56
+#define SX_MINI_COMPACT_TARGET 64
+#define SX_MINI_COMPACT_PLAY 44
 #define SX_MINI_R 20
 #define SX_MINI_COVER 64
 #define SX_MINI_COVER_R 12

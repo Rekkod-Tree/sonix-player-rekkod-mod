@@ -12,6 +12,7 @@
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/sx_card.h"
+#include "src/gui/shell/sx_mini.h"
 #include "src/gui/shell/sx_palette.h"
 #include "src/gui/shell/sx_styles.h"
 #include "src/gui/shell/theme.h"
@@ -41,6 +42,7 @@ static lv_obj_t *battery_percent_toggle;
 static lv_obj_t *statusbar_always_toggle;
 static lv_obj_t *rounded_corners_toggle;
 static lv_obj_t *large_rows_toggle;
+static lv_obj_t *mini_mode_pill[2];
 static lv_obj_t *text_size_pill[2]; // normal / large
 // The status bar draws the battery either way; this setting is only about the
 // number beside it, and is on by default.
@@ -75,6 +77,18 @@ static void rounded_corners_cb(lv_event_t *e) {
 static void dynamic_tint_cb(lv_event_t *e) {
 	(void)e;
 	theme_set_dynamic_tint(lv_obj_has_state(tint_toggle, LV_STATE_CHECKED));
+}
+
+static void refresh_mini_mode(void) {
+	for (int i = 0; i < 2; i++)
+		settingsrow_pill_active(mini_mode_pill[i], sx_mini_mode() == i);
+}
+
+static void mini_mode_cb(lv_event_t *e) {
+	if (switcher_back_drag_active())
+		return;
+	sx_mini_set_mode((int)(intptr_t)lv_event_get_user_data(e));
+	refresh_mini_mode();
 }
 
 static void refresh_text_size_pills(void) {
@@ -309,6 +323,12 @@ void appearance_init(gui_config_t *cfg) {
 	if (corners_enabled()) {
 		lv_obj_add_state(rounded_corners_toggle, LV_STATE_CHECKED);
 	}
+
+	settingsrow_pills(container, "appearance_mini_player", &pills);
+	mini_mode_pill[SX_MINI_NORMAL] = settingsrow_pill(pills, "appearance_mini_normal", SX_MINI_NORMAL, mini_mode_cb);
+	mini_mode_pill[SX_MINI_COMPACT] = settingsrow_pill(pills, "appearance_mini_compact", SX_MINI_COMPACT, mini_mode_cb);
+	refresh_mini_mode();
+	theme_register_refresh(refresh_mini_mode);
 
 	// Additive options follow the existing controls; no existing row is moved.
 	static const char *families[] = {"palette_graphite", "palette_mono", "palette_vivid", "palette_lcd", "palette_terminal", "palette_terminal_color", "palette_night_city", "palette_2077", "palette_netrunner"};

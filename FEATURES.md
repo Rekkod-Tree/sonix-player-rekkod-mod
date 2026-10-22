@@ -2,6 +2,21 @@
 
 ## Release polish and responsiveness (unreleased)
 
+- Appearance offers Normal (default) and Compact mini-player modes. Compact
+  uses a 56 px card in a 72 px reserved footer with a 64 px pause target;
+  track and artist share one ellipsized line. Existing gestures and numerical
+  thresholds are unchanged. Idle/resume cards retain their normal geometry.
+
+- Live radio keeps full and mini-player text in step as connection status
+  and on-air metadata change. Revision snapshots preserve pending updates,
+  including stations without ICY titles, errors and reconnection.
+
+- Ordinary PCM opens that began on Bluetooth recheck route identity and activity
+  during a finite retry budget. A stale fallback cannot clear a newer route;
+  diagnostics identify the actual fallback output and elapsed retry time.
+  Codec handoff grace is preserved. USB/DoP, command cancellation and PCM
+  resume ownership are unchanged; native acceptance is pending.
+
 - Global search keeps its last selected source when going Back and reopening.
   Switching between input pages preserves the original opener and each source's
   own query; it does not add the previous source to navigation history.

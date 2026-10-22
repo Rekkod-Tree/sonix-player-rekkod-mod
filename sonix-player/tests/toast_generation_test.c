@@ -20,6 +20,7 @@ lv_style_t theme_style_icon;
 static bool fixture_player, fixture_slot = true;
 bool player_sheet_is_open(void) { return fixture_player; }
 bool sx_frame_slot_occupied(void) { return fixture_slot; }
+int sx_frame_slot_height(void) { return fixture_slot ? SX_MINI_SLOT_H : 0; }
 const char *tr(const char *key) { return strcmp(key, "sx_undo") == 0 ? "Отменить" : key; }
 
 static lv_indev_t *pointer;

@@ -1865,7 +1865,7 @@ static void edge_drag_cb(lv_event_t *e) {
 	// Above the 2.0 bottom slot when something stands in it -- the mini
 	// player, or the "Shuffle all music" card while nothing has played: the
 	// bottom of the screen is theirs.
-	int band = (int)(uintptr_t)lv_event_get_user_data(e) - (sx_frame_slot_occupied() ? SX_MINI_SLOT_H : 0);
+	int band = (int)(uintptr_t)lv_event_get_user_data(e) - sx_frame_slot_height();
 
 	if (code == LV_EVENT_PRESSED) {
 		page_release();

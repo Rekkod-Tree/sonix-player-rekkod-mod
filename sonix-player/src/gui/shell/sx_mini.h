@@ -10,7 +10,7 @@
 // ---------------------------------------------------------------------------
 // Sonix UI 3.1: the mini player
 //
-// One shared 112 px Accent card in a 128 px footer slot. Artwork, track title,
+// One shared Accent card: normal 112/128 px, compact 56/72 px. Artwork, track title,
 // artist and a 64 px play disc inside an 88 px target. Foreground colours follow
 // the accent's contrast pair. A 3 px progress line sits along the bottom.
 // The detailed audio chain remains in the player's menu.
@@ -29,14 +29,20 @@
 // still, it costs nothing; playing, a redraw of the 3 px line each time it
 // grows by a pixel.
 //
-// Size: 14 objects, about 3 KB with their styles and texts (see the report
-// in the commit introducing it).
+// The compact metadata label is reused; no timer or background task is added.
 //
 // UI thread only.
 // ---------------------------------------------------------------------------
 
 // Built by sx_frame_init().
 void sx_mini_init(gui_config_t *cfg);
+
+enum { SX_MINI_NORMAL, SX_MINI_COMPACT };
+int sx_mini_mode(void);
+// Clamps invalid values to normal; persists only an actual user change.
+bool sx_mini_set_mode(int mode);
+int sx_mini_slot_height(void);
+bool sx_mini_wants_cover(void);
 
 // What is loaded. `title` is shown as given (a tag, not a translation key);
 // `track_path` is the file (NULL for a stream), `live` a stream without a

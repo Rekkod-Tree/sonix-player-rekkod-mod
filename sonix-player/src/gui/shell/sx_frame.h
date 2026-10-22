@@ -17,12 +17,12 @@
 //   44   the header, SX_HEADER_H: the round back target (switcher.c), the
 //        title (settingsrow_title), the header's own buttons
 //   120  the body, SX_BODY_TOP (59 on the home page); 15 px side margins
-//   H-88 the bottom slot, SX_MINI_SLOT_H: the mini player (sx_mini.h) while
+//   H-slot the bottom slot: the mini player (sx_mini.h) while
 //        something has played, or, on the home and Music pages while nothing
 //        ever has, the "Shuffle all music" card
 //
 // The bottom slot is the part pages have to know about: while the mini player
-// is up, the last 88 px of the screen are its. A page asks
+// is up, the current slot height belongs to it. A page asks
 // sx_frame_body_bottom() when laying out, or registers its scroller and its
 // bottom-anchored controls here and forgets about it -- they follow the slot
 // as the mini player comes and goes. Pages that do neither are handled on the
@@ -44,10 +44,11 @@ void sx_frame_init(gui_config_t *cfg);
 int sx_frame_body_top(void);
 
 // How many pixels at the bottom of the screen are not the page's now:
-// SX_MINI_SLOT_H while the mini player is up, 0 otherwise.
+// Current mini slot height (128 or 72) while it is up, 0 otherwise.
 int sx_frame_body_bottom(void);
 
-// Called after sx_frame_body_bottom() changes. Up to 16 callbacks; for a page
+// Called after mini reserve or independent idle-slot ownership changes.
+// Up to 16 callbacks; for a page
 // that lays itself out by hand rather than registering below.
 typedef void (*sx_frame_cb_t)(void);
 void sx_frame_on_body_change(sx_frame_cb_t cb);
@@ -75,6 +76,8 @@ void sx_frame_set_idle_card(lv_obj_t *screen, lv_obj_t *card);
 // Something stands in the bottom slot now: the mini player, or an idle card
 // on the page shown. The toast stands above it then.
 bool sx_frame_slot_occupied(void);
+// Includes an independent normal-height idle card; 0 when nothing occupies it.
+int sx_frame_slot_height(void);
 
 // Nothing has played since the player was set up (or the last track was
 // forgotten): there is no mini player, and the idle cards show.
