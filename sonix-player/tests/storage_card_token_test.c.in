@@ -1,0 +1,138 @@
+#include <setjmp.h>
+#include <time.h>
+
+static void startup_storage_actual(storage_config_t *storage_config) {
+    system_config_t wrapper={.storage_cfg=storage_config};system_config_t *cfg=&wrapper;
+@ACTUAL_STARTUP_STORAGE_BLOCK@
+}
+static void token_reset(void) {
+    reset();config.manage_mount=true;config.mount_point="/fixture/card";config.device="/dev/fixture";
+    runtime.storage_cfg=&config;runtime.device_name="mmcblk";
+    strcpy(fixture_mount_root,"/fixture/card");host_folder=false;dead_once=false;
+    card_epoch=0;card_epoch_valid=false;card_epoch_initialized=false;
+}
+static storage_card_token_t admit(void) {
+    storage_card_token_t token={0};char root[PATH_MAX];
+    assert(storage_card_try_admit(&token,root,sizeof(root))&&token.epoch&&strcmp(root,sd_root)==0);
+    return token;
+}
+static void stale(storage_card_token_t token) {
+    int before=observations;errno=0;assert(storage_card_try_check(&token)==-1&&errno==ESTALE);assert(observations==before);
+}
+static void current(storage_card_token_t token) {
+    int before=observations;assert(storage_card_try_check(&token)==0);assert(observations==before);
+}
+static void hotplug_event(const char *event) {
+    fake_hotplug_event=event;fake_recv_count=0;
+    if(!setjmp(hotplug_exit))sd_hotplug_thread(&runtime);
+    assert(!pthread_mutex_trylock(&card_lock));pthread_mutex_unlock(&card_lock);
+}
+static pthread_mutex_t barrier_lock=PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t barrier_wake=PTHREAD_COND_INITIALIZER;
+static bool owner_holding,owner_release;
+static void *hold_card_lock(void *unused) {
+    (void)unused;pthread_mutex_lock(&card_lock);pthread_mutex_lock(&barrier_lock);
+    owner_holding=true;pthread_cond_broadcast(&barrier_wake);
+    while(!owner_release)pthread_cond_wait(&barrier_wake,&barrier_lock);
+    pthread_mutex_unlock(&barrier_lock);pthread_mutex_unlock(&card_lock);return NULL;
+}
+
+static void token_scenarios(void) {
+    storage_card_token_t token={99};char root[PATH_MAX]="old";
+    token_reset();int before=observations;
+    assert(!storage_card_try_admit(&token,root,sizeof(root))&&errno==ENODEV&&!token.epoch&&!root[0]);assert(observations==before);
+    storage_card_token_t zero={0};assert(storage_card_try_check(&zero)==-1&&errno==EINVAL);assert(storage_pin_card_if(&zero)==-1&&errno==EINVAL);
+    // Legacy pins retain admission independently of new token initialization.
+    int fd=storage_pin_card(root,sizeof(root));assert(fd>=0);assert(!fixture_close(fd));
+    startup_storage_actual(&config);storage_card_token_t a_token=admit();current(a_token);
+    before=observations;token.epoch=99;root[0]='x';assert(!storage_card_try_admit(&token,root,1)&&errno==ENAMETOOLONG&&!token.epoch&&!root[0]);assert(observations==before);
+    token.epoch=99;assert(!storage_card_try_admit(&token,NULL,0)&&errno==EINVAL&&!token.epoch);
+    storage_recheck_card();current(a_token);hotplug_event("add@/devices/mmcblk0");current(a_token);hotplug_event("add@/devices/mmcblk0p1");current(a_token);
+
+    // Real contended mutex: GUI APIs return unknown, clear outputs, do no I/O.
+    pthread_t owner;owner_holding=owner_release=false;assert(!pthread_create(&owner,NULL,hold_card_lock,NULL));
+    pthread_mutex_lock(&barrier_lock);while(!owner_holding)pthread_cond_wait(&barrier_wake,&barrier_lock);pthread_mutex_unlock(&barrier_lock);
+    before=observations;token.epoch=99;strcpy(root,"old");
+    assert(!storage_card_try_admit(&token,root,sizeof(root))&&errno==EAGAIN&&!token.epoch&&!root[0]);
+    assert(storage_card_try_check(&a_token)==-1&&errno==EAGAIN);assert(observations==before);
+    pthread_mutex_lock(&barrier_lock);owner_release=true;pthread_cond_broadcast(&barrier_wake);pthread_mutex_unlock(&barrier_lock);assert(!pthread_join(owner,NULL));current(a_token);
+
+    // Same root/device after a managed detach/reattach is a new epoch.
+    pthread_mutex_lock(&card_lock);card_databases_detach();pthread_mutex_unlock(&card_lock);stale(a_token);
+    pthread_mutex_lock(&card_lock);card_databases_detach();assert(!card_epoch_valid);mount_settled(sd_root);card_databases_attach(sd_root);pthread_mutex_unlock(&card_lock);
+    storage_card_token_t b_token=admit();assert(b_token.epoch!=a_token.epoch);stale(a_token);
+    before=pin_opens;int io_before=observations;assert(storage_pin_card_if(&a_token)==-1&&errno==ESTALE&&pin_opens==before&&observations==io_before);
+    fd=storage_pin_card_if(&b_token);assert(fd>=0);assert(fcntl(fd,F_GETFD)&FD_CLOEXEC);assert(!fixture_close(fd));
+    // Early-return detach revokes even when the attached flag is already clear.
+    card_attached=false;pthread_mutex_lock(&card_lock);card_databases_detach();assert(!card_epoch_valid);mount_settled(sd_root);card_databases_attach(sd_root);pthread_mutex_unlock(&card_lock);
+    stale(b_token);b_token=admit();
+
+    // A known alternate root replacement revokes before snprintf, even when
+    // the new root is already mounted and therefore takes mount_sd's fast path.
+    strcpy(fixture_mount_root,"/fixture/other");config.mount_point=fixture_mount_root;
+    pthread_mutex_lock(&card_lock);assert(!mount_sd(&config,&runtime,true));pthread_mutex_unlock(&card_lock);
+    stale(b_token);b_token=admit();assert(!strcmp(sd_root,"/fixture/other"));
+    // No node + failed mount cannot preserve the old generation.
+    mounted=false;config.device=NULL;pthread_mutex_lock(&card_lock);assert(mount_sd(&config,&runtime,true)<0);pthread_mutex_unlock(&card_lock);stale(b_token);
+
+    token_reset();mounted=false;fail_mount=true;startup_storage_actual(&config);assert(card_attached);assert(!storage_card_try_admit(&token,root,sizeof(root))&&errno==ENODEV);
+    fail_mount=false;storage_recheck_card();a_token=admit();current(a_token);
+    // Dead mount supervisor and hotplug both converge through actual manager.
+    dead_once=true;storage_recheck_card();stale(a_token);a_token=admit();
+    hotplug_event("remove@/devices/mmcblk0");stale(a_token);hotplug_event("add@/devices/mmcblk0");b_token=admit();assert(b_token.epoch!=a_token.epoch);
+    mounted=false;fail_mount=true;hotplug_event("add@/devices/mmcblk0");stale(b_token);assert(!storage_card_try_admit(&token,root,sizeof(root)));
+    fail_mount=false;hotplug_event("add@/devices/mmcblk0p1");a_token=admit();stale(b_token);
+    mounted=false;config.device=NULL;storage_recheck_card();stale(a_token);assert(!storage_card_try_admit(&token,root,sizeof(root)));
+
+    // Read-only tokens are valid for reads, but conditional pin refuses writes.
+    token_reset();read_only=true;startup_storage_actual(&config);a_token=admit();current(a_token);
+    before=pin_opens;assert(storage_pin_card_if(&a_token)==-1&&errno==EROFS&&pin_opens==before);
+    read_only=false;sd_writable=true;fail_stat=true;assert(storage_pin_card_if(&a_token)==-1&&errno==EIO);fail_stat=false;
+    fail_pin_open=true;assert(storage_pin_card_if(&a_token)==-1&&errno==EIO);fail_pin_open=false;
+
+    // Actual USB export ordinary unmount refuses an already admitted fd.
+    token_reset();startup_storage_actual(&config);a_token=admit();fd=storage_pin_card_if(&a_token);assert(fd>=0);
+    storage_export();assert(mounted&&!medium&&!storage_active&&exported_writes==0);stale(a_token);assert(!fixture_close(fd));
+    b_token=admit();storage_export();assert(!mounted&&medium&&storage_active);stale(b_token);storage_restore();a_token=admit();stale(b_token);current(a_token);
+    busy=true;storage_export();assert(mounted&&!medium&&!storage_active);stale(a_token);a_token=admit();busy=false;
+    // USB claim while already detached and duplicate healthy resume.
+    pthread_mutex_lock(&card_lock);card_databases_detach();pthread_mutex_unlock(&card_lock);assert(storage_release_for_usb());assert(!card_epoch_valid);
+    storage_resume_after_usb();a_token=admit();storage_resume_after_usb();current(a_token);
+    mounted=false;storage_resume_after_usb();stale(a_token);
+
+    // Failed update precondition preserves current healthy ownership.
+    token_reset();startup_storage_actual(&config);a_token=admit();storage_active=true;
+    assert(!storage_prepare_for_update());storage_active=false;current(a_token);
+    update_fixture=true;fail_sync=true;assert(!storage_prepare_for_update());stale(a_token);b_token=admit();fail_sync=false;
+    sync_calls=pin_closes=unmount_calls=0;assert(storage_prepare_for_update());stale(b_token);assert(!mounted&&card_update_claimed);storage_cancel_update();a_token=admit();stale(b_token);
+    storage_cancel_update();current(a_token);
+    // Public update -> permanent shutdown -> late cancel cannot resurrect any
+    // admission, even though shutdown takes its already-released early return.
+    sync_calls=pin_closes=unmount_calls=0;assert(storage_prepare_for_update());storage_release_for_shutdown();storage_cancel_update();
+    assert(card_released&&!card_update_claimed);assert(!storage_card_try_admit(&token,root,sizeof(root)));stale(a_token);
+
+    token_reset();startup_storage_actual(&config);a_token=admit();storage_release_for_shutdown();
+    assert(card_released&&!mounted&&!card_attached);stale(a_token);assert(!storage_card_try_admit(&token,root,sizeof(root)));
+    token_reset();startup_storage_actual(&config);a_token=admit();mounted=false;storage_release_for_shutdown();stale(a_token);assert(card_released);
+    token_reset();startup_storage_actual(&config);a_token=admit();storage_active=true;storage_release_for_shutdown();storage_active=false;stale(a_token);assert(card_released);
+
+    // Valid unmanaged folder: no false managed-mount or write requirement.
+    token_reset();config.manage_mount=false;mounted=false;host_folder=true;startup_storage_actual(&config);a_token=admit();
+    fd=storage_pin_card_if(&a_token);assert(fd>=0);assert(!fixture_close(fd));before=observations;
+    storage_release_for_shutdown();assert(observations==before);assert(!storage_card_try_admit(&token,root,sizeof(root)));stale(a_token);
+    token_reset();config.manage_mount=false;mounted=false;host_folder=false;startup_storage_actual(&config);assert(!storage_card_try_admit(&token,root,sizeof(root)));
+    token_reset();startup_storage_actual(&config);a_token=admit();g_storage_cfg=NULL;storage_release_for_shutdown();stale(a_token);assert(!storage_card_try_admit(&token,root,sizeof(root)));
+
+    // Last unique token is valid until revoked; exhaustion never wraps/reuses.
+    token_reset();startup_storage_actual(&config);card_epoch=UINT64_MAX;a_token=admit();current(a_token);storage_recheck_card();current(a_token);
+    assert(storage_release_for_usb());storage_resume_after_usb();assert(!storage_card_try_admit(&token,root,sizeof(root))&&errno==EOVERFLOW&&!token.epoch);stale(a_token);
+    fd=storage_pin_card(root,sizeof(root));assert(fd>=0);assert(!fixture_close(fd));
+    puts("PASS actual storage tokens: startup/RO/host/root swap/duplicates/early detach/USB/update/shutdown/overflow/EAGAIN and legacy pins");
+}
+
+int main(int argc,char **argv) {
+    assert(argc==2);fixture_directory=argv[1];
+    assert(legacy_handoff_main()==0);
+    token_scenarios();
+    return 0;
+}

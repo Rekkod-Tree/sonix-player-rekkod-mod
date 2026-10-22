@@ -1,5 +1,6 @@
 #include "gearboypage.h"
 
+#include <errno.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -34,6 +35,7 @@ static bool show_color;
 // array can be freed and rebuilt without a surviving row dangling.
 static gbrom_t *roms;
 static int rom_count;
+static storage_card_token_t roms_token;
 
 // GUI owns page visibility/generation. The worker owns no widget pointers.
 static uint32_t scan_generation;
@@ -49,6 +51,8 @@ typedef struct {
 	bool ready;
 	bool closing;
 	uint32_t generation;
+	storage_card_token_t token;
+	char root[GBROM_PATH_MAX];
 	scan_status_t status;
 	gbrom_t *list;
 	int count;
@@ -64,6 +68,13 @@ static void open_rom_cb(lv_event_t *e) {
 
 	int index = (int)(intptr_t)lv_event_get_user_data(e);
 	if (index < 0 || index >= rom_count || !roms) {
+		return;
+	}
+	// This rejects an already stale list. The delayed emulator open is a
+	// separate ownership boundary; this read check is not a filesystem lease.
+	if (storage_card_try_check(&roms_token) != 0) {
+		if (errno != EAGAIN)
+			rescan_requested = true;
 		return;
 	}
 	gearboyplay_open(roms[index].path, roms[index].name);
@@ -160,8 +171,14 @@ static void scan_done_cb(void *unused) {
 
 static void *scan_thread(void *arg) {
 	uint32_t generation = (uint32_t)(uintptr_t)arg;
+	storage_card_token_t token;
+	char root[GBROM_PATH_MAX];
+	pthread_mutex_lock(&scan_terminal.lock);
+	token = scan_terminal.token;
+	memcpy(root, scan_terminal.root, sizeof(root));
+	pthread_mutex_unlock(&scan_terminal.lock);
 	gbrom_t *list = NULL;
-	int count = gbdb_scan(&list, NULL, NULL);
+	int count = gbdb_scan_admitted(&list, root, &token, NULL, NULL);
 	if (count < 0) {
 		free(list);
 		list = NULL;
@@ -200,8 +217,37 @@ static void start_scan(void) {
 		lv_obj_set_hidden(status_label, false);
 		return;
 	}
+	pthread_mutex_unlock(&scan_terminal.lock);
+	// Never nest card_lock inside terminal/root locks: detach takes card->root.
+	storage_card_token_t token = {0};
+	char root[GBROM_PATH_MAX] = "";
+	if (!storage_card_try_admit(&token, root, sizeof(root))) {
+		if (errno == EAGAIN) {
+			rescan_requested = true;
+			if (!scanning || scan_failed) {
+				scanning = true;
+				scan_failed = false;
+				lv_label_set_text(status_label, tr("gearboy_looking_for_games"));
+				lv_obj_set_hidden(status_label, false);
+			}
+			return;
+		}
+		rescan_requested = false;
+		scanning = false;
+		scan_failed = true;
+		free(roms);
+		roms = NULL;
+		rom_count = 0;
+		roms_token = (storage_card_token_t){0};
+		rebuild_rows();
+		return;
+	}
+	rescan_requested = false;
+	pthread_mutex_lock(&scan_terminal.lock);
 	scan_terminal.active = true;
 	scan_terminal.generation = scan_generation;
+	scan_terminal.token = token;
+	memcpy(scan_terminal.root, root, sizeof(root));
 	pthread_mutex_unlock(&scan_terminal.lock);
 	scanning = true;
 	scan_failed = false;
@@ -227,9 +273,22 @@ static void start_scan(void) {
 void gearboypage_service_completion(void) {
 	pthread_mutex_lock(&scan_terminal.lock);
 	if (!scan_terminal.ready) {
+		bool idle = !scan_terminal.active && !scan_terminal.closing;
 		pthread_mutex_unlock(&scan_terminal.lock);
+		if (idle && page_visible && rescan_requested)
+			start_scan();
 		return;
 	}
+	storage_card_token_t token = scan_terminal.token;
+	bool relevant = !scan_terminal.closing && page_visible && scan_terminal.generation == scan_generation;
+	pthread_mutex_unlock(&scan_terminal.lock);
+	bool current = true;
+	if (relevant && storage_card_try_check(&token) != 0) {
+		if (errno == EAGAIN)
+			return; // READY and its payload remain owned until a known result.
+		current = false;
+	}
+	pthread_mutex_lock(&scan_terminal.lock);
 	gbrom_t *list = scan_terminal.list;
 	int count = scan_terminal.count;
 	scan_status_t status = scan_terminal.status;
@@ -239,16 +298,19 @@ void gearboypage_service_completion(void) {
 	scan_terminal.ready = false;
 	scan_terminal.active = false;
 	pthread_mutex_unlock(&scan_terminal.lock);
-	if (!closing && page_visible && generation == scan_generation) {
+	if (!closing && page_visible && generation == scan_generation && current) {
 		free(roms);
 		roms = list;
 		rom_count = count;
+		roms_token = token;
 		list = NULL;
 		scanning = false;
 		scan_failed = status == SCAN_ERROR;
 		rebuild_rows();
 	}
 	free(list);
+	if (relevant && !current)
+		rescan_requested = true;
 	if (!closing && page_visible && rescan_requested) {
 		rescan_requested = false;
 		start_scan();
@@ -286,6 +348,7 @@ static void screen_deleted_cb(lv_event_t *e) {
 	free(roms);
 	roms = NULL;
 	rom_count = 0;
+	roms_token = (storage_card_token_t){0};
 	list_box = status_label = btn_gb = btn_gbc = NULL;
 	gearboypage_screen = NULL;
 }

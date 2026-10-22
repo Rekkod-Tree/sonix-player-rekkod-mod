@@ -45,7 +45,7 @@ def main():
         tmp=Path(tmp);file=tmp/'test.c';file.write_text(code, encoding='utf-8', newline='\n');exe=tmp/'test'
         cmd=shlex.split(args.cc)+['-std=gnu11','-Wall','-Wextra','-Werror','-Wno-misleading-indentation','-Wno-unused-function','-ffunction-sections','-fdata-sections','-DLV_CONF_INCLUDE_SIMPLE=1']
         if overlay:cmd+=['-I'+str(overlay)]
-        cmd+=['-I'+str(root),'-I'+str(lvgl.parent),'-I'+str(lvgl),'-I'+str(actual.parent),'-I'+str(source_file('src/system/gearboy/gbdb.h').parent)]
+        cmd+=['-I'+str(root),'-I'+str(lvgl.parent),'-I'+str(lvgl),'-I'+str(actual.parent),'-I'+str(root/'src/gui/gearboy'),'-I'+str(source_file('src/system/gearboy/gbdb.h').parent)]
         environment={**os.environ,'TMPDIR':str(tmp)}
         if args.sanitize:cmd+=['-fsanitize=address,undefined','-fno-omit-frame-pointer','-g']
         subprocess.run(cmd+[str(file),'-Wl,--gc-sections','-pthread','-lm','-o',str(exe)],check=True,cwd=tmp,env=environment,timeout=60)

@@ -657,11 +657,16 @@ static int mount_sd_directly(const char *device, const char *mount_point) {
 // of failing silently.
 static _Atomic bool sd_writable;
 
+// Lock-held lifecycle helpers; startup holds card_lock before card threads run.
+static void storage_card_revoke_locked(void);
+static void storage_card_publish_locked(void);
+
 // Records the writability of a mount that has just been established, and says
 // so in the log. Returns 0 so it can stand in for the `return 0` it replaces.
 static int mount_settled(const char *mount_point) {
 	if (sd_requires_mount && !is_mounted(mount_point)) {
 		sd_writable = false;
+		storage_card_revoke_locked();
 		return -1;
 	}
 	sd_writable = mount_is_writable(mount_point);
@@ -672,6 +677,11 @@ static int mount_settled(const char *mount_point) {
 				"device; a card in an adapter may have its write-protect notch closed.\n",
 				mount_point);
 	}
+	// Read-only is still valid for reads; an absent unmanaged folder is not.
+	if (mount_is_alive(mount_point))
+		storage_card_publish_locked();
+	else
+		storage_card_revoke_locked();
 	return 0;
 }
 
@@ -687,10 +697,13 @@ static void card_databases_detach(void);
 
 static int mount_sd(storage_config_t *storage_cfg, const system_runtime_t *runtime, bool runtime_recovery) {
 	(void)runtime;
+	const char *mount_point = pick_sd_root(storage_cfg);
+	// Revoke before replacing the authoritative path. Preserve existing
+	// callback order; duplicate observations of a healthy mount keep its token.
+	if (strcmp(sd_root, mount_point) != 0 || sd_requires_mount != storage_cfg->manage_mount)
+		storage_card_revoke_locked();
 	sd_requires_mount = storage_cfg->manage_mount;
 	sd_writable = false;
-
-	const char *mount_point = pick_sd_root(storage_cfg);
 	snprintf(sd_root, sizeof(sd_root), "%s", mount_point);
 
 	if (!storage_cfg->manage_mount || getenv("SONIX_NO_MOUNT")) {
@@ -702,6 +715,7 @@ static int mount_sd(storage_config_t *storage_cfg, const system_runtime_t *runti
 	// below would otherwise read it as "already there, leave it alone".
 	if (is_mounted(mount_point) && !mount_is_alive(mount_point)) {
 		fprintf(stderr, "storage: %s is mounted but dead; clearing it first\n", mount_point);
+		storage_card_revoke_locked();
 		if (runtime_recovery)
 			card_databases_detach();
 		force_unmount(mount_point);
@@ -728,6 +742,8 @@ static int mount_sd(storage_config_t *storage_cfg, const system_runtime_t *runti
 		return mount_settled(mount_point);
 	}
 
+	// An absent/dead observed mount revokes even before a block node exists.
+	storage_card_revoke_locked();
 	const char *device = pick_sd_device(storage_cfg);
 	if (device) {
 		snprintf(sd_device_used, sizeof(sd_device_used), "%s", device);
@@ -821,6 +837,7 @@ static _Atomic bool card_attached = true; // the card is mounted before this thr
 bool storage_card_attached(void) { return card_attached; }
 
 static void card_databases_detach(void) {
+	storage_card_revoke_locked();
 	if (!card_attached) {
 		return;
 	}
@@ -864,6 +881,7 @@ static void card_databases_attach(const char *root) {
 	if (card_attached || !root || !root[0] || (sd_requires_mount && (!is_mounted(root) || !mount_is_alive(root)))) {
 		return;
 	}
+	storage_card_publish_locked();
 	card_attached = true;
 
 	// PATH_MAX, because the card root comes from a mount point and a mount point
@@ -944,8 +962,129 @@ static bool card_released; // under card_lock: set for the power-off, never clea
 static bool card_update_claimed; // only an aborted update may undo its own release
 static bool card_usb_claimed; // under card_lock: supervisor/hotplug must not mount
 
+// Managed ownership only, protected by card_lock; no 64-bit atomic dependency.
+static uint64_t card_epoch;
+static bool card_epoch_valid;
+static bool card_epoch_initialized;
+
+static void storage_card_revoke_locked(void) { card_epoch_valid = false; }
+
+static void storage_card_publish_locked(void) {
+	if (card_released || card_usb_claimed || usb_storage_active() || !sd_root[0]) {
+		storage_card_revoke_locked();
+		return;
+	}
+	if (card_epoch_valid || card_epoch == UINT64_MAX)
+		return; // After exhaustion/revoke, never wrap or reuse an old token.
+	card_epoch++;
+	card_epoch_valid = true;
+}
+
+static bool storage_card_owned_locked(void) {
+	return card_epoch_initialized && card_epoch_valid && card_attached && sd_root[0] &&
+		   !card_released && !card_usb_claimed && !usb_storage_active();
+}
+
+bool storage_card_try_admit(storage_card_token_t *out, char *root, size_t size) {
+	if (out)
+		out->epoch = 0;
+	if (root && size)
+		root[0] = '\0';
+	if (!out || !root || !size) {
+		errno = EINVAL;
+		return false;
+	}
+	if (pthread_mutex_trylock(&card_lock) != 0) {
+		errno = EAGAIN; // Unknown/busy is not proof of stale ownership.
+		return false;
+	}
+	int error = 0;
+	if (!storage_card_owned_locked())
+		error = card_released || card_usb_claimed || usb_storage_active() ? EBUSY :
+				card_epoch_initialized && card_epoch == UINT64_MAX ? EOVERFLOW : ENODEV;
+	else if (strlen(sd_root) >= size)
+		error = ENAMETOOLONG;
+	else {
+		out->epoch = card_epoch;
+		snprintf(root, size, "%s", sd_root);
+	}
+	pthread_mutex_unlock(&card_lock);
+	if (error)
+		errno = error;
+	return !error;
+}
+
+int storage_card_try_check(const storage_card_token_t *expected) {
+	if (!expected || !expected->epoch) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (pthread_mutex_trylock(&card_lock) != 0) {
+		errno = EAGAIN;
+		return -1;
+	}
+	bool current = storage_card_owned_locked() && expected->epoch == card_epoch;
+	pthread_mutex_unlock(&card_lock);
+	if (!current)
+		errno = ESTALE;
+	return current ? 0 : -1;
+}
+
+// Share the existing current-card admission without recursive locking. Legacy
+// callers deliberately acquire no epoch/initialization requirement here.
+static int storage_pin_card_locked(void) {
+	if (card_released || card_usb_claimed || usb_storage_active()) {
+		errno = EBUSY;
+		return -1;
+	}
+	if (!card_attached || !sd_root[0]) {
+		errno = ENODEV;
+		return -1;
+	}
+	if (!sd_writable) {
+		errno = EROFS;
+		return -1;
+	}
+	if (sd_requires_mount && !is_mounted(sd_root)) {
+		errno = ENODEV;
+		return -1;
+	}
+	struct statvfs st;
+	if (statvfs(sd_root, &st) != 0)
+		return -1;
+	if (st.f_flag & ST_RDONLY) {
+		errno = EROFS;
+		return -1;
+	}
+	return open(sd_root, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+}
+
+int storage_pin_card_if(const storage_card_token_t *expected) {
+	if (!expected || !expected->epoch) {
+		errno = EINVAL;
+		return -1;
+	}
+	pthread_mutex_lock(&card_lock);
+	int fd;
+	if (!card_epoch_initialized) {
+		errno = ENODEV;
+		fd = -1;
+	} else if (!card_epoch_valid || expected->epoch != card_epoch) {
+		errno = ESTALE;
+		fd = -1;
+	} else
+		fd = storage_pin_card_locked();
+	int error = errno;
+	pthread_mutex_unlock(&card_lock);
+	if (fd < 0)
+		errno = error;
+	return fd;
+}
+
+
 bool storage_release_for_usb(void) {
 	pthread_mutex_lock(&card_lock);
+	storage_card_revoke_locked();
 	if (card_released) {
 		pthread_mutex_unlock(&card_lock);
 		return false;
@@ -962,7 +1101,8 @@ void storage_resume_after_usb(void) {
 	if (!card_released && sd_root[0] && is_mounted(sd_root) && mount_is_alive(sd_root)) {
 		mount_settled(sd_root);
 		card_databases_attach(sd_root);
-	}
+	} else
+		storage_card_revoke_locked();
 	pthread_mutex_unlock(&card_lock);
 }
 
@@ -973,8 +1113,8 @@ int storage_pin_card(char *out, size_t size) {
 	}
 	out[0] = '\0';
 	pthread_mutex_lock(&card_lock);
-	if (!card_released && !card_usb_claimed && card_attached && storage_sd_writable() && strlen(sd_root) < size) {
-		fd = open(sd_root, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+	if (strlen(sd_root) < size) {
+		fd = storage_pin_card_locked();
 		if (fd >= 0) {
 			snprintf(out, size, "%s", sd_root);
 		}
@@ -996,6 +1136,7 @@ void storage_recheck_card(void) {
 	pthread_mutex_lock(&card_lock);
 
 	if (card_released || card_usb_claimed || usb_storage_active()) {
+		storage_card_revoke_locked();
 		pthread_mutex_unlock(&card_lock);
 		return;
 	}
@@ -1004,6 +1145,7 @@ void storage_recheck_card(void) {
 		if (statvfs(sd_root, &st) != 0 || (st.f_flag & ST_RDONLY)) {
 			sd_writable = false;
 		}
+		storage_card_publish_locked();
 		card_databases_attach(sd_root);
 		pthread_mutex_unlock(&card_lock);
 		return;
@@ -1149,6 +1291,7 @@ bool storage_prepare_for_update(void) {
 		errno = EBUSY;
 		return false;
 	}
+	storage_card_revoke_locked();
 	card_released = true;
 	card_update_claimed = true;
 	card_databases_detach();
@@ -1183,13 +1326,15 @@ bool storage_prepare_for_update(void) {
 }
 
 void storage_release_for_shutdown(void) {
-	if (!g_storage_cfg || !g_storage_cfg->manage_mount) {
-		return;
-	}
-
 	pthread_mutex_lock(&card_lock);
 	bool already = card_released;
 	card_released = true;
+	card_update_claimed = false; // Late update cancel must not undo shutdown.
+	storage_card_revoke_locked();
+	if (!g_storage_cfg || !g_storage_cfg->manage_mount) {
+		pthread_mutex_unlock(&card_lock);
+		return;
+	}
 
 	// A card handed to a computer is already off this device's hands.
 	if (already || !sd_root[0] || !is_mounted(sd_root) || usb_storage_active()) {
@@ -1270,6 +1415,7 @@ void *sd_hotplug_thread(void *arg) {
 				printf("SD Card Inserted\n");
 				pthread_mutex_lock(&card_lock);
 				if (card_released || card_usb_claimed || usb_storage_active()) {
+					storage_card_revoke_locked();
 					pthread_mutex_unlock(&card_lock);
 					continue;
 				}
@@ -2926,7 +3072,10 @@ void system_start_services(system_config_t *cfg, system_notification_cb_t notifi
 	g_storage_cfg = cfg->storage_cfg;
 	g_runtime = &runtime;
 
+	pthread_mutex_lock(&card_lock);
 	check_and_mount_existing_sd(cfg->storage_cfg, &runtime); // mount sd on startup, if it's present
+	card_epoch_initialized = true;
+	pthread_mutex_unlock(&card_lock);
 
 	pthread_t supervisor;
 	if (pthread_create(&supervisor, NULL, card_supervisor_thread, NULL) == 0) {

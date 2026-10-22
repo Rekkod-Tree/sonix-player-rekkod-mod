@@ -39,6 +39,15 @@ static int fixture_scan(gbrom_t **out,bool(*cb)(int,int,void*),void *u) {
     if(result>0) { *out=calloc(1,sizeof(gbrom_t));assert(*out);(*out)->crc=(uint32_t)id;snprintf((*out)->name,sizeof((*out)->name),"ROM %d",id); }
     return result;
 }
+// Storage API contract seams keep this completion/OOM suite self-contained.
+// They do not test the real epoch/lifecycle algorithm (covered separately).
+bool storage_card_try_admit(storage_card_token_t *out,char *root,size_t size) {
+    assert(size>9);strcpy(root,"/fixture");out->epoch=1;return true;
+}
+int storage_card_try_check(const storage_card_token_t *t) {assert(t->epoch==1);return 0;}
+static int fixture_admitted_scan(gbrom_t **out,const char *root,const storage_card_token_t *token,bool(*cb)(int,int,void*),void*u) {
+    assert(!strcmp(root,"/fixture")&&token->epoch==1);return fixture_scan(out,cb,u);
+}
 static int fixture_create(pthread_t *t,const pthread_attr_t *a,void *(*fn)(void*),void *arg) {
     if(fail_thread)return EAGAIN;
     int result=pthread_create(t,a,fn,arg);if(!result)threads[starts++]=*t;return result;
@@ -82,7 +91,7 @@ bool switcher_back_drag_active(void) { return false; }
 bool player_sheet_drag_active(void) { return false; }
 void gearboyplay_open(const char *p,const char *n) { (void)p;(void)n;on_gui(); }
 
-#define gbdb_scan fixture_scan
+#define gbdb_scan_admitted fixture_admitted_scan
 #define pthread_create fixture_create
 #define pthread_detach fixture_detach
 #define free tracked_free
@@ -92,7 +101,7 @@ void gearboyplay_open(const char *p,const char *n) { (void)p;(void)n;on_gui(); }
 #undef malloc
 #undef pthread_create
 #undef pthread_detach
-#undef gbdb_scan
+#undef gbdb_scan_admitted
 
 int main(int argc,char **argv) {
     gui_thread=pthread_self();list_box=(lv_obj_t*)1;status_label=(lv_obj_t*)2;gearboypage_screen=(lv_obj_t*)3;

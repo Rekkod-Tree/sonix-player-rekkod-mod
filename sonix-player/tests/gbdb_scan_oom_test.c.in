@@ -1,4 +1,6 @@
 #include <assert.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,6 +15,15 @@ static void *test_malloc(size_t n) { if(fail_malloc){errno=ENOMEM;return NULL;}v
 static void *test_calloc(size_t n,size_t s) { if(fail_calloc){errno=ENOMEM;return NULL;}void*p=calloc(n,s);add(p);return p; }
 static void *test_realloc(void *p,size_t n) { if(++realloc_calls==fail_realloc){errno=ENOMEM;return NULL;}void *old=p;remove_owner(old);void *q=realloc(p,n);if(!q){add(old);return NULL;}add(q);return q; }
 static void test_free(void *p) { remove_owner(p);free(p); }
+// Actual GBDB allocation paths, with explicit storage API contract seams.
+// Epoch transitions/conditional admission are not mocked as production proof.
+static const char *fixture_root;
+bool storage_card_try_admit(storage_card_token_t *out,char *root,size_t size) {
+    out->epoch=0;root[0]=0;if(!fixture_root){errno=ENODEV;return false;}
+    assert(strlen(fixture_root)<size);strcpy(root,fixture_root);out->epoch=1;return true;
+}
+int storage_card_try_check(const storage_card_token_t *t) {assert(t->epoch==1);return 0;}
+int storage_pin_card_if(const storage_card_token_t *t) {assert(t->epoch==1);return open(fixture_root,O_DIRECTORY|O_RDONLY|O_CLOEXEC);}
 #define malloc test_malloc
 #define calloc test_calloc
 #define realloc test_realloc
@@ -32,7 +43,7 @@ int main(int argc,char**argv) {
     gbdb_set_root(NULL);assert(gbdb_scan(&list,NULL,NULL)==-1&&!list&&!live);
     const char *root=argv[1];char path[1024];
     snprintf(path,sizeof(path),"%s/Games",root);assert(!mkdir(path,0700));snprintf(path,sizeof(path),"%s/Games/GB",root);assert(!mkdir(path,0700));
-    gbdb_set_root(root);assert(gbdb_scan(&list,NULL,NULL)==0&&!list&&!live);
+    gbdb_set_root(root);fixture_root=root;assert(gbdb_scan(&list,NULL,NULL)==0&&!list&&!live);
     make_rom(root,0);
     fail_realloc=1;realloc_calls=0;assert(gbdb_scan(&list,NULL,NULL)==-ENOMEM&&!list&&!live);
     fail_realloc=0;fail_calloc=1;assert(gbdb_scan(&list,NULL,NULL)==-ENOMEM&&!list&&!live);fail_calloc=0;

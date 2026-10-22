@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 typedef struct {
 	// Preferred block device, e.g. "/dev/mmcblk0p1". May be NULL: the player
@@ -118,6 +119,26 @@ void storage_resume_after_usb(void);
 // unmount it while held; admission is serialized with the USB claim.
 // Copies the stable root to out, or returns -1 without admitting the writer.
 int storage_pin_card(char *out, size_t size);
+
+// Process-lifetime managed ownership token. Zero is invalid. This is not an
+// fd lease or proof against external forced/lazy mount changes.
+typedef struct {
+	uint64_t epoch;
+} storage_card_token_t;
+
+// GUI-safe snapshot, no driver/filesystem I/O. Clears outputs on refusal.
+// Read-only ownership is admissible. Busy mutex is EAGAIN (unknown, not stale).
+bool storage_card_try_admit(storage_card_token_t *out, char *root, size_t size);
+
+// GUI-safe check: 0 if current; -1/EAGAIN if owner is busy; -1/ESTALE if
+// revoked/detached/claimed. Invalid zero tokens return -1/EINVAL.
+int storage_card_try_check(const storage_card_token_t *expected);
+
+// Worker-side exact-token conditional pin; close returned fd on every exit.
+// A stale token is never refreshed. No token requirement is added to legacy
+// storage_pin_card callers. The filesystem pin covers only the admitted mount.
+int storage_pin_card_if(const storage_card_token_t *expected);
+
 
 // Before the machine is powered off or rebooted: playback stops, everything
 // kept open on the card is closed, and the card is unmounted, or remounted

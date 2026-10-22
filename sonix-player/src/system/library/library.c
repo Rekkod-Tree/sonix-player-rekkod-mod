@@ -8813,9 +8813,11 @@ bool library_playlist_stage_publish_receipt(library_playlist_stage_t *stage, con
 	bool checked = ready && ((mode != LIBRARY_PLAYLIST_CREATE && (!stage->guard_namespace || mode != LIBRARY_PLAYLIST_REPLACE)) || playlist_table_lookup_locked(name, &exists));
 	bool begun = checked && (mode != LIBRARY_PLAYLIST_CREATE || !exists) && (!stage->guard_namespace || mode != LIBRARY_PLAYLIST_REPLACE || exists) && exec_quiet("SAVEPOINT queue_stage_publish");
 	bool ok = begun;
-	if (ok && mode == LIBRARY_PLAYLIST_REPLACE) {
-		snprintf(sql, sizeof(sql), "DROP TABLE IF EXISTS %s", quoted);
-		ok = exec_quiet(sql);
+	if (ok && mode != LIBRARY_PLAYLIST_APPEND) {
+		if (mode == LIBRARY_PLAYLIST_REPLACE) {
+			snprintf(sql, sizeof(sql), "DROP TABLE IF EXISTS %s", quoted);
+			ok = exec_quiet(sql);
+		}
 		if (ok) {
 			snprintf(sql, sizeof(sql), "ALTER TABLE " PLAYLIST_STAGE_TABLE " RENAME TO %s", quoted);
 			ok = exec_quiet(sql);
