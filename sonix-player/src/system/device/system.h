@@ -139,6 +139,10 @@ int storage_card_try_check(const storage_card_token_t *expected);
 // storage_pin_card callers. The filesystem pin covers only the admitted mount.
 int storage_pin_card_if(const storage_card_token_t *expected);
 
+// Worker-only exact-token read pin. Locally owned read-only cards are allowed.
+// Close on every exit; no network waits or mutations may use this read pin.
+int storage_pin_card_read_if(const storage_card_token_t *expected);
+
 
 // Before the machine is powered off or rebooted: playback stops, everything
 // kept open on the card is closed, and the card is unmounted, or remounted

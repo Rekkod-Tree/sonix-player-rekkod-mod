@@ -84,27 +84,27 @@ static gui_post_t post_ring[GUI_POST_MAX],post_latest[GUI_LATEST_MAX];
 static int post_count,post_head,post_wake_fd=-1;static pthread_mutex_t post_lock=PTHREAD_MUTEX_INITIALIZER;
 #include "actual_gui_queues.inc"
 static bool gui_post(void (*cb)(void *),void *user) {if(notification_block){pthread_barrier_wait(&entered);pthread_barrier_wait(&proceed);}return actual_gui_post(cb,user);}
+typedef struct {uint64_t epoch;} storage_card_token_t;
+typedef struct {int ignored;} peq_preset_data_t;
 #include "actual_job_types.inc"
+#include "actual_gui_storage.inc"
 
-// Backend seams do not alter transport ownership. Error paths remain production.
-static bool ensure_dirs(void) {backend_calls++;if(backend_block){pthread_barrier_wait(&entered);pthread_barrier_wait(&proceed);}return true;}
-static bool make_dir(const char *path) {(void)path;return true;}
-static bool write_file(const char *path,const char *data,size_t size) {(void)path;assert(data&&size);return true;}
-static int fixture_stat(const char *path,struct stat *out) {memset(out,0,sizeof(*out));if(strstr(path,"INDEX")){out->st_size=50;return 0;}errno=ENOENT;return -1;}
-static int fixture_rename(const char *a,const char *b) {(void)a;(void)b;return 0;}
-static int fixture_remove(const char *path) {(void)path;return 0;}
-static char *read_file(const char *path,size_t max,size_t *size) {(void)max;if(strstr(path,"INDEX"))return index_oom?NULL:text_alloc("Index data");if(cache_profile){if(size)*size=7;return text_alloc("Filters");}return NULL;}
-static bool make_profile_url(const profile_t *selected,char *url,size_t size) {(void)selected;snprintf(url,size,"https://fixture.invalid/profile");return true;}
-static bool http_get(const char *url,char **text,size_t *size,size_t max,int timeout) {(void)url;(void)max;(void)timeout;if(profile_oom){*text=NULL;return false;}*text=text_alloc("Filters");*size=7;return true;}
-static const char *http_last_error(void) {return "out_of_memory";}
-static bool download_index(job_t *job) {(void)job;return true;}
-static bool clear_profile_cache(void) {return true;}
-static void parse_index(const char *data,const char *query,job_t *job) {assert(data&&query);job->result_count=1;snprintf(job->results[0].display,sizeof(job->results[0].display),"Headphones");}
-static void preset_name(const profile_t *selected,char *text,size_t size) {(void)selected;snprintf(text,size,"Fixture preset");}
-static void cache_path(const profile_t *selected,char *text,size_t size) {(void)selected;snprintf(text,size,"/fixture/Profile.txt");}
-static bool peq_preset_load(const char *name,int *ignored) {gui_only();assert(name);profile_loads++;*ignored=0;return !profile_invalid;}
-static void peq_set_preset_name(const char *name) {gui_only();snprintf(applied_name,sizeof(applied_name),"%s",name);}
-static void peq_set_enabled(bool enabled) {gui_only();assert(enabled);applies++;}
+// I/O is covered by the separate actual-module filesystem fixture.
+static bool load_search_results(job_t *job) {
+ backend_calls++;if(backend_block){pthread_barrier_wait(&entered);pthread_barrier_wait(&proceed);}
+ if(index_oom){strcpy(job->error,"out_of_memory");return false;}
+ char *bytes=text_alloc("Index");fixture_free(bytes);job->result_count=1;
+ strcpy(job->results[0].display,"Headphones");return true;
+}
+static bool update_index(job_t *job) {(void)job;return true;}
+static bool download_profile(job_t *job) {
+ backend_calls++;if(backend_block){pthread_barrier_wait(&entered);pthread_barrier_wait(&proceed);}
+ if(profile_oom||profile_invalid){strcpy(job->error,"profile error");return false;}
+ job->profile_text=text_alloc("Filters");job->profile_size=7;job->published=true;return true;
+}
+static void preset_name(const profile_t *selected,char *out,size_t size) {(void)selected;snprintf(out,size,"Fixture preset");}
+static void cache_path(const profile_t *selected,char *out,size_t size) {(void)selected;snprintf(out,size,"12345678.txt");}
+static bool peq_preset_apply_parsed(const char *name,const peq_preset_data_t *data,bool enabled) {gui_only();assert(name&&data&&enabled);profile_loads++;snprintf(applied_name,sizeof(applied_name),"%s",name);applies++;return true;}
 static bool peqautoeq_network_needed(void) {return false;}
 static void result_clicked(lv_event_t *event);
 void peqautoeq_service_completion(void);
@@ -140,8 +140,8 @@ static void leave_search(void) {lv_event_t event={.code=LV_EVENT_SCREEN_UNLOAD_S
 static void assert_clean(void) {assert(allocated==freed);for(unsigned i=0;i<allocated;i++)assert(!tracked[i].live);}
 static void reset(void) {
  assert(!ready_job&&!job_busy);assert_clean();allocated=freed=0;memset(tracked,0,sizeof(tracked));
- job_closing=false;closed_fixture=shutdown_on_reload=false;search_generation=1;pending_results_generation=pending_notice_generation=0;pending_notice[0]=0;
- search_screen=&search_obj;results_screen=&result_obj;search_field=&field_obj;search_list=&list_obj;results_empty=&empty_obj;cfg=&config;strcpy(index_file,"/fixture/INDEX.md");
+ job_closing=false;closed_fixture=shutdown_on_reload=false;reset_storage();search_generation=1;pending_results_generation=pending_notice_generation=0;pending_notice[0]=0;
+ search_screen=&search_obj;results_screen=&result_obj;search_field=&field_obj;search_list=&list_obj;results_empty=&empty_obj;cfg=&config;
  active=&search_obj;query_text[0]=0;strcpy(query_text,"Headphones");navigations=rows_rebuilt=notices=applies=profile_loads=backend_calls=launches=gui_checks=0;
  index_oom=profile_oom=profile_invalid=thread_fail=replace_on_start_failure=replace_on_reload=backend_block=fail_calloc=notification_block=false;cache_profile=false;busy=toast_visible=false;launched=NULL;post_count=post_head=0;memset(post_latest,0,sizeof(post_latest));strcpy(applied_name,"original");reload_cb=reload;
 }
@@ -194,6 +194,22 @@ int main(void) {
  assert(start_job(new_job(JOB_DOWNLOAD_PROFILE),"Downloading"));pthread_t thread;worker_call_t call={launched,launched_user};assert(!pthread_create(&thread,NULL,real_worker_call,&call));pthread_barrier_wait(&entered);
  peqautoeq_shutdown_completions();pthread_barrier_wait(&proceed);assert(!pthread_join(thread,NULL));assert(!job_busy&&!ready_job&&!post_count&&!applies);assert_clean();
  pthread_barrier_destroy(&entered);pthread_barrier_destroy(&proceed);assert(!start_job(new_job(JOB_SEARCH),"Closed"));assert_clean();
+
+ reset();pthread_mutex_lock(&card_lock);assert(start_job(new_job(JOB_SEARCH),"Wait admission"));job_t *waiting=ready_job;
+ assert(waiting&&waiting->phase==JOB_NEEDS_ADMISSION&&!launches&&job_busy&&busy);
+ for(int i=0;i<1000;i++)peqautoeq_service_completion();
+ assert(ready_job==waiting&&!launches&&job_busy&&busy);pthread_mutex_unlock(&card_lock);
+ peqautoeq_service_completion();assert(launches==1&&!ready_job&&job_busy);run_worker();peqautoeq_service_completion();assert_clean();
+ reset();assert(start_job(new_job(JOB_DOWNLOAD_PROFILE),"Wait READY"));run_worker();waiting=ready_job;unsigned free_before=freed;
+ pthread_mutex_lock(&card_lock);for(int i=0;i<1000;i++)peqautoeq_service_completion();
+ assert(ready_job==waiting&&freed==free_before&&job_busy&&busy&&!applies);pthread_mutex_unlock(&card_lock);
+ peqautoeq_service_completion();assert(applies==1);assert_clean();
+ reset();assert(start_job(new_job(JOB_DOWNLOAD_PROFILE),"Old A"));run_worker();change_owner();peqautoeq_service_completion();
+ assert(!applies&&!strcmp(applied_name,"original")&&notices==1&&!job_busy);assert_clean();
+ reset();pthread_mutex_lock(&card_lock);assert(start_job(new_job(JOB_SEARCH),"Pending leave"));leave_search();
+ peqautoeq_service_completion();assert(!job_busy&&!ready_job&&!launches);pthread_mutex_unlock(&card_lock);assert_clean();
+ reset();pthread_mutex_lock(&card_lock);assert(start_job(new_job(JOB_SEARCH),"Pending close"));peqautoeq_shutdown_completions();
+ assert(!job_busy&&!ready_job&&!launches);pthread_mutex_unlock(&card_lock);assert_clean();
  puts("PASS actual AutoEQ ownership: both queues full, direct service, stale search, owned toast/global apply, OOM/start failure, closing, reentry, duplicate wake and barrier publication");
  return 0;
 }

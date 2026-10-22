@@ -87,6 +87,7 @@ static void token_scenarios(void) {
     // Read-only tokens are valid for reads, but conditional pin refuses writes.
     token_reset();read_only=true;startup_storage_actual(&config);a_token=admit();current(a_token);
     before=pin_opens;assert(storage_pin_card_if(&a_token)==-1&&errno==EROFS&&pin_opens==before);
+    fd=storage_pin_card_read_if(&a_token);assert(fd>=0);assert(!fixture_close(fd));
     read_only=false;sd_writable=true;fail_stat=true;assert(storage_pin_card_if(&a_token)==-1&&errno==EIO);fail_stat=false;
     fail_pin_open=true;assert(storage_pin_card_if(&a_token)==-1&&errno==EIO);fail_pin_open=false;
 

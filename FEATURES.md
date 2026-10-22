@@ -34,6 +34,13 @@
   titles while preserving a gesture already under the pointer.
 - Bluetooth commits power, scan and operation state only with queue admission.
   A full queue retains the latest volume intent; OFF or a changed sink clears it.
+- AutoEQ binds index, profile-cache and preset writes to the card that admitted
+  the request. It releases card descriptors during HTTP and validates the preset
+  before publishing and applying it; failed required saves retain the active sound.
+- AutoEQ search opens offline and uses an existing index on a read-only card.
+  Cached profile hits avoid network and cache rewrites; cold transfers fail early
+  when the required card write is impossible. Index staging uses bounded internal
+  disk storage, without a RAM fallback or a new background polling timer.
 
 ## Palette controls, search and playlist safety (alpha25)
 

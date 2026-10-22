@@ -1032,7 +1032,7 @@ int storage_card_try_check(const storage_card_token_t *expected) {
 
 // Share the existing current-card admission without recursive locking. Legacy
 // callers deliberately acquire no epoch/initialization requirement here.
-static int storage_pin_card_locked(void) {
+static int storage_open_card_locked(bool writable) {
 	if (card_released || card_usb_claimed || usb_storage_active()) {
 		errno = EBUSY;
 		return -1;
@@ -1041,7 +1041,7 @@ static int storage_pin_card_locked(void) {
 		errno = ENODEV;
 		return -1;
 	}
-	if (!sd_writable) {
+	if (writable && !sd_writable) {
 		errno = EROFS;
 		return -1;
 	}
@@ -1052,14 +1052,16 @@ static int storage_pin_card_locked(void) {
 	struct statvfs st;
 	if (statvfs(sd_root, &st) != 0)
 		return -1;
-	if (st.f_flag & ST_RDONLY) {
+	if (writable && (st.f_flag & ST_RDONLY)) {
 		errno = EROFS;
 		return -1;
 	}
 	return open(sd_root, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
 }
 
-int storage_pin_card_if(const storage_card_token_t *expected) {
+static int storage_pin_card_locked(void) { return storage_open_card_locked(true); }
+
+static int storage_pin_card_expected(const storage_card_token_t *expected, bool writable) {
 	if (!expected || !expected->epoch) {
 		errno = EINVAL;
 		return -1;
@@ -1073,13 +1075,17 @@ int storage_pin_card_if(const storage_card_token_t *expected) {
 		errno = ESTALE;
 		fd = -1;
 	} else
-		fd = storage_pin_card_locked();
+		fd = writable ? storage_pin_card_locked() : storage_open_card_locked(false);
 	int error = errno;
 	pthread_mutex_unlock(&card_lock);
 	if (fd < 0)
 		errno = error;
 	return fd;
 }
+
+int storage_pin_card_if(const storage_card_token_t *expected) { return storage_pin_card_expected(expected, true); }
+
+int storage_pin_card_read_if(const storage_card_token_t *expected) { return storage_pin_card_expected(expected, false); }
 
 
 bool storage_release_for_usb(void) {

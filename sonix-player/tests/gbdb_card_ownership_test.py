@@ -27,7 +27,7 @@ def core_functions(source, gui):
     state = source[source.index('static uint64_t card_epoch;'):source.index('static void storage_card_revoke_locked(void) {')]
     functions = '\n'.join(function(source, name) for name in (
         'storage_card_revoke_locked', 'storage_card_publish_locked', 'storage_card_owned_locked',
-        'storage_card_try_admit', 'storage_card_try_check', 'storage_pin_card_locked', 'storage_pin_card_if'))
+        'storage_card_try_admit', 'storage_card_try_check', 'storage_open_card_locked', 'storage_pin_card_locked', 'storage_pin_card_expected', 'storage_pin_card_if'))
     for name in ('storage_card_try_admit', 'storage_card_try_check', 'storage_pin_card_if'):
         functions = functions.replace(name+'(', 'actual_'+name+'(')
     prefix = '''

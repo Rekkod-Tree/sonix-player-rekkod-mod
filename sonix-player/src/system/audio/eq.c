@@ -807,11 +807,7 @@ static apo_filter_t apo_parse_filter(char *rest, peq_band_t *out) {
 // the file are left at their defaults. `*ignored` counts the filters that were
 // in the file and could not come along. False when the file cannot be opened
 // or holds no filter this chain can play.
-static bool peq_read_apo(const char *path, peq_band_t *bands, int *preamp_tenths, int *ignored) {
-	FILE *f = fopen(path, "r");
-	if (!f) {
-		return false;
-	}
+static bool peq_parse_apo(FILE *f, peq_band_t *bands, int *preamp_tenths, int *ignored) {
 	for (int i = 0; i < PEQ_BANDS; i++) {
 		bands[i] = peq_default_band(i);
 	}
@@ -869,8 +865,50 @@ static bool peq_read_apo(const char *path, peq_band_t *bands, int *preamp_tenths
 			}
 		}
 	}
-	fclose(f);
-	return count > 0;
+	return count > 0 && !ferror(f);
+}
+
+static bool peq_read_apo(const char *path, peq_band_t *bands, int *preamp_tenths, int *ignored) {
+	FILE *file = fopen(path, "r");
+	if (!file)
+		return false;
+	bool ok = peq_parse_apo(file, bands, preamp_tenths, ignored);
+	if (fclose(file) != 0)
+		ok = false;
+	return ok;
+}
+
+bool peq_preset_parse_text(const char *text, size_t length, peq_preset_data_t *out) {
+	if (!text || !length || !out)
+		return false;
+	FILE *file = fmemopen((void *)text, length, "r");
+	if (!file)
+		return false;
+	peq_preset_data_t parsed;
+	bool ok = peq_parse_apo(file, parsed.bands, &parsed.preamp_tenths, &parsed.ignored);
+	if (fclose(file) != 0)
+		ok = false;
+	if (ok)
+		*out = parsed;
+	return ok;
+}
+
+bool peq_preset_apply_parsed(const char *name, const peq_preset_data_t *data, bool enabled) {
+	if (!data || !name_is_usable(name))
+		return false;
+	for (int i = 0; i < PEQ_BANDS; i++) {
+		peq_bands[i] = data->bands[i];
+		peq_clamp_band(&peq_bands[i]);
+		peq_store_band(i);
+	}
+	peq_preamp_tenths = clamp_int(data->preamp_tenths, PEQ_PREAMP_MIN_TENTHS, PEQ_PREAMP_MAX_TENTHS);
+	peq_enabled = enabled ? 1 : 0;
+	config_set_int("peq", "preamp", peq_preamp_tenths);
+	config_set_int("peq", "enabled", peq_enabled);
+	peq_name_set(name);
+	config_save();
+	settings_version++;
+	return true;
 }
 
 // The .ini of the presets saved before the move to the APO format.
@@ -986,21 +1024,12 @@ bool peq_preset_load(const char *name, int *ignored) {
 		return false;
 	}
 
-	// Into the chain and the config together, with one write to the card at
-	// the end rather than one per band.
-	for (int i = 0; i < PEQ_BANDS; i++) {
-		peq_bands[i] = bands[i];
-		peq_store_band(i);
-	}
-	peq_preamp_tenths = preamp;
-	config_set_int("peq", "preamp", peq_preamp_tenths);
-	peq_name_set(name);
-	config_save();
-	settings_version++;
-
-	if (ignored) {
+	peq_preset_data_t parsed = {.preamp_tenths = preamp, .ignored = dropped};
+	memcpy(parsed.bands, bands, sizeof(bands));
+	if (!peq_preset_apply_parsed(name, &parsed, peq_get_enabled()))
+		return false;
+	if (ignored)
 		*ignored = dropped;
-	}
 	return true;
 }
 

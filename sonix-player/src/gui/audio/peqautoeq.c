@@ -3,6 +3,10 @@
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <sys/statvfs.h>
+#include <sys/vfs.h>
+#include <unistd.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -26,6 +30,7 @@
 #include "src/system/core/lang.h"
 #include "src/system/core/utils.h"
 #include "src/system/net/http.h"
+#include "src/system/device/system.h"
 #include "src/system/net/wifi.h"
 
 #define RESULT_MAX 20
@@ -49,8 +54,14 @@ typedef enum {
 	JOB_DOWNLOAD_PROFILE,
 } job_action_t;
 
+typedef enum { JOB_NEEDS_ADMISSION, JOB_WORKING, JOB_READY } job_phase_t;
+
 typedef struct {
 	job_action_t action;
+	job_phase_t phase;
+	storage_card_token_t card;
+	peq_preset_data_t parsed;
+	bool published, replaced, cached_profile;
 	char query[128];
 	char error[192];
 	profile_t selected;
@@ -65,10 +76,6 @@ typedef struct {
 } job_t;
 
 static gui_config_t *cfg;
-static char local_dir[512];
-static char autoeq_dir[512];
-static char profiles_dir[512];
-static char index_file[512];
 static lv_obj_t *search_screen;
 static lv_obj_t *search_field;
 static lv_obj_t *search_list;
@@ -92,93 +99,7 @@ static uint64_t pending_notice_generation;
 
 static void job_done(void *user);
 static void result_clicked(lv_event_t *event);
-
-// By hand rather than with snprintf: the result is the same, but GCC, once it
-// inlines this into a caller with a fixed-size buffer, warns about the
-// truncation snprintf would do even though it is checked for right here.
-static bool path_join(char *out, size_t size, const char *parent, const char *name) {
-	size_t parent_len = strlen(parent);
-	size_t name_len = strlen(name);
-	if (parent_len + 1 + name_len >= size) {
-		return false;
-	}
-	memcpy(out, parent, parent_len);
-	out[parent_len] = '/';
-	memcpy(out + parent_len + 1, name, name_len + 1);
-	return true;
-}
-
-static bool make_dir(const char *path) {
-	struct stat st;
-	if (mkdir(path, 0777) == 0) {
-		return true;
-	}
-	return errno == EEXIST && stat(path, &st) == 0 && S_ISDIR(st.st_mode);
-}
-
-static bool set_paths(void) {
-	if (!cfg || !cfg->sd_root_path || !cfg->sd_root_path[0]) {
-		return false;
-	}
-	return path_join(local_dir, sizeof(local_dir), cfg->sd_root_path, ".local") && path_join(autoeq_dir, sizeof(autoeq_dir), local_dir, "autoeq") && path_join(profiles_dir, sizeof(profiles_dir), autoeq_dir, "profiles") && path_join(index_file, sizeof(index_file), autoeq_dir, "INDEX.md");
-}
-
-static bool ensure_dirs(void) { return set_paths() && make_dir(local_dir) && make_dir(autoeq_dir) && make_dir(profiles_dir); }
-
-static bool write_file(const char *path, const char *data, size_t size) {
-	char temp[800];
-	int n = snprintf(temp, sizeof(temp), "%s.tmp", path);
-	if (n < 0 || (size_t)n >= sizeof(temp)) {
-		return false;
-	}
-
-	FILE *file = fopen(temp, "wb");
-	if (!file) {
-		return false;
-	}
-	bool ok = fwrite(data, 1, size, file) == size;
-	if (fclose(file) != 0) {
-		ok = false;
-	}
-	if (!ok || rename(temp, path) != 0) {
-		remove(temp);
-		return false;
-	}
-	return true;
-}
-
-static char *read_file(const char *path, size_t max_size, size_t *size_out) {
-	FILE *file = fopen(path, "rb");
-	if (!file) {
-		return NULL;
-	}
-	if (fseek(file, 0, SEEK_END) != 0) {
-		fclose(file);
-		return NULL;
-	}
-	long size = ftell(file);
-	if (size < 0 || (size_t)size > max_size || fseek(file, 0, SEEK_SET) != 0) {
-		fclose(file);
-		return NULL;
-	}
-
-	char *data = malloc((size_t)size + 1);
-	if (!data) {
-		fclose(file);
-		return NULL;
-	}
-	size_t got = fread(data, 1, (size_t)size, file);
-	fclose(file);
-	if (got != (size_t)size) {
-		free(data);
-		return NULL;
-	}
-	data[got] = '\0';
-	if (size_out) {
-		*size_out = got;
-	}
-	return data;
-}
+static void *worker(void *user);
 
 static bool begin_job(void) {
 	pthread_mutex_lock(&job_lock);
@@ -190,11 +111,7 @@ static bool begin_job(void) {
 	return ok;
 }
 
-static void end_job(void) {
-	pthread_mutex_lock(&job_lock);
-	job_busy = false;
-	pthread_mutex_unlock(&job_lock);
-}
+
 
 static bool is_busy(void) {
 	pthread_mutex_lock(&job_lock);
@@ -448,149 +365,563 @@ static void preset_name(const profile_t *item, char *out, size_t size) {
 static void cache_path(const profile_t *item, char *out, size_t size) {
 	// Hash the profile name and source path to keep same-name profiles separate.
 	uint32_t hash = hash_text(item->name) ^ hash_text(item->path);
-	snprintf(out, size, "%s/%08x.txt", profiles_dir, hash);
+	snprintf(out, size, "%08x.txt", hash);
 }
 
-static bool download_index(job_t *job) {
-	char temp[600];
-	if (!path_join(temp, sizeof(temp), autoeq_dir, "INDEX.md.tmp")) {
-		snprintf(job->error, sizeof(job->error), "%s", tr("peq_autoeq_error_database_save"));
-		return false;
-	}
 
-	http_stream_t stream;
-	if (!http_stream_open(&stream, INDEX_URL, 35)) {
-		const char *error = http_last_error();
-		snprintf(job->error, sizeof(job->error), "%s", error && error[0] ? error : tr("peq_autoeq_error_index_download"));
-		return false;
-	}
-	if (stream.content_length > (long)INDEX_MAX) {
-		http_stream_close(&stream);
-		snprintf(job->error, sizeof(job->error), "%s", tr("peq_autoeq_error_index_download"));
-		return false;
-	}
-	long expected_size = stream.content_length;
 
-	FILE *file = fopen(temp, "wb");
-	if (!file) {
-		http_stream_close(&stream);
-		snprintf(job->error, sizeof(job->error), "%s", tr("peq_autoeq_error_database_save"));
-		return false;
-	}
 
-	char buffer[8192];
-	size_t total = 0;
-	bool too_large = false;
-	bool read_failed = false;
-	bool write_failed = false;
-	for (;;) {
-		int count = http_stream_read(&stream, buffer, (int)sizeof(buffer));
-		if (count < 0) {
-			read_failed = true;
-			break;
-		}
-		if (count == 0) {
-			break;
-		}
-		if (total + (size_t)count > INDEX_MAX) {
-			too_large = true;
-			break;
-		}
-		if (fwrite(buffer, 1, (size_t)count, file) != (size_t)count) {
-			write_failed = true;
-			break;
-		}
-		total += (size_t)count;
-	}
-	http_stream_close(&stream);
-	if (fclose(file) != 0) {
-		write_failed = true;
-	}
-	if (!write_failed && expected_size > 0 && total != (size_t)expected_size) {
-		read_failed = true;
-	}
-	if (total == 0) {
-		read_failed = true;
-	}
-	if (!too_large && !read_failed && !write_failed && rename(temp, index_file) == 0) {
+
+
+
+
+
+// No mount reference is retained during HTTP or while a result waits for GUI.
+#ifndef AUTOEQ_INTERNAL_ROOT
+#define AUTOEQ_INTERNAL_ROOT "/usr/data"
+#endif
+#define AUTOEQ_UBIFS_MAGIC 0x24051905
+#define AUTOEQ_STAGE_RESERVE (1024u * 1024u)
+static uint64_t temp_serial;
+
+static bool job_cancelled(void) {
+	pthread_mutex_lock(&job_lock);
+	bool closing = job_closing;
+	pthread_mutex_unlock(&job_lock);
+	return closing;
+}
+
+static bool job_stale(job_t *job) {
+	if (job_cancelled())
 		return true;
-	}
-
-	remove(temp);
-	if (too_large || read_failed) {
-		snprintf(job->error, sizeof(job->error), "%s", tr("peq_autoeq_error_index_download"));
-	} else {
-		snprintf(job->error, sizeof(job->error), "%s", tr("peq_autoeq_error_database_save"));
-	}
-	return false;
-}
-
-static bool load_search_results(job_t *job) {
-	struct stat st;
-	bool cached = stat(index_file, &st) == 0 && st.st_size > 0 && (size_t)st.st_size <= INDEX_MAX;
-	if (!cached && !download_index(job)) {
+	if (storage_card_try_check(&job->card) == 0 || errno == EAGAIN)
 		return false;
-	}
-
-	char *index = read_file(index_file, INDEX_MAX, NULL);
-	if (!index) {
-		snprintf(job->error, sizeof(job->error), "%s", tr("peq_autoeq_error_database_save"));
-		return false;
-	}
-	parse_index(index, job->query, job);
-	free(index);
+	snprintf(job->error, sizeof(job->error), "%s", tr("peq_autoeq_need_card"));
 	return true;
 }
 
-static bool clear_profile_cache(void) {
-	DIR *dir = opendir(profiles_dir);
-	if (!dir) {
+// Refuse a known doomed cold transfer before HTTP or internal staging.
+// This is not the final write lease: commit checks the same original token.
+static bool write_preflight(job_t *job) {
+	if (job_cancelled())
+		return false;
+	int pin = storage_pin_card_if(&job->card);
+	if (pin < 0)
+		return false;
+	return close(pin) == 0;
+}
+
+static int directory_at(int parent, const char *name, bool create) {
+	if (create && mkdirat(parent, name, 0700) != 0 && errno != EEXIST)
+		return -1;
+	return openat(parent, name, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+}
+
+static int autoeq_directory(int root, bool profiles, bool create) {
+	int local = directory_at(root, ".local", create);
+	if (local < 0)
+		return -1;
+	int autoeq = directory_at(local, "autoeq", create);
+	int error = errno;
+	if (close(local) != 0 && autoeq >= 0) {
+		error = errno;
+		close(autoeq);
+		autoeq = -1;
+	}
+	if (autoeq < 0) {
+		errno = error;
+		return -1;
+	}
+	if (!profiles)
+		return autoeq;
+	int result = directory_at(autoeq, "profiles", create);
+	error = errno;
+	if (close(autoeq) != 0 && result >= 0) {
+		error = errno;
+		close(result);
+		result = -1;
+	}
+	errno = error;
+	return result;
+}
+
+static int owned_temp(int directory, char *name, size_t size, bool readable) {
+	for (int attempt = 0; attempt < 8; attempt++) {
+		if (temp_serial == UINT64_MAX) {
+			errno = EOVERFLOW;
+			return -1;
+		}
+		int n = snprintf(name, size, ".autoeq-%ld-%llu.tmp", (long)getpid(), (unsigned long long)++temp_serial);
+		if (n < 0 || (size_t)n >= size) {
+			errno = ENAMETOOLONG;
+			return -1;
+		}
+		int fd = openat(directory, name, O_CREAT | O_EXCL | (readable ? O_RDWR : O_WRONLY) | O_CLOEXEC | O_NOFOLLOW, 0600);
+		if (fd >= 0 || errno != EEXIST)
+			return fd;
+	}
+	errno = EEXIST;
+	return -1;
+}
+
+static bool write_all(int fd, const void *data, size_t size) {
+	const char *bytes = data;
+	while (size) {
+		ssize_t count = write(fd, bytes, size);
+		if (count < 0 && errno == EINTR)
+			continue;
+		if (count <= 0)
+			return false;
+		bytes += count;
+		size -= (size_t)count;
+	}
+	return true;
+}
+
+// Uses only the granted directory. A published rename is never undone on a
+// later directory-sync failure; callers record it but do not apply sound.
+static bool publish_file(int directory, const char *name, const char *data, int input, size_t size, bool *published) {
+	*published = false;
+	char temporary[80];
+	int fd = owned_temp(directory, temporary, sizeof(temporary), false);
+	if (fd < 0)
+		return false;
+	bool ok = true;
+	if (data) {
+		ok = write_all(fd, data, size);
+	} else {
+		ok = lseek(input, 0, SEEK_SET) == 0;
+		char buffer[8192];
+		size_t remaining = size;
+		while (ok && remaining) {
+			size_t wanted = remaining < sizeof(buffer) ? remaining : sizeof(buffer);
+			ssize_t count = read(input, buffer, wanted);
+			if (count < 0 && errno == EINTR)
+				continue;
+			ok = count > 0 && write_all(fd, buffer, (size_t)count);
+			if (ok)
+				remaining -= (size_t)count;
+		}
+	}
+	if (ok && fsync(fd) != 0)
+		ok = false;
+	if (close(fd) != 0)
+		ok = false;
+	if (ok && job_cancelled())
+		ok = false;
+	if (ok) {
+		ok = renameat(directory, temporary, directory, name) == 0;
+		*published = ok;
+	}
+	if (!*published) {
+		if (unlinkat(directory, temporary, 0) != 0)
+			fprintf(stderr, "autoeq: temporary cleanup failed\n");
+	} else if (fsync(directory) != 0)
+		ok = false;
+	if (*published && !ok)
+		fprintf(stderr, "autoeq: file published; durability not confirmed\n");
+	return ok;
+}
+
+static char *read_snapshot(int fd, size_t maximum, size_t *size_out) {
+	struct stat st;
+	if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_size <= 0 || (uint64_t)st.st_size > maximum || lseek(fd, 0, SEEK_SET) != 0)
+		return NULL;
+	size_t size = (size_t)st.st_size;
+	char *text = malloc(size + 1);
+	if (!text)
+		return NULL;
+	size_t total = 0;
+	while (total < size) {
+		ssize_t count = read(fd, text + total, size - total);
+		if (count < 0 && errno == EINTR)
+			continue;
+		if (count <= 0) {
+			free(text);
+			return NULL;
+		}
+		total += (size_t)count;
+	}
+	text[size] = '\0';
+	if (size_out)
+		*size_out = size;
+	return text;
+}
+
+static char *read_cache(job_t *job, bool profile, size_t *size_out) {
+	int pin = storage_pin_card_read_if(&job->card);
+	if (pin < 0) {
+		snprintf(job->error, sizeof(job->error), "%s", tr("peq_autoeq_need_card"));
+		return NULL;
+	}
+	int directory = autoeq_directory(pin, profile, false);
+	int fd = directory >= 0 ? openat(directory, profile ? job->cache : "INDEX.md", O_RDONLY | O_CLOEXEC | O_NOFOLLOW) : -1;
+	char *text = fd >= 0 ? read_snapshot(fd, profile ? PROFILE_MAX : INDEX_MAX, size_out) : NULL;
+	bool ok = true;
+	if (fd >= 0 && close(fd) != 0)
+		ok = false;
+	if (directory >= 0 && close(directory) != 0)
+		ok = false;
+	if (close(pin) != 0)
+		ok = false;
+	if (job_stale(job) || !ok) {
+		free(text);
+		text = NULL;
+	}
+	return text;
+}
+
+static bool stage_filesystem(int fd) {
+	struct statfs type;
+	if (fstatfs(fd, &type) != 0)
+		return false;
+#ifdef HOST_BUILD
+	uint32_t kind = (uint32_t)type.f_type;
+	return kind != 0x01021994u && kind != 0x858458f6u; // TMPFS and RAMFS
+#else
+	return (unsigned long)type.f_type == AUTOEQ_UBIFS_MAGIC;
+#endif
+}
+
+#ifdef HOST_BUILD
+// XDG cache paths are explicit host input, not a card or /tmp fallback.
+// Validate every component before creating any directory.
+static int host_cache_root(void) {
+	const char *base = getenv("XDG_CACHE_HOME");
+	bool home = !base || !base[0];
+	if (home)
+		base = getenv("HOME");
+	if (!base || base[0] != '/' || strnlen(base, 1024) >= 1024) {
+		errno = EINVAL;
+		return -1;
+	}
+	for (const char *part = base + 1; *part;) {
+		const char *end = strchr(part, '/');
+		size_t length = end ? (size_t)(end - part) : strlen(part);
+		if (!length || length > 255 || (length == 1 && part[0] == '.') || (length == 2 && part[0] == '.' && part[1] == '.')) {
+			errno = EINVAL;
+			return -1;
+		}
+		part += length;
+		if (*part)
+			part++;
+	}
+	int parent = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+	if (parent < 0)
+		return -1;
+	for (const char *part = base + 1; *part;) {
+		const char *end = strchr(part, '/');
+		size_t length = end ? (size_t)(end - part) : strlen(part);
+		char component[256];
+		memcpy(component, part, length);
+		component[length] = '\0';
+		int child = directory_at(parent, component, false);
+		if (child < 0 && errno == ENOENT && stage_filesystem(parent))
+			child = directory_at(parent, component, true);
+		if (close(parent) != 0 && child >= 0) {
+			close(child);
+			child = -1;
+		}
+		if (child < 0)
+			return -1;
+		parent = child;
+		part += length;
+		if (*part)
+			part++;
+	}
+	if (!stage_filesystem(parent)) {
+		close(parent);
+		return -1;
+	}
+	if (home) {
+		int child = directory_at(parent, ".cache", true);
+		if (close(parent) != 0 && child >= 0) {
+			close(child);
+			child = -1;
+		}
+		if (child < 0)
+			return -1;
+		parent = child;
+		if (!stage_filesystem(parent)) {
+			close(parent);
+			return -1;
+		}
+	}
+	int root = directory_at(parent, "sonix", true);
+	if (close(parent) != 0 && root >= 0) {
+		close(root);
+		root = -1;
+	}
+	return root;
+}
+#endif
+
+static int internal_stage_root(void) {
+#ifdef HOST_BUILD
+	return host_cache_root();
+#else
+	return open(AUTOEQ_INTERNAL_ROOT, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+#endif
+}
+
+static int internal_stage(void) {
+	int root = internal_stage_root();
+	if (root < 0)
+		return -1;
+	struct statvfs space;
+	bool ok = stage_filesystem(root) && fstatvfs(root, &space) == 0 && !(space.f_flag & ST_RDONLY);
+	if (ok)
+		ok = space.f_frsize && space.f_bavail >= ((uint64_t)INDEX_MAX + AUTOEQ_STAGE_RESERVE) / space.f_frsize + (((uint64_t)INDEX_MAX + AUTOEQ_STAGE_RESERVE) % space.f_frsize != 0);
+	int directory = ok ? directory_at(root,
+#ifdef HOST_BUILD
+		"autoeq",
+#else
+		"sonix-autoeq",
+#endif
+		true) : -1;
+	if (directory >= 0)
+		ok = stage_filesystem(directory);
+	else
+		ok = false;
+	char name[80];
+	int fd = ok ? owned_temp(directory, name, sizeof(name), true) : -1;
+	if (fd >= 0) {
+		struct stat st;
+		ok = fstat(fd, &st) == 0 && S_ISREG(st.st_mode);
+		if (unlinkat(directory, name, 0) != 0) {
+			ok = false;
+			// One best-effort cleanup of this owned, still-empty inode only.
+			if (unlinkat(directory, name, 0) != 0)
+				fprintf(stderr, "autoeq: internal stage cleanup failed\n");
+		}
+		if (fstat(fd, &st) != 0 || st.st_nlink != 0)
+			ok = false;
+	} else
+		ok = false;
+	if (directory >= 0 && close(directory) != 0)
+		ok = false;
+	if (close(root) != 0)
+		ok = false;
+	if (!ok && fd >= 0) {
+		close(fd);
+		fd = -1;
+	}
+	return fd;
+}
+
+static int download_index(job_t *job, size_t *size_out) {
+	if (!peqautoeq_network_ready()) {
+		snprintf(job->error, sizeof(job->error), "%s", tr("peq_autoeq_only_works_over_wi_fi"));
+		return -1;
+	}
+	if (!write_preflight(job)) {
+		snprintf(job->error, sizeof(job->error), "%s", tr("peq_autoeq_error_database_save"));
+		return -1;
+	}
+	int fd = internal_stage();
+	if (fd < 0) {
+		snprintf(job->error, sizeof(job->error), "%s", tr("peq_autoeq_error_database_save"));
+		return -1;
+	}
+	http_stream_t stream;
+	bool opened = http_stream_open(&stream, INDEX_URL, 35);
+	bool ok = opened && stream.content_length <= (long)INDEX_MAX;
+	size_t total = 0;
+	char buffer[8192];
+	while (ok && !job_stale(job)) {
+		int count = http_stream_read(&stream, buffer, (int)sizeof(buffer));
+		if (count <= 0) {
+			ok = count == 0;
+			break;
+		}
+		ok = (size_t)count <= INDEX_MAX - total && write_all(fd, buffer, (size_t)count);
+		if (ok)
+			total += (size_t)count;
+	}
+	if (opened) {
+		if (stream.content_length > 0 && total != (size_t)stream.content_length)
+			ok = false;
+		http_stream_close(&stream);
+	}
+	ok = ok && total && !job_stale(job);
+	if (ok && fsync(fd) != 0)
+		ok = false;
+	if (!ok) {
+		close(fd);
+		if (!job->error[0])
+			snprintf(job->error, sizeof(job->error), "%s", tr("peq_autoeq_error_index_download"));
+		return -1;
+	}
+	*size_out = total;
+	return fd;
+}
+
+static bool commit_index(job_t *job, int input, size_t size) {
+	if (job_cancelled())
+		return false;
+	int pin = storage_pin_card_if(&job->card);
+	if (pin < 0)
+		return false;
+	int directory = autoeq_directory(pin, false, true);
+	bool published = false;
+	bool ok = directory >= 0 && publish_file(directory, "INDEX.md", NULL, input, size, &published);
+	job->published = published;
+	if (directory >= 0 && close(directory) != 0)
+		ok = false;
+	if (close(pin) != 0)
+		ok = false;
+	return ok;
+}
+
+static bool load_search_results(job_t *job) {
+	char *index = read_cache(job, false, NULL);
+	if (!index && !job->error[0] && !job_cancelled()) {
+		size_t size = 0;
+		int fd = download_index(job, &size);
+		if (fd >= 0) {
+			if (commit_index(job, fd, size))
+				index = read_snapshot(fd, INDEX_MAX, NULL);
+			if (close(fd) != 0) {
+				free(index);
+				index = NULL;
+			}
+		}
+	}
+	if (!index) {
+		if (!job->error[0])
+			snprintf(job->error, sizeof(job->error), "%s", tr("peq_autoeq_error_database_save"));
 		return false;
 	}
+	bool ok = !job_stale(job);
+	if (ok)
+		parse_index(index, job->query, job);
+	free(index);
+	return ok;
+}
 
-	bool ok = true;
-	struct dirent *entry;
-	while ((entry = readdir(dir)) != NULL) {
-		if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..")) {
-			continue;
+static bool clear_profile_cache(job_t *job) {
+	for (;;) {
+		if (job_cancelled())
+			return false;
+		int pin = storage_pin_card_if(&job->card);
+		if (pin < 0)
+			return false;
+		int fd = autoeq_directory(pin, true, false);
+		bool missing = fd < 0 && errno == ENOENT;
+		DIR *dir = fd >= 0 ? fdopendir(fd) : NULL;
+		if (fd >= 0 && !dir)
+			close(fd);
+		bool ok = dir != NULL || missing;
+		int removed = 0;
+		while (dir && ok && removed < 16) {
+			errno = 0;
+			struct dirent *entry = readdir(dir);
+			if (!entry) {
+				ok = errno == 0;
+				break;
+			}
+			if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
+				continue;
+			ok = unlinkat(dirfd(dir), entry->d_name, 0) == 0;
+			if (ok)
+				removed++;
 		}
-		char path[768];
-		int n = snprintf(path, sizeof(path), "%s/%s", profiles_dir, entry->d_name);
-		if (n < 0 || (size_t)n >= sizeof(path) || remove(path) != 0) {
+		if (dir && closedir(dir) != 0)
 			ok = false;
-		}
+		if (close(pin) != 0)
+			ok = false;
+		if (!ok || removed < 16)
+			return ok;
 	}
-	if (closedir(dir) != 0) {
+}
+
+static bool update_index(job_t *job) {
+	size_t size = 0;
+	int fd = download_index(job, &size);
+	if (fd < 0)
+		return false;
+	bool ok = commit_index(job, fd, size);
+	if (close(fd) != 0)
 		ok = false;
+	if (!ok) {
+		if (!job->error[0])
+			snprintf(job->error, sizeof(job->error), "%s", tr("peq_autoeq_error_database_save"));
+		return false;
 	}
+	if (!clear_profile_cache(job)) {
+		snprintf(job->error, sizeof(job->error), "%s", tr("peq_autoeq_error_clear_profile_cache"));
+		return false;
+	}
+	return true;
+}
+
+static bool commit_profile(job_t *job) {
+	if (job_cancelled())
+		return false;
+	int pin = storage_pin_card_if(&job->card);
+	if (pin < 0)
+		return false;
+	int cache = job->cached_profile ? -1 : autoeq_directory(pin, true, true);
+	if (cache >= 0) {
+		bool cached = false;
+		(void)publish_file(cache, job->cache, job->profile_text, -1, job->profile_size, &cached);
+		close(cache);
+	}
+	if (job_cancelled()) {
+		close(pin);
+		return false;
+	}
+	int directory = directory_at(pin, "PEQ", true);
+	char name[sizeof(job->preset) + 5];
+	int n = snprintf(name, sizeof(name), "%s.txt", job->preset);
+	struct stat st;
+	bool ok = directory >= 0 && n > 0 && (size_t)n < sizeof(name);
+	if (ok) {
+		int result = fstatat(directory, name, &st, AT_SYMLINK_NOFOLLOW);
+		job->replaced = result == 0;
+		ok = result == 0 || errno == ENOENT;
+	}
+	if (ok)
+		ok = publish_file(directory, name, job->profile_text, -1, job->profile_size, &job->published);
+	if (directory >= 0 && close(directory) != 0)
+		ok = false;
+	if (close(pin) != 0)
+		ok = false;
 	return ok;
 }
 
 static bool download_profile(job_t *job) {
-	size_t size = 0;
-	char *text = read_file(job->cache, PROFILE_MAX, &size);
-	if (text) {
-		job->profile_text = text;
-		job->profile_size = size;
-		return true;
+	job->profile_text = read_cache(job, true, &job->profile_size);
+	job->cached_profile = job->profile_text != NULL;
+	if (!job->profile_text && !job->error[0] && !job_cancelled()) {
+		char url[3072];
+		if (!peqautoeq_network_ready())
+			snprintf(job->error, sizeof(job->error), "%s", tr("peq_autoeq_only_works_over_wi_fi"));
+		else if (!make_profile_url(&job->selected, url, sizeof(url)))
+			snprintf(job->error, sizeof(job->error), "%s", tr("peq_autoeq_error_profile_url"));
+		else if (!write_preflight(job))
+			snprintf(job->error, sizeof(job->error), "%s", tr("peq_autoeq_error_save_preset"));
+		else if (!http_get(url, &job->profile_text, &job->profile_size, PROFILE_MAX, 30)) {
+			const char *error = http_last_error();
+			snprintf(job->error, sizeof(job->error), "%s", error && error[0] ? error : tr("peq_autoeq_error_profile_download"));
+		}
 	}
-
-	char url[3072];
-	if (!make_profile_url(&job->selected, url, sizeof(url))) {
-		snprintf(job->error, sizeof(job->error), "%s", tr("peq_autoeq_error_profile_url"));
+	if (!job->profile_text || job->error[0])
+		return false;
+	if (job_stale(job))
+		return false;
+	errno = 0;
+	if (!peq_preset_parse_text(job->profile_text, job->profile_size, &job->parsed)) {
+		snprintf(job->error, sizeof(job->error), "%s", tr(errno == ENOMEM ? "out_of_memory" : "peq_autoeq_error_unsupported_profile"));
 		return false;
 	}
-	if (!http_get(url, &text, &size, PROFILE_MAX, 30)) {
-		const char *error = http_last_error();
-		snprintf(job->error, sizeof(job->error), "%s", error && error[0] ? error : tr("peq_autoeq_error_profile_download"));
-		free(text);
+	if (!commit_profile(job)) {
+		snprintf(job->error, sizeof(job->error), "%s", tr("peq_autoeq_error_save_preset"));
 		return false;
 	}
-	write_file(job->cache, text, size);
-	job->profile_text = text;
-	job->profile_size = size;
 	return true;
 }
+
 
 static void free_job(job_t *job) {
 	if (!job)
@@ -619,16 +950,13 @@ static void *worker(void *user) {
 	job_t *job = user;
 	thread_be_background("autoeq");
 
-	if (!ensure_dirs()) {
-		snprintf(job->error, sizeof(job->error), "%s", tr("peq_autoeq_need_card"));
-	} else if (job->action == JOB_SEARCH) {
-		load_search_results(job);
-	} else if (job->action == JOB_UPDATE_DATABASE) {
-		if (download_index(job) && !clear_profile_cache()) {
-			snprintf(job->error, sizeof(job->error), "%s", tr("peq_autoeq_error_clear_profile_cache"));
-		}
-	} else {
-		download_profile(job);
+	if (!job_cancelled()) {
+		if (job->action == JOB_SEARCH)
+			load_search_results(job);
+		else if (job->action == JOB_UPDATE_DATABASE)
+			update_index(job);
+		else
+			download_profile(job);
 	}
 
 	pthread_mutex_lock(&job_lock);
@@ -638,11 +966,43 @@ static void *worker(void *user) {
 		free_job(job);
 		return NULL;
 	}
+	job->phase = JOB_READY;
 	ready_job = job;
 	pthread_mutex_unlock(&job_lock);
 	// The notification owns no payload. Direct GUI service also works if full.
 	(void)gui_post(job_done, NULL);
 	return NULL;
+}
+
+// GUI-only, with no filesystem access. The first successful observation binds
+// this not-yet-admitted request; an existing token is never refreshed.
+static int admit_and_start(job_t *job) {
+	char root[512];
+	if (!storage_card_try_admit(&job->card, root, sizeof(root))) {
+		if (errno == EAGAIN)
+			return 0;
+		snprintf(job->error, sizeof(job->error), "%s", tr("peq_autoeq_need_card"));
+	} else {
+		pthread_mutex_lock(&job_lock);
+		ready_job = NULL;
+		job->phase = JOB_WORKING;
+		pthread_mutex_unlock(&job_lock);
+		pthread_t thread;
+		if (pthread_create(&thread, NULL, worker, job) == 0) {
+			pthread_detach(thread);
+			return 1;
+		}
+		snprintf(job->error, sizeof(job->error), "%s", tr("peq_autoeq_error_start"));
+	}
+	pthread_mutex_lock(&job_lock);
+	if (ready_job == job)
+		ready_job = NULL;
+	job_busy = false;
+	pthread_mutex_unlock(&job_lock);
+	bool owned = toast_busy_end_owned(job->toast_owner);
+	report_status(job->error, true, owned, job->request_generation);
+	free_job(job);
+	return -1;
 }
 
 static bool start_job(job_t *job, const char *busy_text) {
@@ -657,61 +1017,20 @@ static bool start_job(job_t *job, const char *busy_text) {
 	if (job->action == JOB_SEARCH)
 		job->request_generation = ++search_generation;
 	job->toast_owner = toast_busy_owned(busy_text);
-
-	pthread_t thread;
-	if (pthread_create(&thread, NULL, worker, job) != 0) {
-		end_job();
-		bool owned = toast_busy_end_owned(job->toast_owner);
-		report_status(tr("peq_autoeq_error_start"), true, owned, job->request_generation);
-		free_job(job);
-		return false;
-	}
-	pthread_detach(thread);
-	return true;
+	job->phase = JOB_NEEDS_ADMISSION;
+	pthread_mutex_lock(&job_lock);
+	ready_job = job;
+	pthread_mutex_unlock(&job_lock);
+	return admit_and_start(job) >= 0;
 }
 
 static bool save_and_apply(job_t *job, bool announce) {
-	char peq_dir[600];
-	char stage_name[40];
-	char stage_path[700];
-	char preset_path[700];
-	if (!cfg || !cfg->sd_root_path || !cfg->sd_root_path[0] || !path_join(peq_dir, sizeof(peq_dir), cfg->sd_root_path, "PEQ") || !make_dir(peq_dir)) {
-		report_status(tr("peq_autoeq_error_peq_folder"), true, announce, 0);
-		return false;
-	}
-
-	uint32_t id = hash_text(job->preset) ^ hash_text(job->profile_text);
-	snprintf(stage_name, sizeof(stage_name), "AutoEq Stage %08x", id);
-	int n = snprintf(stage_path, sizeof(stage_path), "%s/%s.txt", peq_dir, stage_name);
-	int p = snprintf(preset_path, sizeof(preset_path), "%s/%s.txt", peq_dir, job->preset);
-	if (n < 0 || (size_t)n >= sizeof(stage_path) || p < 0 || (size_t)p >= sizeof(preset_path) || !write_file(stage_path, job->profile_text, job->profile_size)) {
-		report_status(tr("peq_autoeq_error_save_profile"), true, announce, 0);
-		return false;
-	}
-
-	// Load the stage file through the regular PEQ parser before renaming it, so
-	// a download with no supported filters cannot replace an existing preset.
-	int ignored = 0;
-	if (!peq_preset_load(stage_name, &ignored)) {
-		remove(stage_path);
-		report_status(tr("peq_autoeq_error_unsupported_profile"), true, announce, 0);
-		return false;
-	}
-	struct stat existing;
-	bool replaced = stat(preset_path, &existing) == 0;
-	if (!replaced && errno != ENOENT) {
-		remove(stage_path);
+	if (!job->published || !peq_preset_apply_parsed(job->preset, &job->parsed, true)) {
 		report_status(tr("peq_autoeq_error_save_preset"), true, announce, 0);
 		return false;
 	}
-	if (rename(stage_path, preset_path) != 0) {
-		remove(stage_path);
-		report_status(tr("peq_autoeq_error_save_preset"), true, announce, 0);
-		return false;
-	}
-
-	peq_set_preset_name(job->preset); // loaded as the staging file, kept under this name
-	peq_set_enabled(true);
+	bool replaced = job->replaced;
+	int ignored = job->parsed.ignored;
 	if (reload_cb) {
 		reload_cb();
 	}
@@ -783,18 +1102,32 @@ void peqautoeq_service_completion(void) {
 		return;
 	}
 	job_t *job = ready_job;
-	ready_job = NULL;
-	if (job)
-		job_busy = false;
 	pthread_mutex_unlock(&job_lock);
 	if (!job) {
 		service_deferred();
 		return;
 	}
+	bool stale_search = job->action == JOB_SEARCH && (job->request_generation != search_generation || !search_screen);
+	if (!stale_search && job->phase == JOB_NEEDS_ADMISSION) {
+		(void)admit_and_start(job);
+		return;
+	}
+	if (!stale_search && !job->error[0]) {
+		if (storage_card_try_check(&job->card) != 0) {
+			if (errno == EAGAIN)
+				return;
+			snprintf(job->error, sizeof(job->error), "%s", tr("peq_autoeq_need_card"));
+		}
+	}
+	if (!stale_search && job->action == JOB_SEARCH && lv_screen_active() != search_screen)
+		stale_search = true;
+	pthread_mutex_lock(&job_lock);
+	ready_job = NULL;
+	job_busy = false;
+	pthread_mutex_unlock(&job_lock);
 	bool owned = toast_busy_end_owned(job->toast_owner);
-	bool current_search = job->request_generation == search_generation && search_screen && lv_screen_active() == search_screen;
-	if (job->action == JOB_SEARCH && !current_search) {
-		// Navigation invalidated this search, not a user-requested global apply.
+	if (stale_search) {
+		// Disposal is always allowed, including when storage is busy or gone.
 	} else if (job->error[0]) {
 		report_status(job->error, true, owned, job->request_generation);
 	} else if (job->action == JOB_SEARCH) {
@@ -973,7 +1306,6 @@ static void build_pages(gui_config_t *config) {
 // search started there, so it is built by then too.
 void peqautoeq_init(gui_config_t *config) {
 	cfg = config;
-	set_paths();
 	search_screen = lv_obj_create(NULL);
 	results_screen = lv_obj_create(NULL);
 	gui_page_defer(search_screen, build_pages);

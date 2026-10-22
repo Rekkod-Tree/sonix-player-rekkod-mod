@@ -2,6 +2,7 @@
 #define EQ_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 // A 10-band graphic equalizer applied in software to the decoded PCM, the
@@ -148,6 +149,15 @@ void peq_set_preset_name(const char *name);
 void peq_presets_set_dir(const char *sd_root);
 bool peq_preset_save(const char *name);
 bool peq_preset_load(const char *name, int *ignored);
+typedef struct {
+	peq_band_t bands[PEQ_BANDS];
+	int preamp_tenths, ignored;
+} peq_preset_data_t;
+// Pure bounded-text parse; assigns out only on success. No live settings or I/O.
+bool peq_preset_parse_text(const char *text, size_t length, peq_preset_data_t *out);
+// GUI-only application, without reopening a preset path. Config-save failures
+// retain applied RAM settings and dirty-config retry semantics as normal load.
+bool peq_preset_apply_parsed(const char *name, const peq_preset_data_t *data, bool enabled);
 bool peq_preset_delete(const char *name);
 typedef bool (*peq_preset_name_cb_t)(const char *name, void *user);
 int peq_preset_for_each(peq_preset_name_cb_t cb, void *user);
