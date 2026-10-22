@@ -547,11 +547,11 @@ static void spoken_states(void) {
 		phase++;
 		break;
 	case 8: {
-		if (!spoken_wait_label("Симона де"))
+		if (!spoken_wait_label("РЎРёРјРѕРЅР° РґРµ"))
 			return;
 		assert(visible(find_label(lv_screen_active(), tr("spoken_audiobook"))));
 		capture("yandex-spoken-book-search");
-		lv_obj_t *title = find_label(lv_screen_active(), "Симона де");
+		lv_obj_t *title = find_label(lv_screen_active(), "РЎРёРјРѕРЅР° РґРµ");
 		lv_area_t box;
 		lv_obj_get_coords(title, &box);
 		input(box.x1 + 20, (box.y1 + box.y2) / 2, true);
@@ -614,7 +614,7 @@ static void spoken_states(void) {
 		break;
 	}
 	case 13: {
-		if (!spoken_wait_label("206: Последний кадр"))
+		if (!spoken_wait_label("206: РџРѕСЃР»РµРґРЅРёР№ РєР°РґСЂ"))
 			return;
 		podcast_list = lv_screen_active();
 		snprintf(count, sizeof(count), tr("spoken_episode_count"), 299);
@@ -623,7 +623,7 @@ static void spoken_states(void) {
 		assert(!visible(find_label(podcast_list, tr("spoken_download_book"))));
 		assert(!visible(find_label(podcast_list, tr("yandex_save_album"))));
 		capture("yandex-spoken-podcast-299-newest");
-		lv_obj_t *first = find_label(podcast_list, "206: Последний кадр");
+		lv_obj_t *first = find_label(podcast_list, "206: РџРѕСЃР»РµРґРЅРёР№ РєР°РґСЂ");
 		lv_area_t box;
 		lv_obj_get_coords(first, &box);
 		hold_x = box.x1 + 20;
@@ -643,7 +643,7 @@ static void spoken_states(void) {
 		phase++;
 		break;
 	case 15: {
-		lv_obj_t *label = find_label(podcast_list, "206: Последний кадр");
+		lv_obj_t *label = find_label(podcast_list, "206: РџРѕСЃР»РµРґРЅРёР№ РєР°РґСЂ");
 		lv_obj_t *scroll = lv_obj_get_parent(label);
 		while (scroll && lv_obj_get_scroll_bottom(scroll) < 1000)
 			scroll = lv_obj_get_parent(scroll);
@@ -653,7 +653,7 @@ static void spoken_states(void) {
 		break;
 	}
 	case 16:
-		if (!spoken_wait_label("01: Миф"))
+		if (!spoken_wait_label("01: РњРёС„"))
 			return;
 		capture("yandex-spoken-podcast-last-page");
 		printf("UI_TEST_PASS spoken: both providers, real book downloads, 338/299 episodes, dates and destination menus\n");
@@ -690,7 +690,7 @@ static void service_states(void) {
 		break;
 	case 4:
 		mock_mode("401");
-		assert(zvukpage_open_album("701", "Группа крови"));
+		assert(zvukpage_open_album("701", "Р“СЂСѓРїРїР° РєСЂРѕРІРё"));
 		break;
 	case 5:
 		break;
@@ -714,7 +714,7 @@ static void service_states(void) {
 		break;
 	case 9:
 		capture("service-return-after-login");
-		assert(visible(find_label(lv_screen_active(), "Закрой за мной дверь")));
+		assert(visible(find_label(lv_screen_active(), "Р—Р°РєСЂРѕР№ Р·Р° РјРЅРѕР№ РґРІРµСЂСЊ")));
 		mock_mode("418");
 		assert(zvukpage_open_album("702", "Blocked album"));
 		break;
@@ -752,7 +752,7 @@ static void service_states(void) {
 		break;
 	case 20:
 		capture("service-recovered");
-		assert(find_label(lv_screen_active(), "Закрой за мной дверь"));
+		assert(find_label(lv_screen_active(), "Р—Р°РєСЂРѕР№ Р·Р° РјРЅРѕР№ РґРІРµСЂСЊ"));
 		theme_set_dark(false);
 		break;
 	case 21:
@@ -1922,7 +1922,7 @@ static void run(lv_timer_t *timer) {
 	case 20:
 		capture("zvuk-connected-light");
 		if (getenv("SONIX_UI_TEST_ZVUK"))
-			assert(zvukpage_open_album("701", "Группа крови"));
+			assert(zvukpage_open_album("701", "Р“СЂСѓРїРїР° РєСЂРѕРІРё"));
 		break;
 	case 21:
 		break;
@@ -1956,13 +1956,13 @@ static void run(lv_timer_t *timer) {
 			static char description[3000];
 			for (int i = 0; i < 12; i++)
 				strcat(description, "The service could not complete this request. Your library and downloads remain available. Check the connection and try again.\n\n");
-			sx_sheet_t sheet = {.title = "Звук недоступен", .subtitle = description, .action_label = "Повторить", .cancel_label = "Закрыть"};
+			sx_sheet_t sheet = {.title = "Р—РІСѓРє РЅРµРґРѕСЃС‚СѓРїРµРЅ", .subtitle = description, .action_label = "РџРѕРІС‚РѕСЂРёС‚СЊ", .cancel_label = "Р—Р°РєСЂС‹С‚СЊ"};
 			sx_sheet_open(&sheet);
 		}
 		break;
 	case 28: {
 		capture("error-long");
-		lv_obj_t *action = find_label(lv_layer_top(), "Повторить");
+		lv_obj_t *action = find_label(lv_layer_top(), "РџРѕРІС‚РѕСЂРёС‚СЊ");
 		assert(action);
 		lv_area_t area;
 		lv_obj_get_coords(lv_obj_get_parent(action), &area);
@@ -1971,7 +1971,7 @@ static void run(lv_timer_t *timer) {
 		break;
 	}
 	case 29:
-		sx_toast_undo("Добавлено в избранное: The Great Gig in the Sky", undo, NULL);
+		sx_toast_undo("Р”РѕР±Р°РІР»РµРЅРѕ РІ РёР·Р±СЂР°РЅРЅРѕРµ: The Great Gig in the Sky", undo, NULL);
 		break;
 	case 30: {
 		capture("toast-undo");
@@ -2169,7 +2169,7 @@ static void run(lv_timer_t *timer) {
 				lv_obj_get_coords(field, &box);
 				assert(box.y1 == SX_BODY_TOP && box.y2 - box.y1 + 1 == 88);
 				assert(keyboard_shown_on(playlistpage_screen) && !sx_mini_visible());
-				lv_textarea_set_text(field, "Название для проверки переноса и отмены");
+				lv_textarea_set_text(field, "РќР°Р·РІР°РЅРёРµ РґР»СЏ РїСЂРѕРІРµСЂРєРё РїРµСЂРµРЅРѕСЃР° Рё РѕС‚РјРµРЅС‹");
 				input(436, 88, true);
 				input(436, 88, false);
 				return;
@@ -2220,6 +2220,14 @@ static void run(lv_timer_t *timer) {
 void graphite_ui_test_init(void) {
 	signal(SIGABRT, SIG_DFL); // test assertions must exit, not enter the device crash handler
 	out_dir = getenv("SONIX_UI_TEST_DIR");
-	if (out_dir && out_dir[0])
+	if (out_dir && out_dir[0]) {
+		// fflush() only hands text to the asynchronous log queue.
+		// Drain it before a successful test exits and its marker is checked.
+		if (atexit(logging_flush) != 0) {
+			fprintf(stderr, "UI_TEST_ERROR: cannot register exit log drain\n");
+			logging_flush();
+			exit(EXIT_FAILURE);
+		}
 		lv_timer_create(run, 1000, NULL);
+	}
 }

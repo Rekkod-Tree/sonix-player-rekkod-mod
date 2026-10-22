@@ -25,6 +25,15 @@
   Resume, Seek and output handoff wake the same playback owner.
 - The optional performance-report signal is harmless when statistics are off;
   it does not enable counters or add a background timer.
+- Shared card and Wi-Fi status setters skip identical text and subtitle roles,
+  avoiding redundant text allocation and layout invalidation. Live text, palette
+  styles and ellipsis expansion keep their existing behavior.
+- Home/More network subtitles follow delayed radio connection changes through
+  the existing radio poll. Bluetooth searching rows follow the state actually
+  drawn, including refusal before the first poll. Queue source notes follow late
+  titles while preserving a gesture already under the pointer.
+- Bluetooth commits power, scan and operation state only with queue admission.
+  A full queue retains the latest volume intent; OFF or a changed sink clears it.
 
 ## Palette controls, search and playlist safety (alpha25)
 

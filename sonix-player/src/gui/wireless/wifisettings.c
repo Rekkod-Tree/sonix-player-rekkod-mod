@@ -300,13 +300,13 @@ static void refresh_status_label(void) {
 	}
 
 	if (!wifi_available()) {
-		lv_label_set_text(status_label, tr("wifi_no_hardware"));
+		sx_set_text(status_label, tr("wifi_no_hardware"));
 		lv_obj_set_hidden(status_label, false);
 		return;
 	}
 
 	if (wifi_busy()) {
-		lv_label_set_text(status_label, wifi_get_enabled() ? tr("turning_on") : tr("wifi_turning_off_2"));
+		sx_set_text(status_label, wifi_get_enabled() ? tr("turning_on") : tr("wifi_turning_off_2"));
 		lv_obj_set_hidden(status_label, false);
 		return;
 	}
@@ -319,7 +319,7 @@ static void refresh_status_label(void) {
 	// plaque itself.
 	if (status.state == WIFI_STATE_OFF) {
 		// What being off costs, which is the reason to look at this page.
-		lv_label_set_text(status_label, tr("wifi_off_note"));
+		sx_set_text(status_label, tr("wifi_off_note"));
 		lv_obj_set_hidden(status_label, false);
 		return;
 	}

@@ -137,6 +137,7 @@ static unsigned queue_seen_revision;
 static unsigned queue_seen_metadata_revision;
 static int queue_seen_current = -2;
 static queue_mode_t queue_seen_mode;
+static char queue_seen_outside[256];
 
 // Editing never changes playback or the parked queue. Revisions invalidate picks.
 static int queue_edit_mode; // 0 view, 1 select, 2 reorder
@@ -433,6 +434,7 @@ static void queue_layout(void) {
 		beside = !audiobook_is_playing() && !dlna_owns_playback();
 	}
 
+	snprintf(queue_seen_outside, sizeof(queue_seen_outside), "%s", outside);
 	int count = playlist_count();
 	int current = playlist_current_index();
 	if (outside[0] && !beside) {
@@ -531,20 +533,36 @@ void trackmenu_queue_refresh(void) {
 	}
 }
 
-static queue_mode_t queue_mode_now(void) {
-	char outside[8];
-	if (player_outside_title(outside, sizeof(outside))) {
+static queue_mode_t queue_mode_for_outside(bool has_outside) {
+	if (has_outside) {
 		return audiobook_is_playing() || dlna_owns_playback() ? QUEUE_MODE_PARKED : QUEUE_MODE_BESIDE;
 	}
 	return playlist_count() <= 0 && !sx_mini_has_track() ? QUEUE_MODE_IDLE : QUEUE_MODE_QUEUE;
+}
+
+static queue_mode_t queue_mode_now(void) {
+	char outside[8];
+	return queue_mode_for_outside(player_outside_title(outside, sizeof(outside)));
 }
 
 void trackmenu_queue_poll(void) {
 	if (!queue_page_up()) {
 		return;
 	}
+	char outside[256];
+	bool has_outside = player_outside_title(outside, sizeof(outside));
+	if (strcmp(outside, queue_seen_outside) != 0) {
+		// A late source title can reflow the note; keep the existing scroll and
+		// leave a row under a finger alone until the gesture has finished.
+		for (lv_indev_t *input = lv_indev_get_next(NULL); input; input = lv_indev_get_next(input)) {
+			if (lv_indev_get_type(input) == LV_INDEV_TYPE_POINTER && lv_indev_get_state(input) == LV_INDEV_STATE_PRESSED)
+				return;
+		}
+		queue_layout();
+		return;
+	}
 	if (playlist_revision() != queue_seen_revision || playlist_current_index() != queue_seen_current ||
-		queue_mode_now() != queue_seen_mode) {
+		queue_mode_for_outside(has_outside) != queue_seen_mode) {
 		queue_layout();
 	} else if (device_state_metadata_revision() != queue_seen_metadata_revision) {
 		// Do not rebind the row beneath a finger during a queue gesture.

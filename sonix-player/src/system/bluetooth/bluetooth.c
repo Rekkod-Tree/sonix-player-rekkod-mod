@@ -1889,6 +1889,8 @@ static void refresh_audio_state(void) {
 		note_link_seen();
 	}
 	bool changed = sink != g_a2dp_connected || (sink && strcasecmp(g_a2dp_mac, mac) != 0);
+	if (changed)
+		g_pending_volume = -1;
 	g_a2dp_connected = sink;
 	snprintf(g_a2dp_mac, sizeof(g_a2dp_mac), "%s", sink ? mac : "");
 	if (sink) {
@@ -3788,6 +3790,11 @@ static void notification_cb(const char *message) {
 
 static bool take_job(job_t *out) {
 	if (queue_count == 0) {
+		// A full ring may defer the one coalesced volume intent, not lose it.
+		if (g_pending_volume >= 0 && g_enabled && g_a2dp_connected) {
+			*out = (job_t){.type = JOB_VOLUME};
+			return true;
+		}
 		return false;
 	}
 	*out = queue[queue_head];
@@ -3809,20 +3816,39 @@ static bool queue_has(job_type_t type) {
 	return false;
 }
 
+// Caller holds lock, so admission and visible intent can change together.
+static bool enqueue_job_locked(const job_t *job) {
+	bool duplicate = job->type == JOB_REFRESH && queue_has(JOB_REFRESH);
+	if (duplicate)
+		return true;
+	if (queue_count == JOB_QUEUE_LEN)
+		return false;
+	queue[(queue_head + queue_count) % JOB_QUEUE_LEN] = *job;
+	queue_count++;
+	pthread_cond_signal(&wake);
+	return true;
+}
+
+static void rejected_job(const job_t *job) {
+	fprintf(stderr, "bluetooth: job queue full (%d); refusing job type %d\n", JOB_QUEUE_LEN, (int)job->type);
+}
+
 static void post_job(const job_t *job) {
 	pthread_mutex_lock(&lock);
-	bool duplicate = job->type == JOB_REFRESH && queue_has(JOB_REFRESH);
-	bool queued = duplicate || queue_count < JOB_QUEUE_LEN;
-	if (!duplicate && queued) {
-		queue[(queue_head + queue_count) % JOB_QUEUE_LEN] = *job;
-		queue_count++;
-		pthread_cond_signal(&wake);
-	}
+	bool queued = enqueue_job_locked(job);
 	pthread_mutex_unlock(&lock);
+	if (!queued)
+		rejected_job(job);
+}
 
-	if (!queued) {
-		fprintf(stderr, "bluetooth: job queue full (%d); dropping a job of type %d\n", JOB_QUEUE_LEN, (int)job->type);
-	}
+static void post_op_job(const job_t *job) {
+	pthread_mutex_lock(&lock);
+	bool queued = enqueue_job_locked(job);
+	g_op = queued ? BT_OP_BUSY : BT_OP_FAILED;
+	g_op_name[0] = 0;
+	pthread_mutex_unlock(&lock);
+	if (!queued)
+		rejected_job(job);
 }
 
 // Stops bluealsa and starts it again with the current options, then asks the
@@ -4269,42 +4295,39 @@ bool bluetooth_get_enabled(void) {
 }
 
 static void set_enabled(bool on, bool remember) {
-	if (!worker_running) {
+	if (!worker_running)
 		return;
-	}
-
+	job_t job = {.type = JOB_POWER, .arg_int = on ? 1 : (remember ? -1 : 0)};
 	pthread_mutex_lock(&lock);
 	if (g_enabled == on) {
 		pthread_mutex_unlock(&lock);
 		return;
 	}
-	g_enabled = on;
-	g_busy = true;
 	if (!on) {
-		g_state = BT_STATE_OFF;
-		g_found_count = 0;
-		g_scanning = false;
-		g_serial++;
-
-		// Everything queued concerns a radio that is going off, and whatever the
-		// worker is waiting on no longer matters. Dropping the queue keeps the
-		// "turning off" notice from sitting there for as long as a pairing
-		// attempt takes.
-		queue_head = 0;
-		queue_count = 0;
-		// Renames waiting are kept: the "name changed" has already been said,
-		// and they go to bluez before the stack comes down (bring_stack_down).
+		// Off supersedes queued radio work, as before; admit it in this lock.
+		queue_head = queue_count = 0;
+		g_pending_volume = -1;
+	}
+	bool queued = enqueue_job_locked(&job);
+	if (queued) {
+		g_enabled = on;
+		g_busy = true;
+		if (!on) {
+			g_state = BT_STATE_OFF;
+			g_found_count = 0;
+			g_scanning = false;
+			g_serial++;
+		}
 	}
 	pthread_mutex_unlock(&lock);
-
+	if (!queued) {
+		rejected_job(&job);
+		return;
+	}
 	if (remember) {
 		config_set_int("wireless", "bluetooth", on ? 1 : 0);
 		config_save();
 	}
-
-	// The sign carries which kind of "off" this is: see do_power().
-	job_t job = {.type = JOB_POWER, .arg_int = on ? 1 : (remember ? -1 : 0)};
-	post_job(&job);
 }
 
 void bluetooth_set_enabled(bool on) { set_enabled(on, true); }
@@ -4413,19 +4436,15 @@ int bluetooth_get_found(bt_device_t *out, int max) {
 }
 
 void bluetooth_scan_start(void) {
+	job_t job = {.type = JOB_SCAN};
 	pthread_mutex_lock(&lock);
 	bool skip = g_scanning || !g_enabled || g_busy;
-	if (!skip) {
+	bool queued = !skip && enqueue_job_locked(&job);
+	if (queued)
 		g_scanning = true;
-	}
 	pthread_mutex_unlock(&lock);
-
-	if (skip) {
-		return;
-	}
-
-	job_t job = {.type = JOB_SCAN};
-	post_job(&job);
+	if (!skip && !queued)
+		rejected_job(&job);
 }
 
 void bluetooth_scan_stop(void) {
@@ -4452,14 +4471,11 @@ void bluetooth_refresh(void) {
 }
 
 static void post_device_job(job_type_t type, const char *mac) {
-	if (!mac || !mac[0]) {
+	if (!mac || !mac[0])
 		return;
-	}
-	set_op(BT_OP_BUSY, NULL);
-
 	job_t job = {.type = type};
 	snprintf(job.mac, sizeof(job.mac), "%s", mac);
-	post_job(&job);
+	post_op_job(&job);
 }
 
 void bluetooth_pair(const char *mac) { post_device_job(JOB_PAIR, mac); }
@@ -4867,22 +4883,16 @@ void bluetooth_set_receiver_profile(bool on) {
 }
 
 void bluetooth_set_codec(const char *codec) {
-	if (!codec || !codec[0]) {
+	if (!codec || !codec[0])
 		return;
-	}
-	// Sent, and written down against the device once it is accepted (see
-	// do_set_codec), so the same headphones come back on it next time.
-	set_op(BT_OP_BUSY, NULL);
-
 	job_t job = {.type = JOB_SET_CODEC};
 	snprintf(job.text, sizeof(job.text), "%s", codec);
-	post_job(&job);
+	post_op_job(&job);
 }
 
 void bluetooth_set_codec_auto(void) {
-	set_op(BT_OP_BUSY, NULL);
 	job_t job = {.type = JOB_SET_CODEC}; // empty text: forget the choice
-	post_job(&job);
+	post_op_job(&job);
 }
 
 bool bluetooth_codec_chosen(char *out, int size) {
@@ -4997,16 +5007,15 @@ void bluetooth_notify_volume(int percent) {
 	bool already_queued = g_pending_volume >= 0;
 	if (wanted) {
 		g_pending_volume = percent;
+		// One job takes the latest value. If the ring is full, take_job()
+		// services this retained intent after the queued work has drained.
+		if (!already_queued) {
+			job_t job = {.type = JOB_VOLUME};
+			enqueue_job_locked(&job);
+		}
+		pthread_cond_signal(&wake);
 	}
 	pthread_mutex_unlock(&lock);
-
-	// One job in flight is enough: it picks up whatever the latest value is when
-	// it runs, so holding the volume key costs one AVRCP write, not one per
-	// step.
-	if (wanted && !already_queued) {
-		job_t job = {.type = JOB_VOLUME};
-		post_job(&job);
-	}
 }
 
 bt_op_t bluetooth_take_op_result(char *name_out, int name_size) {

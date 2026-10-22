@@ -24,6 +24,8 @@ void main_menu_hide(home_item_t item);
 void main_menu_reset(void);
 void main_menu_reload(void);
 void main_menu_refresh(void);
+// Visible Home/More network subtitle, from the existing GUI radio poll.
+void main_menu_poll_network(void);
 void main_menu_open_settings(void);
 void main_menu_open_search(void);
 // A visible source switch on the three search input pages. UI thread only.

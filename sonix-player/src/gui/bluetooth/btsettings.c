@@ -338,6 +338,7 @@ static lv_timer_t *poll_timer;
 
 static uint32_t drawn_serial = 0xFFFFFFFFu;
 static bool drawn_enabled;
+static bool drawn_scanning;
 
 // The device a sheet is about. Copied, so the list can be rebuilt under it.
 static char menu_mac[BT_MAC_MAX];
@@ -1007,6 +1008,8 @@ static void rebuild_lists(void) {
 	lv_obj_clean(found_list);
 
 	bool on = bluetooth_get_enabled() && bluetooth_available();
+	bool scanning = bluetooth_scan_running();
+	drawn_scanning = scanning;
 	lv_obj_set_hidden(more_card, !on);
 	lv_obj_set_hidden(receiver_card, !on);
 	refresh_codec_cards();
@@ -1049,7 +1052,7 @@ static void rebuild_lists(void) {
 	// found something.
 	count = bluetooth_get_found(devices, BT_MAX_DEVICES);
 	if (count == 0) {
-		bool searching = bluetooth_scan_running();
+		bool searching = scanning;
 		lv_obj_set_hidden(found_label, !searching);
 		lv_obj_set_hidden(found_list, !searching);
 		if (searching) {
@@ -1145,8 +1148,9 @@ static void poll_cb(lv_timer_t *timer) {
 	int battery = bluetooth_headset_battery(NULL);
 	char summary[80] = "";
 	bluetooth_codec_summary(NULL, summary, sizeof(summary));
+	bool scanning = bluetooth_scan_running();
 	uint32_t serial = bluetooth_devices_serial();
-	if (serial != drawn_serial || on != drawn_enabled || battery != drawn_battery ||
+	if (serial != drawn_serial || on != drawn_enabled || scanning != drawn_scanning || battery != drawn_battery ||
 		strcmp(summary, drawn_summary) != 0) {
 		drawn_serial = serial;
 		drawn_enabled = on;
@@ -1169,7 +1173,7 @@ static void poll_cb(lv_timer_t *timer) {
 	}
 	if (scan_icon) {
 		lv_obj_set_style_image_opa(scan_icon,
-								   !ready ? LV_OPA_20 : (bluetooth_scan_running() ? LV_OPA_50 : LV_OPA_COVER), 0);
+								   !ready ? LV_OPA_20 : (scanning ? LV_OPA_50 : LV_OPA_COVER), 0);
 	}
 	sx_card_set_dim(receiver_card, !ready);
 

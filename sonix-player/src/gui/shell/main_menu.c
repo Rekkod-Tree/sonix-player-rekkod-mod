@@ -138,12 +138,28 @@ static void books_description(char *text, size_t size) {
 	else if (audiobookdb_count() > 0)
 		snprintf(text, size, tr("home_books_n"), audiobookdb_count());
 }
-static void network_description(char *text, size_t size) {
+static int drawn_network_state = -1;
+static int network_state(void) {
 	wifi_status_t wifi;
 	wifi_get_status(&wifi);
-	bt_device_t device;
-	const char *tag = wifi.state == WIFI_STATE_CONNECTED ? "home_wifi_connected" : bluetooth_connected_device(&device) ? "home_bt_connected" : "home_no_connections";
-	snprintf(text, size, "%s", tr(tag));
+	return wifi.state == WIFI_STATE_CONNECTED ? 1 : bluetooth_connected_device(NULL) ? 2 : 0;
+}
+static void network_description(char *text, size_t size) {
+	static const char *const tags[] = {"home_no_connections", "home_wifi_connected", "home_bt_connected"};
+	drawn_network_state = network_state();
+	snprintf(text, size, "%s", tr(tags[drawn_network_state]));
+}
+// Called by the existing standby-paused radio poll; no work for hidden grids.
+void main_menu_poll_network(void) {
+	lv_obj_t *screen = lv_screen_active();
+	if (!screen || (screen != main_menu_screen && screen != morepage_screen))
+		return;
+	int current = network_state();
+	if (current == drawn_network_state)
+		return;
+	// Update even if this particular grid does not contain the network tile.
+	drawn_network_state = current;
+	lv_obj_send_event(screen, LV_EVENT_REFRESH, NULL);
 }
 static void yandex_description(char *text, size_t size) { snprintf(text, size, "%s", tr("yandex")); }
 bool main_menu_get_entry(home_item_t item, grid_entry_t *out) {

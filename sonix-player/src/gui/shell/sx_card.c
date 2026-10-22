@@ -310,7 +310,7 @@ lv_obj_t *sx_card_title(lv_obj_t *card, const char *text) {
 		lv_obj_add_style(p->title, &sx_style_panel_text, 0);
 		lv_obj_move_to_index(p->title, 0);
 	}
-	lv_label_set_text(p->title, text ? text : "");
+	sx_set_text(p->title, text ? text : "");
 	return p->title;
 }
 
@@ -319,16 +319,21 @@ lv_obj_t *sx_card_subtitle(lv_obj_t *card, const char *text, bool mono) {
 	if (!p) {
 		return NULL;
 	}
-	if (!p->subtitle) {
+	bool created = !p->subtitle;
+	if (created) {
 		p->subtitle = lv_label_create(p->sw ? card : p->text);
 		lv_obj_set_width(p->subtitle, lv_pct(100));
 		lv_label_set_long_mode(p->subtitle, LV_LABEL_LONG_WRAP);
 	}
-	lv_obj_remove_style(p->subtitle, &sx_style_panel_text2, 0);
-	lv_obj_remove_style(p->subtitle, &sx_style_panel_action, 0);
-	lv_obj_add_style(p->subtitle, mono ? &sx_style_panel_action : &sx_style_panel_text2, 0);
-	lv_obj_set_style_text_font(p->subtitle, mono ? &font_ui_17 : &font_ui_22, 0);
-	lv_label_set_text(p->subtitle, text ? text : "");
+	const lv_font_t *font = mono ? &font_ui_17 : &font_ui_22;
+	// The two component modes keep their shared, theme-bound colour style.
+	if (created || lv_obj_get_style_text_font(p->subtitle, 0) != font) {
+		lv_obj_remove_style(p->subtitle, &sx_style_panel_text2, 0);
+		lv_obj_remove_style(p->subtitle, &sx_style_panel_action, 0);
+		lv_obj_add_style(p->subtitle, mono ? &sx_style_panel_action : &sx_style_panel_text2, 0);
+		lv_obj_set_style_text_font(p->subtitle, font, 0);
+	}
+	sx_set_text(p->subtitle, text ? text : "");
 	lv_obj_set_hidden(p->subtitle, !text || !text[0]);
 	return p->subtitle;
 }
@@ -347,7 +352,7 @@ lv_obj_t *sx_card_value(lv_obj_t *card, const char *text) {
 		// Before the chevron or the switch, if either is there already.
 		lv_obj_move_to_index(p->value, 1);
 	}
-	lv_label_set_text(p->value, text ? text : "");
+	sx_set_text(p->value, text ? text : "");
 	return p->value;
 }
 

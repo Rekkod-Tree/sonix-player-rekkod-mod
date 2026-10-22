@@ -11,6 +11,7 @@
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/nowplaying/player.h"
 #include "src/gui/shell/icons.h"
+#include "src/gui/shell/main_menu.h"
 #include "src/gui/shell/quickpanel.h"
 #include "src/gui/shell/sx_palette.h"
 #include "src/gui/shell/sx_tokens.h"
@@ -551,6 +552,7 @@ void topbar_set_library_check(topbar_library_t state) {
 static void radio_timer_cb(lv_timer_t *timer) {
 	(void)timer;
 	topbar_refresh_radios();
+	main_menu_poll_network();
 }
 
 // Playback callers also notify us when the source changes to or from AirPlay.
