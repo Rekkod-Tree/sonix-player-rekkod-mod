@@ -1,4 +1,5 @@
 #include "sx_palette.h"
+#include "artview.h"
 #include "src/system/image/albumtone.h"
 #include "theme.h"
 
@@ -27,6 +28,12 @@ static bool cfg_dark = true;
 static int cfg_accent = THEME_ACCENT_GRAPHITE;
 static lv_color_t cfg_preset;
 static bool cfg_tint;
+static int cfg_family, cfg_lamp;
+static bool cfg_force_color;
+static bool cfg_monochrome;
+static float play_placeholder_hue;
+static lv_color_t family_placeholder(float hue);
+static lv_color_t family_placeholder_for(float hue, float context_hue);
 
 // The playing track's tone, and an album page's while it is pushed.
 static float play_hue = DEFAULT_HUE;
@@ -151,7 +158,7 @@ static lv_color_t readable_accent(lv_color_t accent, lv_color_t surface, lv_colo
 	return c;
 }
 
-lv_color_t sx_placeholder_tone(float hue) {
+static lv_color_t placeholder_legacy(float hue) {
 	static const uint32_t colours[] = {
 		0x984F47, 0x866329, 0x5A7139, 0x36715D, 0x3B6483, 0x4E5F8A, 0x6C5286, 0x884E71,
 	};
@@ -159,21 +166,224 @@ lv_color_t sx_placeholder_tone(float hue) {
 	return sx_hex(colours[index]);
 }
 
+lv_color_t sx_placeholder_tone(float hue) {
+	lv_color_t color = cfg_family && !cfg_force_color ? family_placeholder(hue) : placeholder_legacy(hue);
+	return cfg_monochrome && !cfg_force_color ? sx_artview_gray_color(color) : color;
+}
+lv_color_t sx_placeholder_ink(lv_color_t background) {
+	if (!cfg_family && !cfg_monochrome)
+		return lv_color_white();
+	return contrast(lv_color_black(), background) > contrast(lv_color_white(), background) ? lv_color_black() : lv_color_white();
+}
+
 lv_color_t sx_placeholder_name(const char *name) { return sx_placeholder_tone(sx_palette_hue_of_name(name)); }
 
-lv_color_t sx_placeholder_file(const char *path, const char *album) {
+float sx_placeholder_file_hue(const char *path, const char *album) {
 	if (album && album[0])
-		return sx_placeholder_name(album);
+		return sx_palette_hue_of_name(album);
 	char folder[512];
 	snprintf(folder, sizeof(folder), "%s", path ? path : "");
 	char *slash = strrchr(folder, '/');
 	if (slash)
 		*slash = '\0';
 	const char *name = strrchr(folder, '/');
-	return sx_placeholder_name(name ? name + 1 : folder);
+	return sx_palette_hue_of_name(name ? name + 1 : folder);
+}
+lv_color_t sx_placeholder_file(const char *path, const char *album) { return sx_placeholder_tone(sx_placeholder_file_hue(path, album)); }
+
+// Additional families are opt-in. The original recompute path stays intact.
+enum { FAMILY_LCD = 1, FAMILY_CANVAS = 2 };
+typedef struct {
+	float level[2][5];
+	uint32_t fixed[2][5];
+	float tint, primary_chroma, hue, chroma, text_chroma, secondary;
+	uint32_t recommended[2];
+	unsigned flags;
+} family_t;
+static const family_t families[8] = {
+	{.level = {{.95, .99, .89, .20, .43}, {.19, .255, .32, .96, .76}}, .fixed = {{0xefefef, 0xffffff, 0xd6d6d6, 0x212121, 0x525252}, {0x101010, 0x212121, 0x313131, 0xf7f7f7, 0xb8b8b8}}, .tint = .018, .primary_chroma = .105},
+	{.level = {{1, .965, .88, .13, .36}, {0, .20, .29, .98, .80}}, .fixed = {{0xffffff, 0xf3f4f6, 0xdce0e5, 0x101319, 0x4a5058}, {0x000000, 0x101216, 0x252a30, 0xf9fbff, 0xb7bdc5}}, .tint = .045, .primary_chroma = .29, .hue = 255, .chroma = .29, .recommended = {0x005beb, 0x008cff}, .flags = FAMILY_CANVAS},
+	{.level = {{.81, .85, .73, .19, .35}, {.16, .22, .29, .87, .73}}, .tint = .055, .primary_chroma = .13, .chroma = .10, .text_chroma = .035, .flags = FAMILY_LCD},
+	{.level = {{.99, .99, .87, .10, .34}, {.045, .08, .17, .98, .79}}, .fixed = {{0xffffff, 0xffffff, 0xdedede, 0x101010, 0x525252}, {0x000000, 0x080808, 0x212121, 0xffffff, 0xb5b5b5}}, .tint = .012, .primary_chroma = .12},
+	{.level = {{.95, .99, .85, .16, .35}, {.10, .16, .24, .91, .77}}, .fixed = {{0xe9f0e7, 0xf6fbef, 0xcad8c6, 0x14331f, 0x3e6046}, {0x080f0a, 0x101a12, 0x1b2b1e, 0x6ce99b, 0x86bb96}}, .tint = .025, .primary_chroma = .22, .hue = 145, .chroma = .21, .text_chroma = .10, .secondary = 195},
+	{.level = {{.94, .99, .86, .15, .37}, {.10, .185, .28, .97, .80}}, .tint = .055, .primary_chroma = .27, .hue = 335, .chroma = .25, .secondary = 195},
+	{.level = {{.94, .99, .86, .15, .37}, {.10, .185, .28, .97, .80}}, .fixed = {{0xeee736, 0xf8f34d, 0xd4ce2a, 0x101a22, 0x414732}, {0x0b1018, 0x18212b, 0x263744, 0xe8e28c, 0xa2b7ba}}, .tint = .030, .primary_chroma = .24, .hue = 100, .chroma = .19, .secondary = 195, .recommended = {0x14212b, 0xeee736}},
+	{.level = {{.94, .99, .86, .15, .37}, {.10, .185, .28, .97, .80}}, .fixed = {{0xeee8e6, 0xfaf6f3, 0xddd0cc, 0x302129, 0x66525a}, {0x110e16, 0x211921, 0x34232b, 0xedc4bd, 0xba9ba0}}, .tint = .025, .primary_chroma = .22, .hue = 25, .chroma = .20, .secondary = 195, .recommended = {0x9f303f, 0xff7772}},
+};
+static const float lamp_hues[5] = {115, 80, 215, 0, 345};
+static const float lamp_chroma[5] = {.065, .085, .055, 0, .055};
+
+static lv_color_t quantized(lv_color_t c) {
+	unsigned r = (c.red * 31U + 127U) / 255U;
+	unsigned g = (c.green * 63U + 127U) / 255U;
+	unsigned b = (c.blue * 31U + 127U) / 255U;
+	return lv_color_make((r << 3) | (r >> 2), (g << 2) | (g >> 4), (b << 3) | (b >> 2));
+}
+static lv_color_t family_hex(uint32_t c) { return quantized(sx_hex(c)); }
+static lv_color_t family_mix(lv_color_t a, lv_color_t b, unsigned pct) { return quantized(sx_mix(a, b, pct)); }
+static float minimum_contrast(lv_color_t ink, const lv_color_t *bg, int n) {
+	float c = 100;
+	for (int i = 0; i < n; i++)
+		c = fminf(c, contrast(ink, bg[i]));
+	return c;
+}
+// Eight bisections bound the work. Compare the final quantized display colors.
+static lv_color_t family_readable(lv_color_t candidate, const lv_color_t *bg, int n, float target) {
+	candidate = quantized(candidate);
+	if (minimum_contrast(candidate, bg, n) >= target)
+		return candidate;
+	lv_color_t black = lv_color_black(), white = lv_color_white();
+	lv_color_t end = minimum_contrast(black, bg, n) > minimum_contrast(white, bg, n) ? black : white;
+	int low = 0, high = 100;
+	for (int i = 0; i < 8; i++) {
+		int middle = (low + high) / 2;
+		if (minimum_contrast(family_mix(end, candidate, middle), bg, n) >= target)
+			high = middle;
+		else
+			low = middle + 1;
+	}
+	return family_mix(end, candidate, high);
+}
+static lv_color_t family_ink(lv_color_t background) { return contrast(lv_color_black(), background) > contrast(lv_color_white(), background) ? lv_color_black() : lv_color_white(); }
+static void family_channels(float hue, float chroma, lv_color_t out[5]) {
+	const family_t *f = &families[cfg_family - 1];
+	int d = cfg_dark;
+	float scale = fminf(1, fmaxf(0, chroma / REFERENCE_CHROMA));
+	float base_h = cfg_tint ? hue : f->flags & FAMILY_LCD ? lamp_hues[cfg_lamp] : cfg_family == 6 ? 295 : 0;
+	float base_c = cfg_tint ? f->tint * scale : f->flags & FAMILY_LCD ? lamp_chroma[cfg_lamp] : cfg_family == 6 ? .04 : 0;
+	bool fixed = f->fixed[d][1] != 0;
+	for (int i = 0; i < 5; i++) {
+		out[i] = fixed ? family_hex(f->fixed[d][i]) : sx_oklch(f->level[d][i], i < 3 ? base_c : f->text_chroma, i < 3 ? base_h : f->flags & FAMILY_LCD ? base_h : f->hue);
+		if (fixed && cfg_tint && i < 3 && (!(f->flags & FAMILY_CANVAS) || i > 0))
+			out[i] = family_mix(sx_oklch(f->level[d][i], base_c, base_h), out[i], 32);
+	}
+	out[3] = family_readable(out[3], out, 3, 4.6f);
+	if (f->secondary)
+		out[4] = sx_oklch(cfg_dark ? .79f : .36f, .035f, f->secondary);
+	out[4] = family_readable(out[4], out, 3, 4.6f);
+}
+static lv_color_t family_primary(float hue, float chroma) {
+	const family_t *f = &families[cfg_family - 1];
+	if (cfg_accent == THEME_ACCENT_PALETTE) {
+		if (f->recommended[cfg_dark])
+			return family_hex(f->recommended[cfg_dark]);
+		float h = f->flags & FAMILY_LCD ? lamp_hues[cfg_lamp] : f->hue;
+		float c = f->flags & FAMILY_LCD && lamp_chroma[cfg_lamp] == 0 ? 0 : f->chroma;
+		return sx_oklch(cfg_dark ? .76f : .46f, c, h);
+	}
+	if (cfg_accent == THEME_ACCENT_COVER)
+		return sx_oklch(cfg_dark ? .76f : .46f, f->primary_chroma * fminf(1, fmaxf(0, chroma / REFERENCE_CHROMA)), hue);
+	return quantized(cfg_preset);
+}
+static void family_recompute(void) {
+	float h = pushed ? pushed_hue : play_hue, c = pushed ? pushed_chroma : play_chroma;
+	lv_color_t colors[5], playing[5];
+	family_channels(h, c, colors);
+	family_channels(play_hue, play_chroma, playing);
+	pal.dark = cfg_dark;
+	pal.tinted = cfg_tint;
+	pal.accent_from_cover = cfg_accent == THEME_ACCENT_COVER;
+	pal.hue = h;
+	pal.play_hue = play_hue;
+	pal.bg = colors[0];
+	pal.surface = colors[1];
+	pal.press = colors[2];
+	pal.text = colors[3];
+	pal.text2 = colors[4];
+	pal.accent = family_primary(h, c);
+	pal.on_accent = family_ink(pal.accent);
+	pal.active = family_mix(pal.accent, pal.surface, 16);
+	lv_color_t text_bgs[] = {pal.bg, pal.surface, pal.press, pal.active};
+	pal.text = family_readable(pal.text, text_bgs, 4, 4.6f);
+	pal.text2 = family_readable(pal.text2, text_bgs, 4, 4.6f);
+	pal.accent_text = family_readable(pal.accent, text_bgs, 4, 4.6f);
+	pal.panel = pal.surface;
+	pal.panel_press = pal.press;
+	pal.panel_text = pal.text;
+	pal.panel_text2 = pal.text2;
+	if (cfg_family == 7 && !cfg_dark) {
+		pal.panel = family_hex(0x1b2730);
+		pal.panel_press = family_hex(0x30404b);
+		if (cfg_tint) {
+			pal.panel = family_mix(sx_oklch(.28, .03, h), pal.panel, 25);
+			pal.panel_press = family_mix(sx_oklch(.36, .03, h), pal.panel_press, 25);
+		}
+		pal.panel_text = family_hex(0xeee8b1);
+		pal.panel_text2 = family_hex(0xb7c1c3);
+	}
+	lv_color_t panel_bgs[] = {pal.panel, pal.panel_press};
+	pal.panel_text = family_readable(pal.panel_text, panel_bgs, 2, 4.6f);
+	pal.panel_text2 = family_readable(pal.panel_text2, panel_bgs, 2, 4.6f);
+	pal.panel_accent = family_readable(pal.accent, panel_bgs, 2, 4.6f);
+	pal.panel_on_accent = family_ink(pal.panel_accent);
+	pal.panel_active = family_mix(pal.panel_accent, pal.panel, 16);
+	lv_color_t panel_states[] = {pal.panel, pal.panel_press, pal.panel_active};
+	pal.panel_text = family_readable(pal.panel_text, panel_states, 3, 4.6f);
+	pal.panel_text2 = family_readable(pal.panel_text2, panel_states, 3, 4.6f);
+	pal.panel_action = family_readable(pal.accent, panel_states, 3, 4.6f);
+	pal.swipe_end = family_mix(pal.accent, pal.surface, 25);
+	pal.cover_tone = sx_placeholder_tone(h);
+	pal.star_on = pal.accent_text;
+	pal.hairline = family_mix(pal.text, pal.surface, 25);
+	pal.hairline_opa = LV_OPA_COVER;
+	pal.np_bg = playing[0];
+	pal.np_text2 = playing[4];
+	pal.mini_bg = playing[1];
+	pal.mini_ink = playing[3];
+	pal.mini_text2 = playing[4];
+	if (cfg_family == 7 && !cfg_dark) {
+		pal.mini_bg = family_hex(0x1b2730);
+		if (cfg_tint)
+			pal.mini_bg = family_mix(sx_oklch(.28, .03, play_hue), pal.mini_bg, 25);
+		pal.mini_ink = family_readable(family_hex(0xeee8b1), &pal.mini_bg, 1, 4.6f);
+		pal.mini_text2 = family_readable(sx_oklch(.79, .035, 195), &pal.mini_bg, 1, 4.6f);
+	}
+	pal.np_accent = family_readable(family_primary(play_hue, play_chroma), playing, 2, 4.6f);
+	lv_color_t white = lv_color_white();
+	pal.np_ink = family_readable(family_primary(play_hue, play_chroma), &white, 1, 4.6f);
+	pal.album_text = pal.text;
+	float placeholder_hue = play_placeholder_known ? play_placeholder_hue : DEFAULT_HUE;
+	pal.mini_cover_tone = cfg_force_color ? placeholder_legacy(placeholder_hue) : family_placeholder_for(placeholder_hue, play_hue);
+	if (cfg_monochrome && !cfg_force_color)
+		pal.mini_cover_tone = sx_artview_gray_color(pal.mini_cover_tone);
+	for (int i = 0; i < 3; i++)
+		pal.album_grad[i] = pal.bg;
+	chroma_scale = scale_for(c);
 }
 
+void sx_palette_options(int family, int lamp, bool force_color, bool monochrome) {
+	cfg_monochrome = monochrome;
+	cfg_family = family >= 0 && family <= 8 ? family : 0;
+	cfg_lamp = lamp >= 0 && lamp < 5 ? lamp : 0;
+	cfg_force_color = force_color;
+}
+
+static lv_color_t family_placeholder_for(float hue, float context_hue) {
+	int bucket = ((int)hue % 360 + 360) % 360 / 45;
+	const family_t *f = &families[cfg_family - 1];
+	float h = hue, c = .045f;
+	if (cfg_family == 1 || cfg_family == 4)
+		c = 0;
+	else if (f->flags & FAMILY_LCD) {
+		h = cfg_tint ? context_hue : lamp_hues[cfg_lamp];
+		c = cfg_tint ? f->tint : lamp_chroma[cfg_lamp];
+	} else if (cfg_family == 5)
+		h = 145 + bucket * 7;
+	else if (cfg_family == 6)
+		h = (float[]){285, 310, 195, 335}[bucket % 4];
+	else if (cfg_family == 7)
+		h = (float[]){100, 195, 240, 75}[bucket % 4];
+	else if (cfg_family == 8)
+		h = (float[]){20, 345, 195, 280}[bucket % 4];
+	return sx_oklch((cfg_dark ? .34f : .84f) + (bucket % 4) * .025f, c, h);
+}
+static lv_color_t family_placeholder(float hue) { return family_placeholder_for(hue, pal.hue); }
+
 static void recompute(void) {
+	if (cfg_family) {
+		family_recompute();
+		return;
+	}
 	float hue = pushed ? pushed_hue : play_hue;
 	float page_scale = scale_for(pushed ? pushed_chroma : play_chroma);
 	float play_scale = scale_for(play_chroma);
@@ -249,11 +459,21 @@ static void recompute(void) {
 	lv_color_t play_surface = cfg_tint && cfg_dark ? sx_tone(SX_T_D_SURFACE, play_hue) : pal.surface;
 	pal.np_accent = cfg_accent == THEME_ACCENT_GRAPHITE ? pal.accent_text : readable_accent(pal.mini_bg, play_surface, pal.text);
 	pal.np_ink = pal.mini_bg;
-	pal.mini_cover_tone = play_placeholder_known ? play_placeholder : sx_placeholder_tone(DEFAULT_HUE);
+	pal.mini_cover_tone = play_placeholder_known ? (cfg_monochrome && !cfg_force_color ? sx_artview_gray_color(play_placeholder) : play_placeholder) : sx_placeholder_tone(DEFAULT_HUE);
 	if (!cfg_tint) {
 		pal.album_grad[0] = pal.album_grad[1] = pal.album_grad[2] = pal.bg;
 	}
 
+	pal.panel = pal.surface;
+	pal.panel_press = pal.press;
+	pal.panel_text = pal.text;
+	pal.panel_text2 = pal.text2;
+	pal.panel_accent = pal.accent;
+	pal.panel_on_accent = pal.on_accent;
+	pal.panel_active = pal.active;
+	pal.panel_action = pal.accent_text;
+	pal.album_text = pal.tinted ? lv_color_white() : pal.text;
+	pal.mini_text2 = sx_mix(pal.mini_ink, pal.mini_bg, 85);
 	// sx_tone() as called from outside works at the page's scale.
 	chroma_scale = page_scale;
 }
@@ -336,7 +556,8 @@ static bool default_tone(const char *track_path, float *hue, float *chroma) {
 void sx_palette_set_tone_provider(sx_tone_provider_t provider) { tone_provider = provider; }
 
 void sx_palette_track_changed(const char *track_path, const char *name) {
-	play_placeholder = sx_placeholder_file(track_path, name);
+	play_placeholder_hue = sx_placeholder_file_hue(track_path, name);
+	play_placeholder = placeholder_legacy(play_placeholder_hue);
 	play_placeholder_known = true;
 	float hue = DEFAULT_HUE;
 	float chroma = REFERENCE_CHROMA;
@@ -537,4 +758,22 @@ void sx_gradient_paint(lv_obj_t *obj, lv_draw_buf_t *const *slot) {
 	if (obj) {
 		lv_obj_add_event_cb(obj, gradient_paint_cb, LV_EVENT_DRAW_MAIN, (void *)slot);
 	}
+}
+
+lv_color_t sx_palette_recommended_accent(void) {
+	if (!cfg_family)
+		return sx_hex(cfg_dark ? SX_D_ACCENT : SX_L_ACCENT);
+	const family_t *f = &families[cfg_family - 1];
+	if (f->recommended[cfg_dark])
+		return family_hex(f->recommended[cfg_dark]);
+	float h = f->flags & FAMILY_LCD ? lamp_hues[cfg_lamp] : f->hue;
+	float c = f->flags & FAMILY_LCD && lamp_chroma[cfg_lamp] == 0 ? 0 : f->chroma;
+	return sx_oklch(cfg_dark ? .76f : .46f, c, h);
+}
+
+lv_color_t sx_placeholder_category(float hue) {
+	if (cfg_family || cfg_force_color)
+		return sx_placeholder_tone(hue);
+	lv_color_t color = sx_hex(SX_CATEGORY_BG);
+	return cfg_monochrome ? sx_artview_gray_color(color) : color;
 }

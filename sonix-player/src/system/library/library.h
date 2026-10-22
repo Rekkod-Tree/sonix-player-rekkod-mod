@@ -733,17 +733,66 @@ bool library_playlist_rename(const char *name, const char *new_name);
 // Appends a row, creating the playlist if it is not there.
 bool library_playlist_append(const char *name, const library_playlist_row_t *row);
 
-// Appending many, one at a time, under one transaction: an import writes
-// hundreds of rows and a commit each would be hundreds of card writes, while an
-// array of them all would be the megabytes described above.
-//
-// begin() creates the playlist if it is not there. Every row() that returns
-// false has left the writer failed, and end() then rolls the whole thing back;
-// end() also rolls back when `keep` is false. The writer is freed either way.
+// Compatibility append writer for callers with rows already prepared. Import
+// readers use the bounded stage API below, so metadata lookup never leaves a
+// long transaction on this shared connection.
+// begin() rejects a foreign transaction before any table mutation and creates
+// the playlist if missing. The caller must serialize all other SQL on this
+// connection between begin() and end(). Under that contract, a failed row or
+// keep=false rolls back the writer transaction. This compatibility API is not
+// a transaction arbiter: a foreign COMMIT followed by BEGIN in the same database
+// epoch cannot be distinguished. General callers must use the bounded stage API.
+// A revoked/closed database rejects subsequent rows/end without touching a newer
+// database. The caller releases the writer with end().
 typedef struct library_playlist_writer library_playlist_writer_t;
 library_playlist_writer_t *library_playlist_write_begin(const char *name);
 bool library_playlist_write_row(library_playlist_writer_t *writer, const library_playlist_row_t *row);
 bool library_playlist_write_end(library_playlist_writer_t *writer, bool keep);
+
+// Card/database identity, independent of a rescan or a playlist edit. Zero
+// without an open index. Callers must not treat a mount-path string as identity.
+unsigned library_database_epoch(void);
+
+// GUI capture copies only an immutable handle's RAM identity/row IDs. It does
+// not wait for db_lock or perform SQL. Resolution is worker-only and validates
+// both the database and source generation while holding the index lock.
+typedef struct {
+	library_index_spec_t spec;
+	unsigned generation, database_epoch;
+} library_export_source_t;
+// Produced only by a successful publish under the database owner lock.
+// It certifies that a different playlist table changed, not this source.
+typedef struct {
+	bool valid;
+	library_export_source_t source;
+	unsigned new_generation;
+} library_export_receipt_t;
+bool library_index_export_source(const library_index_t *index, library_export_source_t *out);
+bool library_index_export_ack(library_index_t *index, const library_export_receipt_t *receipt);
+bool library_index_export_id(const library_index_t *index, int position, int32_t *row_id);
+bool library_export_paths(const library_export_source_t *source, const int32_t *row_ids, int count, char paths[][512]);
+
+// Bounded staging for a background queue/import writer. No statement, mutex or
+// transaction is retained between calls. A changed database rejects every call.
+// Stage rows are hidden from the playlist picker until one atomic publish.
+#define LIBRARY_PLAYLIST_STAGE_BATCH 16
+// Import-only heap buffer; never used by the live GUI queue capture.
+#define LIBRARY_PLAYLIST_IMPORT_BATCH 256
+typedef struct library_playlist_stage library_playlist_stage_t;
+typedef enum { LIBRARY_PLAYLIST_APPEND, LIBRARY_PLAYLIST_CREATE, LIBRARY_PLAYLIST_REPLACE } library_playlist_publish_t;
+library_playlist_stage_t *library_playlist_stage_begin(unsigned database_epoch, const library_export_source_t *source);
+bool library_playlist_stage_rows(library_playlist_stage_t *stage, const library_playlist_row_t *rows, int count);
+// Capture epoch/revision before import parsing. Any intervening playlist edit
+// rejects staging/publication; cleanup still owns only this stage/epoch.
+library_playlist_stage_t *library_playlist_stage_begin_import(unsigned database_epoch, unsigned namespace_revision);
+bool library_playlist_stage_import_rows(library_playlist_stage_t *stage, const library_playlist_row_t *rows, int count);
+bool library_playlist_stage_publish(library_playlist_stage_t *stage, const char *name, library_playlist_publish_t mode, const library_export_source_t *source);
+bool library_playlist_stage_publish_receipt(library_playlist_stage_t *stage, const char *name, library_playlist_publish_t mode, const library_export_source_t *source, library_export_receipt_t *receipt);
+// Consumes stage on every path; never cleans up a newer database/job.
+void library_playlist_stage_discard(library_playlist_stage_t *stage);
+// Activity policy can keep shutdown/MEM off during an owned stage without
+// keeping the display lit or waiting for db_lock.
+bool library_playlist_stage_busy(void);
 
 // The same, for a caller that already holds the rows. Only for a handful of
 // them: see the note on the size of one.
@@ -788,6 +837,8 @@ int library_playlist_count(const char *name);
 // already been taken into the index. See playlists_init().
 bool library_playlists_migrated(void);
 void library_playlists_set_migrated(void);
+// Mark only the captured card/index, outside any foreign transaction.
+bool library_playlists_set_migrated_at(unsigned database_epoch);
 
 // A remembered track count for a playlist held as an .m3u file, where counting
 // means one card lookup per entry -- seconds of blocked interface on a list of

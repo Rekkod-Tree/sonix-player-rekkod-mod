@@ -1,4 +1,5 @@
 #include "audiobooks.h"
+#include "src/gui/shell/artview.h"
 
 #include <dirent.h>
 #include <stdint.h>
@@ -347,6 +348,7 @@ static void row_show_plaque_as(row_t *row, const char *name, bool with_letter) {
 		}
 	}
 	sx_row_set_letter(row->obj, letter, sx_placeholder_name(name), false);
+	sx_row_set_content(row->obj, sx_palette_hue_of_name(name), false, false, 0);
 }
 
 static void row_show_plaque(row_t *row, const char *name) { row_show_plaque_as(row, name, true); }
@@ -358,7 +360,7 @@ static void row_drop_thumb(row_t *row) {
 		// Stop pointing at the pixels before they go.
 		winrow_t *w = NULL;
 		row_show_plaque(row, row_at(row->owner, row->index, &w) ? w->name : "");
-		cover_free(&row->thumb);
+		sx_artview_release_cover(&row->thumb);
 		row->has_thumb = false;
 	}
 	row->thumb_requested = false;
@@ -471,6 +473,7 @@ static void thumbs_update(booklist_t *bl) {
 			row->has_thumb = true;
 			row->thumb_settled = true;
 			sx_row_set_thumb(row->obj, &row->thumb.dsc, sx_placeholder_name(w->name));
+			sx_row_set_content(row->obj, sx_palette_hue_of_name(w->name), false, true, row->thumb.display_generation);
 		} else if (finished) {
 			row->thumb_settled = true; // no jacket in this one; the plaque stays
 		} else {
@@ -936,6 +939,7 @@ static void name_row_bind(name_row_t *row, int index) {
 		letter[i] = name[i];
 	}
 	sx_row_set_letter(row->obj, letter, sx_placeholder_name(name), names_kind == LIST_AUTHORS);
+	sx_row_set_content(row->obj, sx_palette_hue_of_name(name), false, false, 0);
 }
 
 static void names_window_update(void) {

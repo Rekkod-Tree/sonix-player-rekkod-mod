@@ -1331,20 +1331,23 @@ static void home_layout_states(void) {
 		device_state_get(&state);
 		assert(!strcmp(state.current_file, getenv("SONIX_UI_TEST_TRACK")));
 		assert(!rename(moved, book));
+		sx_toast_dismiss();
 		audiobookdb_mark_finished(book);
 		bookresume_play();
-		assert(sx_sheet_is_open());
-		assert(find_label(lv_layer_top(), tr("home_resume_book")));
-		capture("home-finished-book-choice");
-		sx_sheet_close();
-		device_state_get(&state);
-		assert(!strcmp(state.current_file, getenv("SONIX_UI_TEST_TRACK")));
-		main_menu_reset();
-		assert(config_get_copy("home", "resume_book", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE)[0]);
-		main_menu_open_search();
+		assert(!sx_sheet_is_open());
+		capture("home-finished-book-resume-requested");
 		break;
 	}
 	case 16: {
+		device_state_t state;
+		device_state_get(&state);
+		assert(!strcmp(state.current_file, book));
+		assert(state.status == AUDIO_STATUS_PLAYING && state.progress_current_secs >= 16);
+		assert(!sx_sheet_is_open());
+		capture("home-finished-book-resumed");
+		main_menu_reset();
+		assert(config_get_copy("home", "resume_book", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE)[0]);
+		main_menu_open_search();
 		assert(sx_sheet_is_open());
 		lv_obj_t *scope = find_label(lv_layer_top(), tr("home_search_card"));
 		assert(scope);
@@ -1360,7 +1363,13 @@ static void home_layout_states(void) {
 	case 18: {
 		lv_obj_t *name = find_label(hometiles_screen, tr("settings"));
 		assert(name);
-		lv_obj_send_event(lv_obj_get_parent(name), LV_EVENT_CLICKED, NULL);
+		lv_obj_update_layout(hometiles_screen);
+		lv_area_t area;
+		lv_obj_get_coords(name, &area);
+		int x = (area.x1 + area.x2) / 2;
+		int y = (area.y1 + area.y2) / 2;
+		input(x, y, true);
+		input(x, y, false);
 		break;
 	}
 	case 19: {
@@ -1444,8 +1453,20 @@ static void home_layout_states(void) {
 #include "graphite_sleep_wait.inc"
 #include "graphite_catalog.inc"
 #include "graphite_spotify.inc"
+#include "graphite_queue_export.inc"
+#include "graphite_playlist_roles.inc"
+#include "graphite_playlist_content.inc"
+#include "graphite_import_mini.inc"
+#include "graphite_caret_park.inc"
+#include "graphite_search_scope.inc"
 
 static void run(lv_timer_t *timer) {
+	if (getenv("SONIX_UI_TEST_PLAYLIST_CONTENT")) { playlist_content_states(timer); return; }
+	if (getenv("SONIX_UI_TEST_IMPORT_MINI")) { import_mini_states(); return; }
+	if (getenv("SONIX_UI_TEST_CARET_PARK")) { caret_park_states(timer); return; }
+	if (getenv("SONIX_UI_TEST_SEARCH_SCOPE")) { search_scope_states(); return; }
+	if (getenv("SONIX_UI_TEST_QUEUE_EXPORT")) { queue_export_states(); return; }
+	if (getenv("SONIX_UI_TEST_PLAYLIST_ROLES")) { playlist_roles_states(); return; }
 	if (getenv("SONIX_UI_TEST_FEEDBACK")) { feedback_states(); return; }
 	if (getenv("SONIX_UI_TEST_SPOTIFY")) { spotify_states(); return; }
 	if (getenv("SONIX_UI_TEST_CATALOG")) { catalog_states(); return; }

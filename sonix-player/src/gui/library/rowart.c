@@ -1,4 +1,6 @@
 #include "rowart.h"
+#include "src/gui/shell/artview.h"
+#include "src/gui/shell/sx_row.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,6 +23,7 @@ void rowart_bind_id(rowart_t *art, int64_t album_id, const char *title) {
 		art->settled = false;
 		art->revision = 0;
 	}
+	art->identity_hue = sx_palette_hue_of_name(title);
 	art->tone = sx_placeholder_name(title);
 	art->tone_known = true;
 	if (album_id == 0) {
@@ -36,7 +39,12 @@ void rowart_bind(rowart_t *art, const char *album_value) {
 	rowart_bind_id(art, album_value && album_value[0] ? covertone_album_id(album_value) : 0, title);
 }
 
-lv_color_t rowart_tone(const rowart_t *art) { return art->tone; }
+lv_color_t rowart_tone(const rowart_t *art) { return art->tone_known ? sx_placeholder_tone(art->identity_hue) : art->tone; }
+void rowart_apply(rowart_t *art, lv_obj_t *row) {
+	const lv_image_dsc_t *image = rowart_picture(art);
+	sx_row_set_thumb(row, image, rowart_tone(art));
+	sx_row_set_content(row, art->identity_hue, false, image != NULL, art->display_generation);
+}
 
 const lv_image_dsc_t *rowart_picture(const rowart_t *art) { return art->has_picture ? &art->dsc : NULL; }
 
@@ -62,6 +70,7 @@ bool rowart_load(rowart_t *art) {
 	}
 	if (covertone_thumb(art->album_id, COVERTONE_THUMB_SMALL, &art->dsc, art->buf,
 						COVERTONE_THUMB_BYTES(COVERTONE_THUMB_SMALL))) {
+		art->display_generation = cover_new_display_generation();
 		art->has_picture = true;
 		art->settled = true;
 		return true;
@@ -77,6 +86,7 @@ bool rowart_load(rowart_t *art) {
 }
 
 void rowart_free(rowart_t *art) {
+	sx_artview_forget_pixels(art->buf, art->display_generation);
 	free(art->buf);
 	memset(art, 0, sizeof(*art));
 }

@@ -21,6 +21,8 @@ extern lv_style_t sx_style_press;	   // bg: under a finger (add with LV_STATE_PR
 extern lv_style_t sx_style_active;	   // bg: 16 % accent in surface, "on now"
 extern lv_style_t sx_style_text;	   // text: primary
 extern lv_style_t sx_style_text2;	   // text: secondary
+// Streaming search hints; the original family keeps the LVGL default.
+extern lv_style_t sx_style_search_placeholder;
 extern lv_style_t sx_style_album_text; // theme text, or white on the optional album tint
 extern lv_style_t sx_style_album_icon;
 extern lv_style_t sx_style_text_accent; // text: the accent
@@ -41,6 +43,17 @@ extern lv_style_t sx_style_star_on;	   // image recolour: a set star
 // No border, no shadow, no padding, no radius, transparent, no scrollbar: the
 // starting point for every plain container a component builds.
 extern lv_style_t sx_style_flat;
+
+extern lv_style_t sx_style_panel;
+extern lv_style_t sx_style_panel_press;
+extern lv_style_t sx_style_panel_text;
+extern lv_style_t sx_style_panel_text2;
+extern lv_style_t sx_style_panel_action;
+extern lv_style_t sx_style_panel_icon;
+extern lv_style_t sx_style_panel_icon_action;
+extern lv_style_t sx_style_panel_accent;
+extern lv_style_t sx_style_panel_accent_press;
+extern lv_style_t sx_style_panel_active;
 
 void sx_styles_init(void);
 void sx_styles_apply(void);

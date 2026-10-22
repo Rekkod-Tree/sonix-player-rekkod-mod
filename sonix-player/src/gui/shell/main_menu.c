@@ -15,6 +15,9 @@
 #include "src/gui/streaming/yandexpage.h"
 #include "switcher.h"
 #include "sx_sheet.h"
+#include "settingsrow.h"
+#include "sx_styles.h"
+#include "touch.h"
 #include "toast.h"
 #include <stdint.h>
 #include <stdio.h>
@@ -35,6 +38,8 @@ static lv_obj_t *tile_grid;
 static home_item_t order[HOME_CUSTOM_SLOTS];
 static int order_n;
 static bool loaded;
+// UI-thread-only preference for this process; no configuration writes.
+static int last_search_scope = -1;
 static const char *ids[] = {"music", "streaming", "networks", "audiobooks", "settings", "continue_book", "tidal", "qobuz", "radio", "podcasts", "subsonic", "yandex", "zvuk", "music_all", "music_albums", "music_artists", "music_album_artists", "music_genres", "music_years", "music_favourites", "music_most_played", "music_recent_added", "music_recent_played", "music_playlists", "music_browse", "search", "files", "yandex_wave", "yandex_liked", "spotify"};
 static const char *tags[] = {"music", "streaming", "wireless", "audiobooks", "settings", "home_resume_book", "tidal", "qobuz", "radio", "podcasts", "subsonic", "yandex", "zvuk", "music_all_tracks", "albums", "artists", "music_album_artists", "music_genres", "music_year", "favourites", "music_most_played", "music_recently_added", "music_recently_played", "playlists", "music_browse", "home_search", "file_explorer", "yandex_my_wave", "yandex_liked", "spotify"};
 static const lv_image_dsc_t *icons[] = {&icon_menu_music, &icon_menu_streaming, &icon_menu_wireless, &icon_menu_audiobooks, &icon_menu_settings, &icon_menu_audiobooks};
@@ -313,6 +318,11 @@ void main_menu_init(gui_config_t *cfg) {
 
 static void search_scope_action(void *user) {
 	home_item_t source = (home_item_t)(intptr_t)user;
+	if (source != HOME_MUSIC && source != HOME_YANDEX && source != HOME_ZVUK)
+		return;
+	if (source != HOME_MUSIC && !main_menu_available(source))
+		return;
+	last_search_scope = source;
 	if (source == HOME_YANDEX)
 		yandexpage_search_open();
 #ifdef SONIX_ZVUK
@@ -322,7 +332,7 @@ static void search_scope_action(void *user) {
 	else
 		search_open();
 }
-void main_menu_open_search(void) {
+static void search_scope_choose(void) {
 	gui_init_rest();
 	sx_sheet_item_t items[3] = {{.label = tr("home_search_card"), .icon = &icon_menu_music, .action = search_scope_action, .user = (void *)(intptr_t)HOME_MUSIC}};
 	int n = 1;
@@ -333,4 +343,62 @@ void main_menu_open_search(void) {
 		items[n++] = (sx_sheet_item_t){.label = tr("zvuk"), .icon = main_menu_icon(HOME_ZVUK), .action = search_scope_action, .user = (void *)(intptr_t)HOME_ZVUK};
 #endif
 	sx_sheet_menu(tr("home_search"), NULL, items, n);
+}
+
+void main_menu_open_search(void) {
+	gui_init_rest();
+	if (last_search_scope == HOME_MUSIC ||
+		(last_search_scope >= 0 && main_menu_available((home_item_t)last_search_scope))) {
+		search_scope_action((void *)(intptr_t)last_search_scope);
+		return;
+	}
+	search_scope_choose();
+}
+
+static const char *search_scope_tag(home_item_t source) {
+	return source == HOME_YANDEX ? "yandex" : source == HOME_ZVUK ? "zvuk" : "home_search_card";
+}
+
+static void search_scope_header_click(lv_event_t *e) {
+	(void)e;
+	if (!switcher_back_drag_active())
+		search_scope_choose();
+}
+
+static void search_scope_chevron_place(lv_event_t *e) {
+	lv_obj_t *title = lv_event_get_target(e);
+	lv_obj_t *arrow = lv_event_get_user_data(e);
+	lv_point_t text_size;
+	lv_text_get_size(&text_size, lv_label_get_text(title), lv_obj_get_style_text_font(title, 0),
+		lv_obj_get_style_text_letter_space(title, 0), 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+	int max_x = lv_obj_get_width(title) - (int)icon_chevron_down.header.w;
+	int x = text_size.x + 8;
+	if (x > max_x)
+		x = max_x;
+	lv_obj_set_pos(arrow, x > 0 ? x : 0,
+		(lv_obj_get_height(title) - (int)icon_chevron_down.header.h) / 2);
+}
+
+static void search_scope_loaded(lv_event_t *e) {
+	lv_obj_t *title = lv_event_get_user_data(e);
+	home_item_t source = (home_item_t)(intptr_t)lv_obj_get_user_data(title);
+	last_search_scope = source;
+	lv_label_set_text(title, tr(search_scope_tag(source)));
+	lv_obj_send_event(title, LV_EVENT_SIZE_CHANGED, NULL);
+}
+
+void main_menu_search_header(lv_obj_t *screen, gui_config_t *cfg, home_item_t source) {
+	lv_obj_t *title = settingsrow_title(screen, cfg, search_scope_tag(source));
+	lv_obj_set_user_data(title, (void *)(intptr_t)source);
+	lv_obj_set_style_pad_right(title, 36, 0);
+	lv_obj_set_clickable(title, true);
+	// The full heading is a normal fingertip-sized control, not a hold action.
+	touch_pad(title, 0, 0, 20, 20);
+	lv_obj_add_event_cb(title, search_scope_header_click, LV_EVENT_SHORT_CLICKED, NULL);
+	lv_obj_t *arrow = lv_image_create(title);
+	lv_image_set_src(arrow, &icon_chevron_down);
+	lv_obj_add_style(arrow, &sx_style_icon2, 0);
+	lv_obj_add_event_cb(title, search_scope_chevron_place, LV_EVENT_SIZE_CHANGED, arrow);
+	lv_obj_add_event_cb(title, search_scope_chevron_place, LV_EVENT_STYLE_CHANGED, arrow);
+	lv_obj_add_event_cb(screen, search_scope_loaded, LV_EVENT_SCREEN_LOADED, title);
 }

@@ -1,4 +1,5 @@
 #include "coverflow.h"
+#include "src/gui/shell/artview.h"
 
 #include "src/gui/shell/sx_frame.h"
 #include "src/gui/shell/sx_palette.h"
@@ -522,7 +523,10 @@ static void face_draw_cover(uint16_t *face, const cover_image_t *cover) {
 	for (int y = y0; y < y1; y++) {
 		const uint16_t *srow = (const uint16_t *)cover->pixels + (size_t)y * stride;
 		uint16_t *drow = face + (size_t)(oy + y) * CF_MID_W + ox;
-		memcpy(drow + x0, srow + x0, (size_t)(x1 - x0) * 2);
+		if (theme_monochrome_covers())
+			sx_artview_copy_gray565(srow + x0, drow + x0, (size_t)(x1 - x0), 1, (size_t)(x1 - x0) * 2, (size_t)(x1 - x0) * 2);
+		else
+			memcpy(drow + x0, srow + x0, (size_t)(x1 - x0) * 2);
 	}
 }
 

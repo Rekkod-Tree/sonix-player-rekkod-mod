@@ -3,13 +3,26 @@
 #include <string.h>
 
 #include "src/gui/shell/sx_palette.h"
+#include "src/gui/shell/theme.h"
 
 lv_style_t sx_style_page;
+lv_style_t sx_style_panel;
+lv_style_t sx_style_panel_press;
+lv_style_t sx_style_panel_text;
+lv_style_t sx_style_panel_text2;
+lv_style_t sx_style_panel_action;
+lv_style_t sx_style_panel_icon;
+lv_style_t sx_style_panel_icon_action;
+lv_style_t sx_style_panel_accent;
+lv_style_t sx_style_panel_accent_press;
+lv_style_t sx_style_panel_active;
+
 lv_style_t sx_style_surface;
 lv_style_t sx_style_press;
 lv_style_t sx_style_active;
 lv_style_t sx_style_text;
 lv_style_t sx_style_text2;
+lv_style_t sx_style_search_placeholder;
 lv_style_t sx_style_album_text;
 lv_style_t sx_style_album_icon;
 lv_style_t sx_style_text_accent;
@@ -39,6 +52,19 @@ static void init_recolour(lv_style_t *s) {
 }
 
 void sx_styles_init(void) {
+	init_bg(&sx_style_panel);
+	init_bg(&sx_style_panel_press);
+	lv_style_set_transform_width(&sx_style_panel_press, 0);
+	lv_style_set_transform_height(&sx_style_panel_press, 0);
+	lv_style_init(&sx_style_panel_text);
+	lv_style_init(&sx_style_panel_text2);
+	lv_style_init(&sx_style_panel_action);
+	init_recolour(&sx_style_panel_icon);
+	init_recolour(&sx_style_panel_icon_action);
+	init_bg(&sx_style_panel_accent);
+	init_bg(&sx_style_panel_accent_press);
+	init_bg(&sx_style_panel_active);
+
 	init_bg(&sx_style_page);
 	init_bg(&sx_style_surface);
 	init_bg(&sx_style_press);
@@ -49,6 +75,7 @@ void sx_styles_init(void) {
 	init_bg(&sx_style_active);
 	lv_style_init(&sx_style_text);
 	lv_style_init(&sx_style_text2);
+	lv_style_init(&sx_style_search_placeholder);
 	lv_style_init(&sx_style_album_text);
 	init_recolour(&sx_style_album_icon);
 	lv_style_init(&sx_style_text_accent);
@@ -81,6 +108,22 @@ void sx_styles_init(void) {
 void sx_styles_apply(void) {
 	const sx_palette_t *p = sx_pal();
 
+	lv_style_set_bg_color(&sx_style_panel, p->panel);
+	lv_style_set_text_color(&sx_style_panel, p->panel_text);
+	lv_style_set_bg_color(&sx_style_panel_press, p->panel_press);
+	lv_style_set_text_color(&sx_style_panel_text, p->panel_text);
+	lv_style_set_text_color(&sx_style_panel_text2, p->panel_text2);
+	lv_style_set_text_color(&sx_style_panel_action, p->panel_action);
+	lv_style_set_image_recolor(&sx_style_panel_icon, p->panel_text);
+	lv_style_set_image_recolor(&sx_style_panel_icon_action, p->panel_action);
+	lv_style_set_bg_color(&sx_style_panel_accent, p->panel_accent);
+	lv_style_set_text_color(&sx_style_panel_accent, p->panel_on_accent);
+	lv_style_set_image_recolor(&sx_style_panel_accent, p->panel_on_accent);
+	lv_style_set_image_recolor_opa(&sx_style_panel_accent, LV_OPA_COVER);
+	lv_style_set_bg_color(&sx_style_panel_accent_press, sx_mix(lv_color_eq(p->panel_on_accent, lv_color_white()) ? lv_color_black() : lv_color_white(), p->panel_accent, 12));
+	lv_style_set_text_color(&sx_style_panel_accent_press, p->panel_on_accent);
+	lv_style_set_bg_color(&sx_style_panel_active, p->panel_active);
+
 	lv_style_set_bg_color(&sx_style_page, p->bg);
 	lv_style_set_bg_color(&sx_style_surface, p->surface);
 	lv_style_set_text_color(&sx_style_surface, p->text);
@@ -88,8 +131,12 @@ void sx_styles_apply(void) {
 	lv_style_set_bg_color(&sx_style_active, p->active);
 	lv_style_set_text_color(&sx_style_text, p->text);
 	lv_style_set_text_color(&sx_style_text2, p->text2);
-	lv_style_set_text_color(&sx_style_album_text, p->tinted ? lv_color_white() : p->text);
-	lv_style_set_image_recolor(&sx_style_album_icon, p->tinted ? lv_color_white() : p->text);
+	if (theme_get_palette() != 0)
+		lv_style_set_text_color(&sx_style_search_placeholder, p->text2);
+	else
+		lv_style_remove_prop(&sx_style_search_placeholder, LV_STYLE_TEXT_COLOR);
+	lv_style_set_text_color(&sx_style_album_text, p->album_text);
+	lv_style_set_image_recolor(&sx_style_album_icon, p->album_text);
 	lv_style_set_text_color(&sx_style_text_accent, p->accent_text);
 	lv_style_set_bg_color(&sx_style_accent, p->accent);
 	lv_style_set_bg_color(&sx_style_accent_press, sx_mix(lv_color_eq(p->on_accent, lv_color_white()) ? lv_color_black() : lv_color_white(), p->accent, 12));

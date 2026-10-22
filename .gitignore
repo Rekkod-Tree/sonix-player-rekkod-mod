@@ -5,6 +5,8 @@ sonix-player/sonix_player
 sonix-player/sonix_player_debug
 sonix-player/sonix_player_host
 sonix-player/sonix_player_host_ui_test
+sonix-player/sonix_player_host_mono_capacity_test
+sonix-player/sonix_player_host_mono_studio_test
 sonix-player/sonix_launch
 sonix-player/sonix_recovery_r1
 sonix-packer/sonix_recovery_r1
@@ -44,3 +46,4 @@ sonix-packer/sonix_player
 sonix-packer/r3proii_original.upt
 sonix-packer/r1_original.upt
 sonix-packer/sonix_launch
+sonix-player/sonix_player_host_stream_search_test

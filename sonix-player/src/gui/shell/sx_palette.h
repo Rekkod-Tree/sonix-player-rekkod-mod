@@ -64,7 +64,13 @@ typedef struct {
 	lv_color_t np_ink; // the glyph on the white play disc
 	lv_color_t mini_bg;
 	lv_color_t mini_ink;
+	lv_color_t mini_text2;
 	lv_color_t mini_cover_tone;
+
+	// Foregrounds belong to the panel when its polarity differs from the page.
+	lv_color_t panel, panel_press, panel_text, panel_text2;
+	lv_color_t panel_accent, panel_on_accent, panel_active, panel_action;
+	lv_color_t album_text;
 
 	// The album page, at the page hue: its gradient at 0, 380 and 900 px.
 	lv_color_t album_grad[3];
@@ -101,6 +107,9 @@ float sx_palette_hue_of_name(const char *name);
 
 // Stable, saturated missing-art colour, independent of theme and playing cover.
 lv_color_t sx_placeholder_tone(float hue);
+lv_color_t sx_placeholder_ink(lv_color_t background);
+lv_color_t sx_placeholder_category(float identity_hue);
+float sx_placeholder_file_hue(const char *path, const char *album);
 lv_color_t sx_placeholder_name(const char *name);
 lv_color_t sx_placeholder_file(const char *path, const char *album);
 
@@ -128,6 +137,7 @@ lv_color_t sx_tone(sx_lc_t lc, float h_deg);
 // The accent "from the cover" would be now, whichever accent is chosen: for
 // the swatch that offers it.
 lv_color_t sx_palette_cover_accent(void);
+lv_color_t sx_palette_recommended_accent(void);
 lv_color_t sx_palette_cover_on_accent(void);
 
 // `pct` percent of `a` over `b`.
@@ -183,6 +193,8 @@ void sx_gradient_paint(lv_obj_t *obj, lv_draw_buf_t *const *slot);
 // The three Appearance choices. `accent` is a preset index (0..5) or -1 for
 // "from the cover". Recomputes; does not notify.
 void sx_palette_configure(bool dark, int accent, lv_color_t preset, bool tint);
+// Set options before configure; no independent recompute or notification.
+void sx_palette_options(int family, int lamp, bool force_color, bool monochrome);
 
 // Called after the palette moved because the hue did (a track change, an
 // album page): theme.c pushes it into the shared styles and repaints.

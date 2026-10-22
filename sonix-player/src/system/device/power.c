@@ -716,7 +716,7 @@ static bool player_is_busy(bool playing, uint32_t input_idle) {
 		   usbdac_is_active() ||				   // a computer feeding the DAC
 		   usb_storage_active() ||				   // the card exported over USB
 		   gearboy_running() ||					   // the emulator
-		   library_scan_running() ||			   // a scan, which is also writing to the card
+		   library_scan_running() || library_playlist_stage_busy() || // local database writes
 		   audiobookdb_scan_running() || wifitransfer_running() || dlna_running() || airplay_running() ||
 		   sonixlink_is_connected() || // a phone driving the player, not a switch left on
 		   stream_provider_any_downloading() || podcastcache_downloading_id() > 0 ||
@@ -1315,8 +1315,8 @@ static void suspend_if_idle(uint32_t now, bool playing) {
 	// Manual screen-off and a scan started after card insertion can bypass
 	// the scan page's screen hold. Let local database work finish before mem
 	// freezes its workers until the next user wake, just as for network work.
-	if (library_scan_running() || audiobookdb_scan_running()) {
-		mem_skip("a library scan is running");
+	if (library_scan_running() || audiobookdb_scan_running() || library_playlist_stage_busy()) {
+		mem_skip("a library scan or queue save is running");
 		return;
 	}
 	// Pause counts as a stopped state: the PCM is already released after five

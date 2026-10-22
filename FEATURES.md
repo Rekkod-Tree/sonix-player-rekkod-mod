@@ -1,5 +1,58 @@
 ﻿# Features
 
+## Palette controls, search and playlist safety (alpha25)
+
+- Eight optional palettes extend the existing Graphite 2 appearance. The legacy
+  palette remains the default; existing geometry, fonts, icons and controls stay.
+  Panel backlight, fixed/cover accent and cover-tinted surfaces remain independent.
+- Monochrome artwork and forced-color content placeholders are separate controls.
+  Visible artwork uses lazy shared grayscale copies, capped at 3 MiB; hidden
+  copies are released. Switching these options refreshes cached playlist rows.
+- Global search offers an explicit source and remembers the last chosen source
+  in memory. Cancelling its picker preserves the current query; choosing another
+  source opens that service's own search rather than copying the query.
+- Saving a queue uses bounded worker batches, supports 20,000 entries and rejects
+  oversized inputs before publishing a partial result. Import replacement keeps
+  the old playlist on failure; valid empty migrated playlists remain visible.
+- Playlist create, rename, append, reorder and removal reject a foreign database
+  transaction and check their own commit. Failed operations preserve the previous
+  content and metadata instead of acknowledging partial success.
+- The playlist import action stays above the mini-player. Hidden playlist-name
+  fields stop their cursor animation and restore it when reopened; other keyboard
+  owners keep their current behavior.
+- Returning through older playlist history restores ordinary browsing after a
+  picker visit, without cancelling an already captured queue export. Search hints
+  in seven streaming pages follow the new palette colors; legacy rendering stays.
+- Independent fault/sanitizer checks and all ten combined host UI scenarios passed
+  at 480x800 and 480x720. The final source passed target LTO/ABI checks, fresh PGO
+  training and an exact profile-use R1 run. The image was packed and verified;
+  its first post-flash boot remains separate. See `ALPHA25_RELEASE.md` for scope.
+  No comparative battery-life or speed improvement is claimed.
+
+## Podcast pair recovery and queue refresh (unreleased)
+
+- Podcast replacement preserves the old audio and metadata together when saving
+  fails or is cancelled. A bounded recovery record lets the existing worker check
+  interrupted saves; conflicts preserve files instead of guessing what to delete.
+- Unverified files are not offered as completed downloads. Ordinary manual audio
+  and unrelated files remain available without background recovery scans.
+- Next, Previous and automatic queue boundary checks refresh a changed library
+  source before choosing a track; explicit queues and shuffle behavior are retained.
+- These changes passed independent fault/sanitizer tests. Six isolated R1 RAM/FAT
+  filesystem runs passed; live interrupted-download recovery remains a separate
+  acceptance check.
+- See `PODCAST_PAIR_RECOVERY_2026-10-22.md`. The separate unexpected reboot
+  investigation remains open; these checks do not establish its cause.
+
+## Home and catalog navigation after alpha24
+
+- Swipe a Home shortcut left to remove it, with Undo that preserves later edits;
+  existing card geometry and reorder grips remain intact.
+- Continue Book taps resume directly; hold shows the saved/live chapter and time.
+- Back in Yandex and Zvuk restores the previous list position with one final bind;
+  stale responses do not disturb a newer request.
+- See `UI_NAVIGATION_2026-10-21.md` for contracts and verification scope.
+
 ## Podcast storage isolation after alpha23
 
 - A previous-card podcast download cannot create, replace or clean files on a new
@@ -10,9 +63,10 @@
   event; healthy duplicate insertion events preserve playback. Hotplug reads keep
   space for the string terminator.
 - Independent barrier/fault tests and native R1 filesystem fixtures cover stale-card
-  isolation, cancellation and write errors. PGO is not retrained.
+  isolation, cancellation and write errors. Those isolated checks used no new PGO;
+  alpha25 later trains and checks the combined final source.
 - See `PODCAST_STORAGE_SAFETY_2026-10-21.md` for verification scope and the separate
-  outstanding audio/sidecar publication issue #30.
+  audio/sidecar publication issue #30, addressed by the pair recovery above.
 
 ## Point fixes after alpha22
 

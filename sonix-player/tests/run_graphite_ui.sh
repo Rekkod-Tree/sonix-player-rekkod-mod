@@ -7,7 +7,7 @@ repo_root=$(dirname "$player_root")
 output=$(realpath -m "${1:?Supply a disposable output directory}")
 test_root=$(mktemp -d /tmp/sonix-graphite-test.XXXXXX)
 mkdir -p "$output" /tmp/.local /tmp/sonix /mnt/sd_0
-python3 "$player_root/tests/graphite_fixtures.py" "$test_root"
+python3 "${SONIX_UI_TEST_FIXTURES:-$player_root/tests/graphite_fixtures.py}" "$test_root"
 mock_port=${SONIX_UI_TEST_PORT:-18766}
 [[ "$mock_port" =~ ^[0-9]+$ ]] && (( mock_port >= 1024 && mock_port <= 65535 ))
 export ZVUK_MOCK_MODE="$test_root/mock-mode"

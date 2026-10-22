@@ -62,6 +62,7 @@ static void window_update(lv_event_t *e) {
 		sx_row_set_title(rows[i], title);
 		sx_row_set_subtitle(rows[i], artist, NULL, when);
 		sx_row_set_thumb(rows[i], NULL, sx_placeholder_name(title));
+		sx_row_set_content(rows[i], sx_palette_hue_of_name(title), false, false, 0);
 		lv_obj_set_pos(rows[i], 0, at * pitch);
 	}
 }

@@ -1272,6 +1272,24 @@ static void kb_caret_blink_off(lv_obj_t *field) {
 	lv_anim_delete(field, NULL);
 }
 
+void keyboard_refresh_caret(lv_obj_t *field) {
+	if (!field)
+		return;
+	for (lv_obj_t *obj = field; obj; obj = lv_obj_get_parent(obj)) {
+		if (lv_obj_is_hidden(obj)) {
+			kb_caret_blink_off(field);
+			return;
+		}
+	}
+	lv_obj_t *screen = lv_obj_get_screen(field);
+	lv_display_t *display = lv_obj_get_display(field);
+	if (screen == lv_display_get_screen_active(display) || screen == lv_display_get_layer_top(display) ||
+		screen == lv_display_get_layer_sys(display) || screen == lv_display_get_layer_bottom(display))
+		kb_caret_blink_on(field);
+	else
+		kb_caret_blink_off(field);
+}
+
 void keyboard_style_caret(lv_obj_t *field) {
 	if (!field) {
 		return;

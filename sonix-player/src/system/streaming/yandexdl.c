@@ -1318,149 +1318,206 @@ static int book_pin(const char *expected_root, unsigned epoch) {
 	return pin;
 }
 
-static bool save_book(const entry_t *entry, unsigned asked, char *book_path, size_t path_size, char *why, size_t why_size) {
-	why[0] = '\0';
-	char card_root[400], directory[512];
-	pthread_mutex_lock(&lock);
-	unsigned epoch = card_epoch;
-	pthread_mutex_unlock(&lock);
-	int pin = storage_pin_card(card_root, sizeof(card_root));
-	if (pin < 0) {
-		snprintf(why, why_size, "%s", tr("download_no_card"));
-		return false;
-	}
-	bool ok = false;
-	bookdownload_t *book = NULL;
-	yandex_track_t *tracks = NULL;
-	char *cover = NULL;
-	size_t cover_size = 0;
-	if (!save_allowed(asked, why, why_size))
-		goto done;
-	if (!book_directory(entry, card_root, directory, sizeof(directory))) {
-		snprintf(why, why_size, "%s", tr("book_download_limit"));
-		goto done;
-	}
-	if (bookdownload_ready(directory, book_path, path_size)) {
-		ok = true;
-		goto done;
-	}
+typedef struct {
+	char root[400];
+	unsigned epoch, asked;
+	dev_t dev;
+	ino_t ino;
+} book_scope_t;
+static int book_scope_open(void *user) {
+	book_scope_t *scope = user;
+	int pin = book_pin(scope->root, scope->epoch);
+	if (pin < 0)
+		return -1;
 	struct stat st;
-	if (lstat(directory, &st) == 0) {
-		snprintf(why, why_size, "%s", tr("book_download_conflict"));
-		goto done;
-	}
-	close(pin);
-	pin = -1;
-	tracks = calloc(BOOKDOWNLOAD_MAX_PARTS, sizeof(*tracks));
-	book = calloc(1, sizeof(*book));
-	if (!tracks || !book) {
-		snprintf(why, why_size, "%s", tr("out_of_memory"));
-		goto done;
-	}
-	yandex_album_meta_t book_meta;
-	int n = yandex_album_tracks_complete(entry->track.album_id, tracks, BOOKDOWNLOAD_MAX_PARTS, &book_meta);
-	if (n < 0) {
-		snprintf(why, why_size, "%s", yandex_last_error());
-		goto done;
-	}
-	if (book_meta.content_type != YANDEX_CONTENT_AUDIOBOOK) {
-		snprintf(why, why_size, "%s", tr("book_download_wrong_type"));
-		goto done;
-	}
-	for (int i = 0; i < n; i++) {
-		if (!tracks[i].available) {
-			snprintf(why, why_size, "%s", tr("book_download_unavailable"));
-			goto done;
-		}
-		if (!tracks[i].id[0] || strspn(tracks[i].id, "0123456789") != strlen(tracks[i].id)) {
-			snprintf(why, why_size, "%s", tr("book_download_incomplete"));
-			goto done;
-		}
-	}
-	if (!save_allowed(asked, why, why_size) || (pin = book_pin(card_root, epoch)) < 0)
-		goto done;
-	char parent[512];
-	snprintf(parent, sizeof(parent), "%s", directory);
-	*strrchr(parent, '/') = '\0';
-	if (!make_dirs(card_root, parent) || !bookdownload_begin(book, directory)) {
-		snprintf(why, why_size, "%s", tr("book_download_conflict"));
-		goto done;
-	}
-	close(pin);
-	pin = -1;
-	meta = book_meta;
-	meta_ok = true;
-	for (int i = 0; i < n; i++) {
-		book_source_t source;
-		if (!save_allowed(asked, why, why_size))
-			goto done;
-		if (!book_source(&tracks[i], &source)) {
-			snprintf(why, why_size, "%s", yandex_last_error());
-			goto done;
-		}
-		source.epoch = epoch;
-		if (!save_allowed(asked, why, why_size) || (pin = book_pin(card_root, epoch)) < 0)
-			goto done;
-		// Anchor every output/tag/rename to this mount's actual directory,
-		// even if physical removal lazily detaches its public mountpoint.
-		const char *relative_stage = book->folder + strlen(card_root) + 1;
-		int stage_fd = openat(pin, relative_stage, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
-		if (stage_fd < 0)
-			goto done;
-		char anchored[64], filename[80];
-		snprintf(anchored, sizeof(anchored), "/proc/self/fd/%d", stage_fd);
-		if (source.cached[0] && strncmp(source.cached, card_root, strlen(card_root)) == 0 && source.cached[strlen(card_root)] == '/') {
-			char relative[512];
-			snprintf(relative, sizeof(relative), "%s", source.cached + strlen(card_root) + 1);
-			snprintf(source.cached, sizeof(source.cached), "/proc/self/fd/%d/%.460s", pin, relative);
-		}
-		bool saved = save_track_pinned_to(&tracks[i], asked, card_root, anchored, i + 1, &source, filename, sizeof(filename), why, why_size);
-		close(stage_fd); // The synchronous saver has closed both its sink and output.
-		if (!saved || !book_card_current(card_root, epoch) || !bookdownload_record(book, filename))
-			goto done;
+	if (fstat(pin, &st) != 0 || !S_ISDIR(st.st_mode) || st.st_dev != scope->dev || st.st_ino != scope->ino) {
 		close(pin);
-		pin = -1;
+		errno = ESTALE;
+		return -1;
 	}
-	// Artwork is optional, and its HTTP wait owns no card descriptor.
-	if (!save_allowed(asked, why, why_size))
-		goto done;
-	if (book_meta.cover[0])
-		http_get(book_meta.cover, &cover, &cover_size, STREAMCOVER_MAX_BYTES, 20);
-	if (!save_allowed(asked, why, why_size) || (pin = book_pin(card_root, epoch)) < 0)
-		goto done;
-	char artwork[512];
-	if (cover && snprintf(artwork, sizeof(artwork), "%s/cover.jpg", book->folder) < (int)sizeof(artwork)) {
-		streamcover_store(artwork, cover, cover_size);
-	}
-	if (!bookdownload_publish(book, n))
-		goto done;
-	ok = bookdownload_ready(directory, book_path, path_size);
+	return pin;
+}
+
+static bool book_scope_cancelled(void *user) {
+	book_scope_t *scope = user;
+	pthread_mutex_lock(&lock);
+	bool stop = scope->asked != generation;
+	pthread_mutex_unlock(&lock);
+	return stop;
+}
+
+static bool save_book(const entry_t *entry, unsigned asked, char *book_path,
+                      size_t path_size, char *why, size_t why_size) {
+  why[0] = '\0';
+  char card_root[400], directory[512];
+  pthread_mutex_lock(&lock);
+  unsigned epoch = card_epoch;
+  pthread_mutex_unlock(&lock);
+  int pin = storage_pin_card(card_root, sizeof(card_root));
+  if (pin < 0) {
+    snprintf(why, why_size, "%s", tr("download_no_card"));
+    return false;
+  }
+  book_scope_t scope = {.epoch = epoch, .asked = asked};
+  snprintf(scope.root, sizeof(scope.root), "%s", card_root);
+  struct stat admitted_root;
+  if (fstat(pin, &admitted_root) != 0) {
+    close(pin);
+    return false;
+  }
+  scope.dev = admitted_root.st_dev;
+  scope.ino = admitted_root.st_ino;
+  bookdownload_io_t io = {.open_root = book_scope_open,
+                          .cancelled = book_scope_cancelled,
+                          .user = &scope};
+  bool ok = false;
+  bookdownload_t *book = NULL;
+  yandex_track_t *tracks = NULL;
+  char *cover = NULL;
+  size_t cover_size = 0;
+  if (!save_allowed(asked, why, why_size))
+    goto done;
+  if (!book_directory(entry, card_root, directory, sizeof(directory))) {
+    snprintf(why, why_size, "%s", tr("book_download_limit"));
+    goto done;
+  }
+  if (bookdownload_ready_admitted(card_root, directory, &io, book_path,
+                                  path_size)) {
+    ok = true;
+    goto done;
+  }
+  struct stat st;
+  if (fstatat(pin, directory + strlen(card_root) + 1, &st,
+              AT_SYMLINK_NOFOLLOW) == 0) {
+    snprintf(why, why_size, "%s", tr("book_download_conflict"));
+    goto done;
+  }
+  close(pin);
+  pin = -1;
+  tracks = calloc(BOOKDOWNLOAD_MAX_PARTS, sizeof(*tracks));
+  book = calloc(1, sizeof(*book));
+  if (!tracks || !book) {
+    snprintf(why, why_size, "%s", tr("out_of_memory"));
+    goto done;
+  }
+  yandex_album_meta_t book_meta;
+  int n = yandex_album_tracks_complete(entry->track.album_id, tracks,
+                                       BOOKDOWNLOAD_MAX_PARTS, &book_meta);
+  if (n < 0) {
+    snprintf(why, why_size, "%s", yandex_last_error());
+    goto done;
+  }
+  if (book_meta.content_type != YANDEX_CONTENT_AUDIOBOOK) {
+    snprintf(why, why_size, "%s", tr("book_download_wrong_type"));
+    goto done;
+  }
+  for (int i = 0; i < n; i++) {
+    if (!tracks[i].available) {
+      snprintf(why, why_size, "%s", tr("book_download_unavailable"));
+      goto done;
+    }
+    if (!tracks[i].id[0] ||
+        strspn(tracks[i].id, "0123456789") != strlen(tracks[i].id)) {
+      snprintf(why, why_size, "%s", tr("book_download_incomplete"));
+      goto done;
+    }
+  }
+  if (!save_allowed(asked, why, why_size) ||
+      (pin = book_pin(card_root, epoch)) < 0)
+    goto done;
+  if (!bookdownload_begin_admitted(book, card_root, directory, &io)) {
+    snprintf(why, why_size, "%s", tr("book_download_conflict"));
+    goto done;
+  }
+  close(pin);
+  pin = -1;
+  meta = book_meta;
+  meta_ok = true;
+  for (int i = 0; i < n; i++) {
+    book_source_t source;
+    if (!save_allowed(asked, why, why_size))
+      goto done;
+    if (!book_source(&tracks[i], &source)) {
+      snprintf(why, why_size, "%s", yandex_last_error());
+      goto done;
+    }
+    source.epoch = epoch;
+    if (!save_allowed(asked, why, why_size) ||
+        (pin = book_pin(card_root, epoch)) < 0)
+      goto done;
+    // Anchor every output/tag/rename to this mount's actual directory,
+    // even if physical removal lazily detaches its public mountpoint.
+    int stage_fd = bookdownload_open_stage(book);
+    if (stage_fd < 0)
+      goto done;
+    char anchored[64], filename[80];
+    snprintf(anchored, sizeof(anchored), "/proc/self/fd/%d", stage_fd);
+    if (source.cached[0] &&
+        strncmp(source.cached, card_root, strlen(card_root)) == 0 &&
+        source.cached[strlen(card_root)] == '/') {
+      char relative[512];
+      snprintf(relative, sizeof(relative), "%s",
+               source.cached + strlen(card_root) + 1);
+      snprintf(source.cached, sizeof(source.cached), "/proc/self/fd/%d/%.460s",
+               pin, relative);
+    }
+    bool saved = save_track_pinned_to(&tracks[i], asked, card_root, anchored,
+                                      i + 1, &source, filename,
+                                      sizeof(filename), why, why_size);
+    close(
+        stage_fd); // The synchronous saver has closed both its sink and output.
+    if (!saved || !book_card_current(card_root, epoch) ||
+        !bookdownload_record(book, filename))
+      goto done;
+    close(pin);
+    pin = -1;
+  }
+  // Artwork is optional, and its HTTP wait owns no card descriptor.
+  if (!save_allowed(asked, why, why_size))
+    goto done;
+  if (book_meta.cover[0])
+    http_get(book_meta.cover, &cover, &cover_size, STREAMCOVER_MAX_BYTES, 20);
+  if (!save_allowed(asked, why, why_size) ||
+      (pin = book_pin(card_root, epoch)) < 0)
+    goto done;
+  int cover_dir = bookdownload_open_stage(book);
+  if (cover_dir < 0)
+    goto done;
+  char artwork[96];
+  if (cover && snprintf(artwork, sizeof(artwork), "/proc/self/fd/%d/cover.jpg",
+                        cover_dir) < (int)sizeof(artwork))
+    streamcover_store(artwork, cover, cover_size);
+  close(cover_dir);
+  if (!bookdownload_publish(book, n))
+    goto done;
+  ok = bookdownload_ready_admitted(card_root, directory, &io, book_path,
+                                   path_size);
 done:
-	if (book && book->owned) {
-		// USB may already own the card. Leave a private stage for the next
-		// retry rather than write to an exported or replacement card.
-		if (pin < 0)
-			pin = book_pin(card_root, epoch);
-		if (pin >= 0 && book_card_current(card_root, epoch))
-			bookdownload_abort(book);
-	}
-	free(cover);
-	free(tracks);
-	free(book);
-	if (pin >= 0)
-		close(pin);
-	if (ok) {
-		book_scan_t *scan = calloc(1, sizeof(*scan));
-		if (scan) {
-			snprintf(scan->path, sizeof(scan->path), "%s", directory);
-			*strrchr(scan->path, '/') = '\0';
-			scan->generation = asked;
-			if (!gui_post(book_scan_async, scan))
-				free(scan);
-		}
-	} else if (!why[0])
-		snprintf(why, why_size, "%s", tr("download_failed"));
-	return ok;
+  if (book && book->owned) {
+    // USB may already own the card. Leave a private stage for the next
+    // retry rather than write to an exported or replacement card.
+    if (pin < 0)
+      pin = book_pin(card_root, epoch);
+    if (pin >= 0 && book_card_current(card_root, epoch))
+      bookdownload_abort(book);
+  }
+  free(cover);
+  free(tracks);
+  free(book);
+  if (pin >= 0)
+    close(pin);
+  if (ok) {
+    book_scan_t *scan = calloc(1, sizeof(*scan));
+    if (scan) {
+      snprintf(scan->path, sizeof(scan->path), "%s", directory);
+      *strrchr(scan->path, '/') = '\0';
+      scan->generation = asked;
+      if (!gui_post(book_scan_async, scan))
+        free(scan);
+    }
+  } else if (!why[0])
+    snprintf(why, why_size, "%s", tr("download_failed"));
+  return ok;
 }
 
 static void *worker_main(void *arg) {

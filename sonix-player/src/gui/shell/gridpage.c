@@ -105,9 +105,9 @@ static void add_tile(lv_obj_t *grid, const grid_entry_t *entry, int width, int h
 	}
 	lv_obj_t *tile = lv_btn_create(grid);
 	lv_obj_set_size(tile, width, height);
-	lv_obj_add_style(tile, &theme_style_card, 0);
-	lv_obj_add_style(tile, &theme_style_card_pressed, LV_STATE_PRESSED);
-	lv_obj_add_style(tile, &sx_style_press, LV_STATE_PRESSED);
+	lv_obj_add_style(tile, &sx_style_panel, 0);
+	lv_obj_add_style(tile, &sx_style_panel_press, LV_STATE_PRESSED);
+	lv_obj_add_style(tile, &sx_style_panel_press, LV_STATE_PRESSED);
 	lv_obj_set_style_radius(tile, TILE_RADIUS, 0);
 	lv_obj_set_style_shadow_width(tile, 0, 0);
 	lv_obj_set_style_pad_all(tile, SX_TILE_PAD, 0);
@@ -126,12 +126,12 @@ static void add_tile(lv_obj_t *grid, const grid_entry_t *entry, int width, int h
 	lv_obj_t *icon = lv_image_create(tile);
 	lv_image_set_src(icon, entry->icon);
 
-	lv_obj_add_style(icon, &sx_style_icon_accent, 0);
+	lv_obj_add_style(icon, &sx_style_panel_icon_action, 0);
 	lv_obj_set_ignore_layout(icon, true);
 	lv_obj_align(icon, LV_ALIGN_TOP_LEFT, 0, 1);
 
 	lv_obj_t *label = lv_label_create(tile);
-	lv_obj_add_style(label, &theme_style_text, 0);
+	lv_obj_add_style(label, &sx_style_panel_text, 0);
 	lv_obj_set_style_text_font(label, &font_ui_24_bold, 0);
 	lv_obj_set_width(label, width - 2 * SX_TILE_PAD);
 	lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_LEFT, 0);
@@ -141,7 +141,7 @@ static void add_tile(lv_obj_t *grid, const grid_entry_t *entry, int width, int h
 	lv_obj_align(label, LV_ALIGN_BOTTOM_LEFT, 0, -SX_TILE_SUB_H - 4);
 	lv_label_set_text(label, tr(entry->label));
 	// Keep the approved subtitle slot, even on tiles without metadata.
-	lv_obj_t *subtitle = sx_label(tile, &font_ui_20, &sx_style_text2);
+	lv_obj_t *subtitle = sx_label(tile, &font_ui_20, &sx_style_panel_text2);
 	lv_obj_set_size(subtitle, width - 2 * SX_TILE_PAD, SX_TILE_SUB_H);
 	lv_obj_set_ignore_layout(subtitle, true);
 	lv_obj_align(subtitle, LV_ALIGN_BOTTOM_LEFT, 0, 0);
@@ -155,7 +155,7 @@ static void add_tile(lv_obj_t *grid, const grid_entry_t *entry, int width, int h
 	} else {
 		lv_obj_add_event_cb(tile, unavailable_cb, LV_EVENT_CLICKED, (void *)entry->label);
 		lv_obj_set_style_opa(icon, LV_OPA_40, 0);
-		lv_obj_add_style(label, &theme_style_text_dim, 0);
+		lv_obj_add_style(label, &sx_style_panel_text2, 0);
 	}
 }
 
@@ -311,7 +311,7 @@ lv_obj_t *gridpage_empty_panel(lv_obj_t *screen, gui_config_t *cfg, const lv_ima
 	lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
 	lv_obj_set_width(label, lv_pct(100));
 	lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
-	lv_obj_add_style(label, &theme_style_text_dim, 0);
+	lv_obj_add_style(label, &sx_style_panel_text2, 0);
 	lv_obj_set_style_text_font(label, &font_ui_24, 0);
 
 	lv_obj_t *button = lv_btn_create(panel);
@@ -319,7 +319,7 @@ lv_obj_t *gridpage_empty_panel(lv_obj_t *screen, gui_config_t *cfg, const lv_ima
 	// The accent with its own ink (sx_style_accent): white on the 2.0 dark
 	// theme's light accent was barely readable.
 	lv_obj_add_style(button, &sx_style_accent, 0);
-	lv_obj_add_style(button, &sx_style_press, LV_STATE_PRESSED);
+	lv_obj_add_style(button, &sx_style_panel_press, LV_STATE_PRESSED);
 	lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
 	lv_obj_set_style_radius(button, SX_CARD_R, 0);
 	lv_obj_set_style_shadow_width(button, 0, 0);

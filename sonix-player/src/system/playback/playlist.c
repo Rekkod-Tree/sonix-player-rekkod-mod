@@ -1738,13 +1738,81 @@ bool playlist_current_path(char *out, size_t out_size) {
 	return true;
 }
 
+bool playlist_export_begin(playlist_export_t *state) {
+	if (!state)
+		return false;
+	memset(state, 0, sizeof(*state));
+	state->revision = revision;
+	state->count = (int)entry_count;
+	state->library_backed = source_ix != NULL;
+	if (source_ix) {
+		if (!library_index_export_source(source_ix, &state->source))
+			return false;
+	}
+	return state->count > 0;
+}
+
+static bool export_current(const playlist_export_t *state) {
+	if (!state || state->revision != revision || state->count != (int)entry_count || state->library_backed != (source_ix != NULL))
+		return false;
+	if (source_ix) {
+		library_export_source_t current;
+		return library_index_export_source(source_ix, &current) && current.generation == state->source.generation && current.database_epoch == state->source.database_epoch;
+	}
+	return true;
+}
+
+bool playlist_export_batch(const playlist_export_t *state, int offset, playlist_export_item_t *items, int capacity, int *count) {
+	if (count)
+		*count = 0;
+	if (!items || !count || capacity <= 0 || capacity > 16 || offset < 0 || !export_current(state) || offset > state->count)
+		return false;
+	int n = state->count - offset;
+	if (n > capacity)
+		n = capacity;
+	for (int i = 0; i < n; i++) {
+		if (!order)
+			return false;
+		memset(&items[i], 0, sizeof(items[i]));
+		size_t entry = order[offset + i];
+		if (entry < ix_count) {
+			items[i].indexed = true;
+			if (!library_index_export_id(source_ix, (int)entry, &items[i].row_id))
+				return false;
+		} else {
+			const char *path = paths ? paths[entry - ix_count] : NULL;
+			if (!path || strlen(path) >= sizeof(items[i].path))
+				return false;
+			snprintf(items[i].path, sizeof(items[i].path), "%s", path);
+		}
+	}
+	if (!export_current(state))
+		return false;
+	*count = n;
+	return true;
+}
+
+bool playlist_export_ack(const playlist_export_t *state, const library_export_receipt_t *receipt) {
+	if (!receipt || !receipt->valid || !export_current(state) || !state->library_backed ||
+		state->source.generation != receipt->source.generation || state->source.database_epoch != receipt->source.database_epoch ||
+		state->source.spec.valid != receipt->source.spec.valid || state->source.spec.kind != receipt->source.spec.kind ||
+		state->source.spec.filter != receipt->source.spec.filter || state->source.spec.order != receipt->source.spec.order ||
+		state->source.spec.desc != receipt->source.spec.desc || strcmp(state->source.spec.value, receipt->source.spec.value) != 0)
+		return false;
+	return library_index_export_ack(source_ix, receipt);
+}
+
 // ---------------------------------------------------------------------------
 // advancing
 // ---------------------------------------------------------------------------
 
-bool playlist_at_end(void) { return entry_count == 0 || pos + 1 >= entry_count; }
+bool playlist_at_end(void) {
+	refresh_stale_source();
+	return entry_count == 0 || pos + 1 >= entry_count;
+}
 
 bool playlist_advance_auto(char *out, size_t out_size) {
+	refresh_stale_source();
 	if (entry_count == 0)
 		return false;
 
@@ -1797,6 +1865,7 @@ bool playlist_advance_auto(char *out, size_t out_size) {
 }
 
 bool playlist_peek_auto(char *out, size_t out_size) {
+	refresh_stale_source();
 	if (entry_count == 0 || !out) {
 		return false;
 	}
@@ -1831,6 +1900,10 @@ bool playlist_peek_auto(char *out, size_t out_size) {
 }
 
 bool playlist_next(char *out, size_t out_size) {
+	// Rebuild around the current track before applying the requested step.
+	// Otherwise a stale handle can anchor the rebuilt list to a numeric offset
+	// that already refers to the next entry, and land on an unrelated track.
+	refresh_stale_source();
 	if (entry_count == 0)
 		return false;
 	// Pressing next past the end of a shuffled deal asks for more, so it deals
@@ -1847,6 +1920,7 @@ bool playlist_next(char *out, size_t out_size) {
 }
 
 bool playlist_prev(char *out, size_t out_size) {
+	refresh_stale_source();
 	if (entry_count == 0)
 		return false;
 	pos = (pos + entry_count - 1) % entry_count;

@@ -14,6 +14,7 @@
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/keyboard.h"
 #include "src/gui/shell/settingsrow.h"
+#include "src/gui/shell/main_menu.h"
 #include "src/gui/shell/spinner.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/sx_card.h"
@@ -784,6 +785,48 @@ static bool view_row(int index, row_t *out) {
 	return false;
 }
 
+// Stable keys read only compact IDs or the already delivered mixed rows.
+static bool list_key(int index, char *out, size_t size) {
+	if (!shown || index < 0 || index >= view_count())
+		return false;
+	char id[YANDEX_ID_MAX];
+	const char *a = "", *b = "";
+	int kind = ROW_TRACK;
+	if (shown->list) {
+		if (!yandexlist_ids(shown->list, index, id, sizeof(id), NULL, 0))
+			return false;
+		a = id;
+	} else {
+		const row_t *r = &shown->rows[index];
+		kind = r->kind;
+		switch (r->kind) {
+		case ROW_TRACK:
+			a = r->u.track.id;
+			break;
+		case ROW_ALBUM:
+			a = r->u.album.id;
+			break;
+		case ROW_ARTIST:
+			a = r->u.artist.id;
+			break;
+		case ROW_PLAYLIST:
+			a = r->u.playlist.owner;
+			b = r->u.playlist.kind;
+			break;
+		case ROW_MORE:
+			a = r->u.artist.id;
+			break;
+		case ROW_CATEGORY:
+			a = r->u.category.path;
+			break;
+		}
+	}
+	if (!a[0])
+		return false;
+	int n = snprintf(out, size, "%d:%zu:%s:%s", kind, strlen(a), a, b);
+	return n > 0 && (size_t)n < size;
+}
+
 // ---------------------------------------------------------------------------
 // what is on the card: the marks and the album bar
 // ---------------------------------------------------------------------------
@@ -881,7 +924,7 @@ static void first_char(const char *text, char *out, size_t size) {
 	}
 }
 
-static void list_art(lv_obj_t *row, int index, const char *cover, lv_color_t tone) {
+static void list_art(lv_obj_t *row, int index, const char *cover, const char *identity) {
 	char url[YANDEX_URL_MAX];
 	yandex_cover_url(cover, 100, url, sizeof(url));
 	// API structs already contain a sized URL, normally ending in /600x600.
@@ -889,7 +932,7 @@ static void list_art(lv_obj_t *row, int index, const char *cover, lv_color_t ton
 	int width, height, used = 0;
 	if (tail && sscanf(tail + 1, "%dx%d%n", &width, &height, &used) == 2 && !tail[1 + used])
 		snprintf(tail + 1, sizeof(url) - (size_t)(tail + 1 - url), "100x100");
-	streamrowart_bind(list_box, row, index, url, tone);
+	streamrowart_content(list_box, row, index, url, svcui_hue(identity));
 }
 
 static void list_bind(lv_obj_t *row, int index) {
@@ -931,7 +974,7 @@ static void list_bind(lv_obj_t *row, int index) {
 			streamrowart_forget(row);
 			sx_row_set_number(row, r.u.track.track_number);
 		} else {
-			list_art(row, index, r.u.track.cover, svcui_tone(r.u.track.album[0] ? r.u.track.album : r.u.track.title));
+			list_art(row, index, r.u.track.cover, r.u.track.album[0] ? r.u.track.album : r.u.track.title);
 		}
 		sx_row_set_trail(row, SX_ROW_TRAIL_STAR);
 		sx_row_set_starred(row, yandex_is_liked(r.u.track.id));
@@ -945,7 +988,7 @@ static void list_bind(lv_obj_t *row, int index) {
 	}
 	case ROW_ALBUM:
 		sx_row_set_subtitle(row, detail, r.u.album.content_type == YANDEX_CONTENT_AUDIOBOOK ? tr("spoken_audiobook") : r.u.album.content_type == YANDEX_CONTENT_PODCAST ? tr("spoken_podcast") : row_saved(&r) ? tr("svc_badge_saved") : NULL, NULL);
-		list_art(row, index, r.u.album.cover, svcui_tone(r.u.album.title));
+		list_art(row, index, r.u.album.cover, r.u.album.title);
 		sx_row_set_trail(row, SX_ROW_TRAIL_CHEVRON);
 		sx_row_set_swipes(row, r.u.album.content_type != YANDEX_CONTENT_AUDIOBOOK && r.u.album.content_type != YANDEX_CONTENT_PODCAST, r.u.album.content_type != YANDEX_CONTENT_AUDIOBOOK && r.u.album.content_type != YANDEX_CONTENT_PODCAST);
 		break;
@@ -1091,6 +1134,8 @@ static void list_art_hidden_cb(lv_event_t *e) {
 	streamrowart_reset(list_box);
 }
 
+static void fill_list_count(int count);
+
 static void fill_list(void) {
 	if (shown && shown->kind == JOB_ALBUM) {
 		list_content_type = shown->content_type;
@@ -1101,7 +1146,7 @@ static void fill_list(void) {
 	}
 	int count = view_count();
 	playing_update();
-	svclist_set_count(list, count, false);
+	fill_list_count(count);
 	lv_obj_set_hidden(list_message, true);
 	update_album_bar();
 	if (count == 0 && shown && shown->error[0] && shown->error_class != STREAM_ERR_NONE) {
@@ -1145,6 +1190,7 @@ typedef struct {
 	char title[YANDEX_TITLE_MAX];
 	char a[YANDEX_TITLE_MAX];
 	char b[YANDEX_ID_MAX];
+	svclist_anchor_t anchor;
 } list_step_t;
 
 #define LIST_HISTORY_DEPTH 8
@@ -1152,9 +1198,22 @@ static list_step_t list_history[LIST_HISTORY_DEPTH];
 static int list_history_len;
 static list_step_t list_current;
 static bool list_has_current;
+static bool list_restore_pending;
+static unsigned list_restore_generation;
 
 static void show_list(const list_step_t *step);
 static void artist_bar_refresh(void);
+
+static void fill_list_count(int count) {
+	const svclist_anchor_t *anchor = NULL;
+	if (list_restore_pending && list_restore_generation == list_generation) {
+		list_restore_pending = false;
+		anchor = &list_current.anchor;
+	}
+	svclist_set_count_at(list, count, anchor);
+}
+
+static bool same_list(const list_step_t *a, const list_step_t *b) { return a->kind == b->kind && !strcmp(a->a, b->a) && !strcmp(a->b, b->b); }
 
 static bool list_back_has_step(void) { return list_history_len > 0; }
 
@@ -1177,11 +1236,13 @@ static void open_list(const char *title, job_kind_t kind, const char *a, const c
 	snprintf(step.b, sizeof(step.b), "%s", b ? b : "");
 	if (lv_screen_active() != list_screen) {
 		list_history_len = 0; // entering from outside: the history restarts
-	} else if (list_has_current && list_current.kind != JOB_WAVE && memcmp(&list_current, &step, sizeof(step)) != 0) {
+	} else if (list_has_current && list_current.kind != JOB_WAVE && !same_list(&list_current, &step)) {
 		if (list_history_len == LIST_HISTORY_DEPTH) {
 			memmove(list_history, list_history + 1, (LIST_HISTORY_DEPTH - 1) * sizeof(list_history[0]));
 			list_history_len--;
 		}
+		if (shown && shown->generation == list_generation)
+			svclist_capture(list, &list_current.anchor);
 		list_history[list_history_len++] = list_current;
 	}
 	list_current = step;
@@ -1261,6 +1322,8 @@ static void show_list(const list_step_t *step) {
 	clear_list();
 	switch_screen(list_screen);
 	list_generation++;
+	list_restore_pending = step->anchor.valid;
+	list_restore_generation = list_generation;
 	if (kind == JOB_SAVED || kind == JOB_SAVED_ALBUM) {
 		job_result_t *r = saved_result(kind, a);
 		if (r) {
@@ -1790,7 +1853,7 @@ static void ensure_list(void) {
 		.on_swipe_end = list_swipe_end,
 		.on_star = list_star,
 	};
-	static const svclist_cbs_t cbs = {.bind = list_bind, .visible = list_visible};
+	static const svclist_cbs_t cbs = {.bind = list_bind, .visible = list_visible, .key = list_key};
 	list = svclist_create(list_screen, &handlers, &cbs, SLOT_COUNT, false);
 	list_box = svclist_obj(list);
 	int top = settingsrow_content_top(list_cfg);
@@ -2039,11 +2102,12 @@ static void search_accept_cb(lv_event_t *e) {
 static void build_search_page(gui_config_t *cfg) {
 	search_screen = lv_obj_create(NULL);
 	lv_obj_add_style(search_screen, &theme_style_screen, 0);
-	settingsrow_title(search_screen, cfg, "yandex_search");
+	main_menu_search_header(search_screen, cfg, HOME_YANDEX);
 	int top = settingsrow_content_top(cfg);
 	search_field = lv_textarea_create(search_screen);
 	lv_textarea_set_one_line(search_field, true);
 	lv_textarea_set_placeholder_text(search_field, tr("artist_album_or_track"));
+	lv_obj_add_style(search_field, &sx_style_search_placeholder, LV_PART_TEXTAREA_PLACEHOLDER);
 	// The handoff's text field: 60 px, the surface of a card, its radius.
 	lv_obj_set_size(search_field, cfg->screen_width - 2 * SX_BODY_PAD_L, 60);
 	lv_obj_set_scrollbar_mode(search_field, LV_SCROLLBAR_MODE_OFF);
@@ -2101,13 +2165,17 @@ static void job_done_async(void *user) {
 		// A page of the list on screen came (or failed: its rows keep saying
 		// "Loading..." and ask again when scrolled to). The rows showing it
 		// get their texts; the next page in view, if any, is asked for.
-		bool here = shown && r->list == shown->list;
-		page_asked = -1;
+		if (!shown || r->list != shown->list || r->generation != list_generation) {
+			free_result(r);
+			return;
+		}
+		if (page_asked == r->page)
+			page_asked = -1;
 		if (r->error[0]) {
 			page_failed = r->page;
 			page_failed_at = time(NULL);
 		}
-		if (here && !r->error[0]) {
+		if (!r->error[0]) {
 			int first, last;
 			svclist_visible(list, &first, &last);
 			svclist_rebind(list);

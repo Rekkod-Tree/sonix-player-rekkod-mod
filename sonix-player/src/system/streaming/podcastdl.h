@@ -5,6 +5,7 @@
 #include <stddef.h>
 
 #include "src/system/streaming/podcast.h"
+#include "src/system/streaming/podcastpair.h"
 
 // Podcast episodes kept on the card for good, as ordinary files:
 //
@@ -28,6 +29,7 @@ typedef enum {
 	PODCASTDL_DONE,
 	PODCASTDL_FAILED,
 	PODCASTDL_CANCELLED,
+	PODCASTDL_RECOVERY_REQUIRED,
 } podcastdl_state_t;
 
 // Copy <card>/Podcast into caller-owned storage. False and an empty output on
@@ -76,5 +78,11 @@ bool podcastdl_busy(void);
 // FAT forbids go, leading and trailing dots and spaces go, the length is capped
 // on a UTF-8 boundary. `fallback` when nothing is left.
 void podcastdl_safe_name(const char *title, const char *fallback, char *out, size_t size);
+
+// Local worker only, with the GUI request's captured card epoch. No network.
+podcastpair_result_t podcastdl_recover_card(unsigned epoch, bool (*stop)(void *), void *user);
+bool podcastdl_recovery_busy(void);
+// The last terminal download's bounded reason, for recovery/conflict feedback.
+podcastpair_result_t podcastdl_pair_result(void);
 
 #endif /* PODCASTDL_H */

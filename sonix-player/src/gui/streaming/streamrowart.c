@@ -1,4 +1,5 @@
 #include "streamrowart.h"
+#include "src/gui/shell/artview.h"
 
 #include <pthread.h>
 #include <stdio.h>
@@ -7,6 +8,7 @@
 
 #include "lvgl/src/misc/cache/instance/lv_image_cache.h"
 #include "src/gui/nowplaying/cover.h"
+#include "src/gui/shell/sx_palette.h"
 #include "src/gui/shell/sx_row.h"
 #include "src/system/core/config.h"
 #include "src/system/core/utils.h"
@@ -24,6 +26,8 @@ typedef struct {
 	unsigned generation;
 	bool visible, settled;
 	lv_color_t tone;
+	float identity_hue;
+	bool identity_known;
 	char url[URL_SIZE];
 	cover_image_t image;
 } art_slot_t;
@@ -52,7 +56,9 @@ static void detach(art_slot_t *s) {
 		// LVGL must no longer reference either the descriptor or its pixels.
 		sx_row_set_thumb(s->row, NULL, s->tone);
 		lv_image_cache_drop(&s->image.dsc);
-		cover_free(&s->image);
+		sx_artview_release_cover(&s->image);
+		if (s->identity_known)
+			sx_row_set_content(s->row, s->identity_hue, false, false, 0);
 	}
 }
 
@@ -61,7 +67,7 @@ static void deleted(lv_event_t *event) {
 	// The row's own DELETE handler may already have freed its private state.
 	// Deletion prevents further drawing; do not call row setters here.
 	lv_image_cache_drop(&s->image.dsc);
-	cover_free(&s->image);
+	sx_artview_release_cover(&s->image);
 	s->row = s->owner = NULL;
 	s->url[0] = '\0';
 	s->visible = false;
@@ -110,6 +116,8 @@ static bool copy_image(art_slot_t *s, const cover_image_t *image) {
 	s->image.pixels = pixels;
 	s->image.dsc.data = pixels;
 	sx_row_set_thumb(s->row, &s->image.dsc, s->tone);
+	if (s->identity_known)
+		sx_row_set_content(s->row, s->identity_hue, false, true, s->image.display_generation);
 	return true;
 }
 
@@ -282,4 +290,20 @@ void streamrowart_reset(lv_obj_t *owner) {
 		// One pass settles its requests or pauses the timer again.
 		lv_timer_resume(timer);
 	}
+}
+
+void streamrowart_content(lv_obj_t *owner, lv_obj_t *row, int index, const char *url, float hue) {
+	streamrowart_bind(owner, row, index, url, sx_placeholder_tone(hue));
+	art_slot_t *slot = NULL;
+	for (int i = 0; slots && i < ROW_SLOTS; i++)
+		if (slots[i].row == row) {
+			slot = &slots[i];
+			break;
+		}
+	if (slot) {
+		slot->identity_hue = hue;
+		slot->identity_known = true;
+	}
+	bool photo = slot && slot->image.pixels;
+	sx_row_set_content(row, hue, false, photo, photo ? slot->image.display_generation : 0);
 }

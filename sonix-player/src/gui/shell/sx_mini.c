@@ -1,4 +1,5 @@
 #include "sx_mini.h"
+#include "artview.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -151,21 +152,23 @@ void sx_mini_set_progress(double position, double total) {
 
 }
 
-void sx_mini_set_cover(const lv_image_dsc_t *thumbnail) {
+void sx_mini_set_cover(const lv_image_dsc_t *thumbnail, uint32_t generation) {
 	if (!cover_img) {
 		return;
 	}
 	if (thumbnail) {
-		lv_image_set_src(cover_img, thumbnail);
+		sx_artview_bind(cover_img, thumbnail, generation);
 		if (thumbnail->header.w > 0) {
 			lv_image_set_scale(cover_img, SX_MINI_COVER * LV_SCALE_NONE / thumbnail->header.w);
 		}
 		lv_obj_set_hidden(cover_img, false);
 	} else {
 		lv_obj_set_hidden(cover_img, true);
+		sx_artview_detach(cover_img);
 		lv_image_set_src(cover_img, NULL);
 	}
 	lv_obj_set_hidden(cover_glyph, thumbnail != NULL);
+	sx_artview_refresh();
 }
 
 // ---------------------------------------------------------------------------
@@ -228,8 +231,9 @@ static void play_clicked_cb(lv_event_t *e) {
 
 static void refresh_theme(void) {
 	const sx_palette_t *p = sx_pal();
+	sx_set_recolor(cover_glyph, sx_placeholder_ink(p->mini_cover_tone));
 	lv_obj_set_style_text_color(title, p->mini_ink, 0);
-	lv_obj_set_style_text_color(artist, sx_mix(p->mini_ink, p->mini_bg, 85), 0);
+	lv_obj_set_style_text_color(artist, p->mini_text2, 0);
 	lv_obj_set_style_bg_color(play_disc, p->mini_ink, 0);
 	lv_obj_set_style_image_recolor(play_icon, p->mini_bg, 0);
 	lv_obj_set_style_border_color(cover, sx_mix(p->mini_ink, p->mini_bg, 65), 0);

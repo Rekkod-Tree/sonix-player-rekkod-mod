@@ -1,4 +1,5 @@
 #include "settingsrow.h"
+#include "src/gui/shell/sx_palette.h"
 
 // LVGL 9.2 made lv_event_t opaque and moved its fields here. This file swaps
 // e->user_data around a wrapped callback, which is a write, and there is no
@@ -94,8 +95,8 @@ lv_obj_t *settingsrow_name_field(lv_obj_t *parent, gui_config_t *cfg, uint32_t m
 	lv_obj_set_size(field, cfg->screen_width - 2 * SX_BODY_PAD_L, 88);
 	lv_obj_set_scrollbar_mode(field, LV_SCROLLBAR_MODE_OFF);
 	lv_obj_align(field, LV_ALIGN_TOP_LEFT, SX_BODY_PAD_L, SX_BODY_TOP);
-	lv_obj_add_style(field, &theme_style_card, 0);
-	lv_obj_add_style(field, &sx_style_text2, LV_PART_TEXTAREA_PLACEHOLDER);
+	lv_obj_add_style(field, &sx_style_panel, 0);
+	lv_obj_add_style(field, &sx_style_panel_text2, LV_PART_TEXTAREA_PLACEHOLDER);
 	lv_obj_set_style_text_opa(field, LV_OPA_COVER, LV_PART_TEXTAREA_PLACEHOLDER);
 	lv_obj_set_style_radius(field, 12, 0);
 	lv_obj_set_style_border_width(field, 0, 0);
@@ -531,11 +532,11 @@ static lv_obj_t *make_card(lv_obj_t *parent, const char *name, lv_obj_t **value_
 	lv_obj_t *card = lv_obj_create(parent);
 	lv_obj_set_width(card, lv_pct(100));
 	lv_obj_set_height(card, height);
-	lv_obj_add_style(card, &theme_style_card, 0);
+	lv_obj_add_style(card, &sx_style_panel, 0);
 	// The 2.0 card (sx_card.h), the pressed fill aside: these cards are not
 	// buttons, their switch or slider is.
 	sx_card_style(card);
-	lv_obj_remove_style(card, &sx_style_press, LV_STATE_PRESSED);
+	lv_obj_remove_style(card, &sx_style_panel_press, LV_STATE_PRESSED);
 	lv_obj_set_scrollable(card, false);
 	// As on the plain rows, presses on the card body reach the page container
 	// so the swipe-back drag can start on a toggle or slider card too; the
@@ -544,13 +545,13 @@ static lv_obj_t *make_card(lv_obj_t *parent, const char *name, lv_obj_t **value_
 
 	lv_obj_t *label = lv_label_create(card);
 	lv_label_set_text(label, tr(name));
-	lv_obj_add_style(label, &theme_style_text, 0);
+	lv_obj_add_style(label, &sx_style_panel_text, 0);
 	lv_obj_set_style_text_font(label, &font_ui_24_bold, 0);
 	lv_obj_align(label, LV_ALIGN_TOP_LEFT, 0, 0);
 
 	if (value_out) {
 		*value_out = lv_label_create(card);
-		lv_obj_add_style(*value_out, &theme_style_text_dim, 0);
+		lv_obj_add_style(*value_out, &sx_style_panel_text2, 0);
 		lv_obj_set_style_text_font(*value_out, &font_ui_22, 0);
 		lv_obj_align(*value_out, LV_ALIGN_TOP_RIGHT, 0, 0);
 	}
@@ -819,7 +820,7 @@ lv_obj_t *settingsrow_toggle_slider(lv_obj_t *parent, const char *name, int step
 	lv_obj_align(toggle, LV_ALIGN_TOP_RIGHT, 0, -4);
 
 	lv_obj_t *value = lv_label_create(card);
-	lv_obj_add_style(value, &theme_style_text_dim, 0);
+	lv_obj_add_style(value, &sx_style_panel_text2, 0);
 	lv_obj_set_style_text_font(value, &font_ui_22, 0);
 	lv_obj_align(value, LV_ALIGN_TOP_LEFT, 0, 42);
 
@@ -952,8 +953,8 @@ lv_obj_t *settingsrow_add(lv_obj_t *parent, const char *name, lv_obj_t **value_o
 	lv_obj_t *row = lv_btn_create(parent);
 	lv_obj_set_width(row, lv_pct(100));
 	lv_obj_set_height(row, ROW_HEIGHT);
-	lv_obj_add_style(row, &theme_style_card, 0);
-	lv_obj_add_style(row, &theme_style_card_pressed, LV_STATE_PRESSED);
+	lv_obj_add_style(row, &sx_style_panel, 0);
+	lv_obj_add_style(row, &sx_style_panel_press, LV_STATE_PRESSED);
 	// The 2.0 card: one line of 60 px between 12 px margins (sx_card.h).
 	sx_card_style(row);
 	// Presses bubble up to the page container, so the swipe-back drag can start
@@ -970,7 +971,7 @@ lv_obj_t *settingsrow_add(lv_obj_t *parent, const char *name, lv_obj_t **value_o
 
 	lv_obj_t *label = lv_label_create(row);
 	lv_label_set_text(label, tr(name));
-	lv_obj_add_style(label, &theme_style_text, 0);
+	lv_obj_add_style(label, &sx_style_panel_text, 0);
 	lv_obj_set_style_text_font(label, &font_ui_24_bold, 0);
 	lv_obj_align(label, LV_ALIGN_LEFT_MID, 0, 0);
 
@@ -983,7 +984,7 @@ lv_obj_t *settingsrow_add(lv_obj_t *parent, const char *name, lv_obj_t **value_o
 
 	if (value_out) {
 		*value_out = lv_label_create(row);
-		lv_obj_add_style(*value_out, &theme_style_text_dim, 0);
+		lv_obj_add_style(*value_out, &sx_style_panel_text2, 0);
 		lv_obj_set_style_text_font(*value_out, &font_ui_22, 0);
 		lv_obj_align(*value_out, LV_ALIGN_RIGHT_MID, 0, 0);
 		lv_obj_add_event_cb(*value_out, row_value_resized_cb, LV_EVENT_SIZE_CHANGED, row);
@@ -992,7 +993,7 @@ lv_obj_t *settingsrow_add(lv_obj_t *parent, const char *name, lv_obj_t **value_o
 		// with a value use their right edge for the value instead.
 		lv_obj_t *chev = lv_image_create(row);
 		lv_image_set_src(chev, &icon_chevron_right);
-		lv_obj_add_style(chev, &theme_style_icon, 0);
+		lv_obj_add_style(chev, &sx_style_panel_icon, 0);
 		lv_obj_set_style_image_opa(chev, LV_OPA_60, 0);
 		lv_obj_align(chev, LV_ALIGN_RIGHT_MID, 0, 0);
 	}
@@ -1053,9 +1054,9 @@ lv_obj_t *settingsrow_toggle_pills(lv_obj_t *parent, const char *title, lv_event
 	lv_obj_t *card = lv_obj_create(parent);
 	lv_obj_set_width(card, lv_pct(100));
 	lv_obj_set_height(card, LV_SIZE_CONTENT);
-	lv_obj_add_style(card, &theme_style_card, 0);
+	lv_obj_add_style(card, &sx_style_panel, 0);
 	sx_card_style(card);
-	lv_obj_remove_style(card, &sx_style_press, LV_STATE_PRESSED);
+	lv_obj_remove_style(card, &sx_style_panel_press, LV_STATE_PRESSED);
 	// The name sits in the middle of the card's 60 px head line, the pills
 	// 10 px under that line (the prototype's card()).
 	lv_obj_set_style_pad_top(card, SX_CARD_PAD_V, 0);
@@ -1079,7 +1080,7 @@ lv_obj_t *settingsrow_toggle_pills(lv_obj_t *parent, const char *title, lv_event
 
 	lv_obj_t *name = lv_label_create(head);
 	lv_label_set_text(name, tr(title));
-	lv_obj_add_style(name, &theme_style_text, 0);
+	lv_obj_add_style(name, &sx_style_panel_text, 0);
 	lv_obj_set_style_text_font(name, &font_ui_24_bold, 0);
 	// The name takes what is left after the switch and wraps inside it. Without
 	// this a long title -- "Compensazione guadagno DSD" in Italian, longer still
@@ -1112,9 +1113,9 @@ lv_obj_t *settingsrow_pills(lv_obj_t *parent, const char *title, lv_obj_t **pill
 	lv_obj_t *card = lv_obj_create(parent);
 	lv_obj_set_width(card, lv_pct(100));
 	lv_obj_set_height(card, LV_SIZE_CONTENT);
-	lv_obj_add_style(card, &theme_style_card, 0);
+	lv_obj_add_style(card, &sx_style_panel, 0);
 	sx_card_style(card);
-	lv_obj_remove_style(card, &sx_style_press, LV_STATE_PRESSED);
+	lv_obj_remove_style(card, &sx_style_panel_press, LV_STATE_PRESSED);
 	// The name sits in the middle of the card's 60 px head line, the pills
 	// 10 px under that line (the prototype's card()).
 	lv_obj_set_style_pad_top(card, SX_CARD_PAD_V, 0);
@@ -1127,7 +1128,7 @@ lv_obj_t *settingsrow_pills(lv_obj_t *parent, const char *title, lv_obj_t **pill
 
 	lv_obj_t *name = lv_label_create(card);
 	lv_label_set_text(name, tr(title));
-	lv_obj_add_style(name, &theme_style_text, 0);
+	lv_obj_add_style(name, &sx_style_panel_text, 0);
 	lv_obj_set_style_text_font(name, &font_ui_24_bold, 0);
 
 	lv_obj_t *pills = lv_obj_create(card);
@@ -1184,9 +1185,9 @@ static void paint_duration_roller(lv_obj_t *roller) {
 	if (!roller) {
 		return;
 	}
-	lv_obj_set_style_text_color(roller, theme()->text_secondary, 0);
-	lv_obj_set_style_bg_color(roller, theme()->surface_pressed, LV_PART_SELECTED);
-	lv_obj_set_style_text_color(roller, theme()->accent_text, LV_PART_SELECTED);
+	lv_obj_set_style_text_color(roller, sx_pal()->panel_text2, 0);
+	lv_obj_set_style_bg_color(roller, sx_pal()->panel_press, LV_PART_SELECTED);
+	lv_obj_set_style_text_color(roller, sx_pal()->panel_action, LV_PART_SELECTED);
 }
 
 static void fill_wheel_numbers(char *out, size_t size, int last, const char *format) {
@@ -1232,7 +1233,7 @@ static lv_obj_t *make_duration_roller(lv_obj_t *parent, const char *options, int
 static void wheel_unit(lv_obj_t *parent, const char *text) {
 	lv_obj_t *label = lv_label_create(parent);
 	lv_label_set_text(label, text);
-	lv_obj_add_style(label, &theme_style_text_dim, 0);
+	lv_obj_add_style(label, &sx_style_panel_text2, 0);
 	lv_obj_set_style_text_font(label, &font_ui_22, 0);
 }
 

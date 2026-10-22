@@ -146,6 +146,8 @@ void player_restore_list(const char *const *list, int count, int start_index, bo
 // owned -- the player frees these at the next track change, so nothing may
 // keep them across one.
 const lv_image_dsc_t *player_cover_image(void);
+uint32_t player_cover_generation(void);
+uint32_t player_backdrop_generation(void);
 const lv_image_dsc_t *player_backdrop_image(void);
 
 // Registers a callback run immediately before that artwork is freed, so

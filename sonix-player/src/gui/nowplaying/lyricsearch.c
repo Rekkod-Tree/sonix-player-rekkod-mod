@@ -1,4 +1,5 @@
 #include "lyricsearch.h"
+#include "src/gui/shell/artview.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/sx_row.h"
 #include "src/gui/shell/sx_styles.h"
@@ -219,6 +220,7 @@ static void add_row(int index) {
 	format_length(record->duration, length, sizeof(length));
 	sx_row_set_subtitle(row, who, tr(record->synced ? "lyrics_synced" : "lyrics_plain"), length);
 	sx_row_set_glyph(row, &icon_lyrics_search, sx_placeholder_name(record->track));
+	sx_row_set_content(row, sx_palette_hue_of_name(record->track), false, false, 0);
 }
 
 void lyricsearch_open(const char *path, lrclib_record_t *records_in, int count) {

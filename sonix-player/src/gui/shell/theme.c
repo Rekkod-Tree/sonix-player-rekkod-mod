@@ -1,9 +1,11 @@
 #include "theme.h"
 
+#include "src/gui/shell/artview.h"
 #include "src/gui/shell/sx_palette.h"
+#include "src/gui/shell/sx_row.h"
 #include "src/gui/shell/sx_styles.h"
-#include "src/system/device/bootlogo.h"
 #include "src/system/core/config.h"
+#include "src/system/device/bootlogo.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -34,6 +36,9 @@ static bool dark_selected = true;
 // backgrounds, cards and the status bar take the cover's hue when enabled.
 // Existing choices are retained; Graphite starts with neutral surfaces.
 static bool dynamic_tint;
+static int palette_family, lcd_lamp;
+static bool force_color_placeholders;
+static bool monochrome_covers;
 
 static theme_palette_t *active = &palette_dark;
 
@@ -57,6 +62,8 @@ lv_color_t theme_accent_preset(int index) {
 	if (index == THEME_ACCENT_GRAPHITE) {
 		return sx_hex(dark_selected ? SX_D_ACCENT : SX_L_ACCENT);
 	}
+	if (index == THEME_ACCENT_PALETTE)
+		return sx_palette_recommended_accent();
 	if (index == THEME_ACCENT_COVER) {
 		return sx_pal()->accent;
 	}
@@ -84,7 +91,11 @@ static int refresh_cb_capacity;
 static void rebuild_active(bool configure) {
 	if (configure) {
 		lv_color_t preset = theme_accent_preset(accent_index);
-		sx_palette_configure(dark_selected, accent_index, preset, dynamic_tint);
+		sx_palette_options(palette_family, lcd_lamp, force_color_placeholders, monochrome_covers);
+		int effective_accent = !palette_family && accent_index == THEME_ACCENT_PALETTE ? THEME_ACCENT_GRAPHITE : accent_index;
+		if (effective_accent == THEME_ACCENT_GRAPHITE)
+			preset = theme_accent_preset(effective_accent);
+		sx_palette_configure(dark_selected, effective_accent, preset, dynamic_tint);
 	}
 	const sx_palette_t *p = sx_pal();
 
@@ -186,12 +197,21 @@ void theme_init(void) {
 
 	// A missing preference selects Graphite. Keep every explicitly saved accent.
 	accent_index = (int)config_get_int("ui", "accent", THEME_ACCENT_GRAPHITE);
-	if (accent_index != THEME_ACCENT_COVER && accent_index != THEME_ACCENT_GRAPHITE && (accent_index < 0 || accent_index >= THEME_ACCENT_COUNT)) {
+	if (accent_index != THEME_ACCENT_PALETTE && accent_index != THEME_ACCENT_COVER && accent_index != THEME_ACCENT_GRAPHITE && (accent_index < 0 || accent_index >= THEME_ACCENT_COUNT)) {
 		accent_index = THEME_ACCENT_GRAPHITE;
 	}
 
 	// Only change the default; preserve saved tint preferences.
 	dynamic_tint = config_get_bool("ui", "dynamic_tint", false);
+	palette_family = (int)config_get_int("ui", "palette", 0);
+	if (palette_family < 0 || palette_family >= THEME_PALETTE_COUNT)
+		palette_family = 0;
+	lcd_lamp = (int)config_get_int("ui", "lcd_backlight", 0);
+	if (lcd_lamp < 0 || lcd_lamp >= THEME_LCD_LAMP_COUNT)
+		lcd_lamp = 0;
+	force_color_placeholders = config_get_bool("ui", "force_color_placeholders", false);
+	monochrome_covers = config_get_bool("ui", "monochrome_covers", false);
+	sx_artview_mode(monochrome_covers);
 
 	rebuild_active(true);
 	apply_palette();
@@ -307,6 +327,8 @@ static void refresh_tree(lv_obj_t *obj) {
 }
 
 void theme_notify_screen_shown(lv_obj_t *screen) {
+	sx_row_refresh_content(screen);
+	sx_artview_screen_will_show(screen);
 	if (screen && screen_is_stale(screen)) {
 		refresh_tree(screen);
 	}
@@ -318,6 +340,8 @@ void theme_notify_screen_shown(lv_obj_t *screen) {
 // at runtime, the blurred artwork behind the controls. Those run for every
 // page, on screen or not, and cost about as much as one frame in total.
 static void refresh_all(void) {
+	sx_row_refresh_content(NULL);
+	sx_artview_mode(monochrome_covers);
 	palette_generation++;
 
 	lv_obj_t *screen = lv_screen_active();
@@ -361,6 +385,8 @@ static void light_tick_cb(lv_timer_t *t) {
 }
 
 static void refresh_light(void) {
+	sx_row_refresh_content(NULL);
+	sx_artview_mode(monochrome_covers);
 	lv_obj_invalidate(lv_screen_active());
 	lv_obj_invalidate(lv_layer_top());
 	lv_obj_invalidate(lv_layer_sys());
@@ -395,7 +421,7 @@ void theme_toggle(void) {
 }
 
 void theme_set_accent(int index) {
-	if (index != THEME_ACCENT_COVER && index != THEME_ACCENT_GRAPHITE && (index < 0 || index >= THEME_ACCENT_COUNT)) {
+	if (index != THEME_ACCENT_PALETTE && index != THEME_ACCENT_COVER && index != THEME_ACCENT_GRAPHITE && (index < 0 || index >= THEME_ACCENT_COUNT)) {
 		index = THEME_ACCENT_GRAPHITE;
 	}
 	accent_index = index;
@@ -422,4 +448,51 @@ void theme_set_dynamic_tint(bool on) {
 	config_save();
 
 	refresh_all();
+}
+
+int theme_get_palette(void) { return palette_family; }
+int theme_get_lcd_lamp(void) { return lcd_lamp; }
+bool theme_force_color_placeholders(void) { return force_color_placeholders; }
+static void appearance_option_saved(const char *key, int value) {
+	rebuild_active(true);
+	apply_palette();
+	config_set_int("ui", key, value);
+	config_save();
+	refresh_all();
+}
+void theme_set_palette(int family) {
+	if (family < 0 || family >= THEME_PALETTE_COUNT)
+		family = 0;
+	if (palette_family == family)
+		return;
+	palette_family = family;
+	appearance_option_saved("palette", family);
+}
+void theme_set_lcd_lamp(int lamp) {
+	if (lamp < 0 || lamp >= THEME_LCD_LAMP_COUNT)
+		lamp = 0;
+	if (lcd_lamp == lamp)
+		return;
+	lcd_lamp = lamp;
+	appearance_option_saved("lcd_backlight", lamp);
+}
+void theme_set_force_color_placeholders(bool on) {
+	if (force_color_placeholders == on)
+		return;
+	force_color_placeholders = on;
+	appearance_option_saved("force_color_placeholders", on);
+}
+
+bool theme_monochrome_covers(void) { return monochrome_covers; }
+bool theme_set_monochrome_covers(bool on) {
+	if (monochrome_covers == on)
+		return sx_artview_refresh();
+	monochrome_covers = on;
+	rebuild_active(true);
+	apply_palette();
+	bool ok = sx_artview_mode(on);
+	config_set_bool("ui", "monochrome_covers", on);
+	config_save();
+	refresh_all();
+	return ok;
 }

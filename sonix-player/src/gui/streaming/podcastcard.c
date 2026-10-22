@@ -1,4 +1,5 @@
 #include "podcastcard.h"
+#include "src/gui/shell/artview.h"
 
 #include <dirent.h>
 #include <pthread.h>
@@ -51,6 +52,8 @@ lv_obj_t *podcastcard_screen;
 lv_obj_t *podcastcard_feed_screen;
 
 static gui_config_t *g_cfg;
+// Written and read only by the GUI thread for the latest shelf scan.
+static bool last_scan_pending;
 
 // ---------------------------------------------------------------------------
 // what the card says about an episode
@@ -238,6 +241,8 @@ static void count_folder(const char *folder, podcastcard_show_t *show) {
 	if (!dir) {
 		return;
 	}
+	if (podcastpair_pending_fd(dirfd(dir)))
+		last_scan_pending = true;
 	// One pass over the listing: a download from Sonix has its ".tags" beside
 	// it, and seeing that name is cheaper than asking after every file.
 	char sidecar[900] = "";
@@ -252,7 +257,10 @@ static void count_folder(const char *folder, podcastcard_show_t *show) {
 		if (!is_episode_name(de->d_name) || !entry_is(de, path, false)) {
 			continue;
 		}
-		count_file(path, show);
+		if (podcastpair_ready_at(dirfd(dir), de->d_name))
+			count_file(path, show);
+		else
+			last_scan_pending = true;
 	}
 	closedir(dir);
 	if (sidecar[0]) {
@@ -281,7 +289,10 @@ static int show_cmp(const void *a, const void *b) {
 	return strcasecmp(x->name, y->name);
 }
 
+bool podcastcard_scan_pending(void) { return last_scan_pending; }
+
 int podcastcard_shows(podcastcard_show_t *out, int max) {
+	last_scan_pending = false;
 	char root[512];
 	podcastdl_root(root, sizeof(root));
 	if (!out || max <= 0 || !root[0]) {
@@ -298,6 +309,8 @@ int podcastcard_shows(podcastcard_show_t *out, int max) {
 		heard_free();
 		return 0;
 	}
+	if (podcastpair_pending_fd(dirfd(dir)))
+		last_scan_pending = true;
 	struct dirent *de;
 	while ((de = readdir(dir)) != NULL && count < max) {
 		if (de->d_name[0] == '.' || strlen(de->d_name) >= sizeof(out[0].name)) {
@@ -306,7 +319,10 @@ int podcastcard_shows(podcastcard_show_t *out, int max) {
 		char path[900];
 		snprintf(path, sizeof(path), "%s/%s", root, de->d_name);
 		if (is_episode_name(de->d_name) && entry_is(de, path, false)) {
-			count_file(path, &loose);
+			if (podcastpair_ready_at(dirfd(dir), de->d_name))
+				count_file(path, &loose);
+			else
+				last_scan_pending = true;
 			continue;
 		}
 		if (!entry_is(de, path, true)) {
@@ -354,7 +370,7 @@ int podcastcard_count_for_title(const char *title) {
 	int n = 0;
 	struct dirent *de;
 	while ((de = readdir(dir)) != NULL) {
-		if (is_episode_name(de->d_name)) {
+		if (is_episode_name(de->d_name) && podcastpair_ready_at(dirfd(dir), de->d_name)) {
 			n++;
 		}
 	}
@@ -601,6 +617,8 @@ static int folder_read(const char *folder, episode_t *out, int max, char (*title
 		}
 		char path[900];
 		snprintf(path, sizeof(path), "%.600s/%.255s", folder, de->d_name);
+		if (!podcastpair_ready_at(dirfd(dir), de->d_name))
+			continue;
 		// The listing says what the entry is and a date in its name says when
 		// it is from: only a file that leaves either open is asked.
 		time_t when = date_in_name(de->d_name);
@@ -1147,6 +1165,7 @@ static void refill(page_t *p, bool keep_scroll) {
 // ---------------------------------------------------------------------------
 
 static void hero_placeholder(page_t *p) {
+	sx_artview_detach(p->hero_cover);
 	lv_image_set_src(p->hero_cover, &icon_podcast_list);
 	lv_obj_add_style(p->hero_cover, &theme_style_icon, 0);
 	lv_obj_set_style_image_recolor_opa(p->hero_cover, LV_OPA_COVER, 0);
@@ -1155,16 +1174,16 @@ static void hero_placeholder(page_t *p) {
 static void hero_show(page_t *p, const cover_image_t *image) {
 	// Off the old pixels before they go.
 	hero_placeholder(p);
-	cover_free(&p->hero_image);
+	sx_artview_release_cover(&p->hero_image);
 	p->hero_image = *image;
 	lv_obj_remove_style(p->hero_cover, &theme_style_icon, 0);
 	lv_obj_set_style_image_recolor_opa(p->hero_cover, LV_OPA_TRANSP, 0);
-	lv_image_set_src(p->hero_cover, &p->hero_image.dsc);
+	sx_artview_bind(p->hero_cover, &p->hero_image.dsc, p->hero_image.display_generation);
 }
 
 static void hero_clear(page_t *p) {
 	hero_placeholder(p);
-	cover_free(&p->hero_image);
+	sx_artview_release_cover(&p->hero_image);
 	p->hero_waiting = false;
 }
 

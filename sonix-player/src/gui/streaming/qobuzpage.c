@@ -1,4 +1,5 @@
 #include "qobuzpage.h"
+#include "src/gui/shell/artview.h"
 #include "src/system/playback/sleeptimer.h"
 
 #include <malloc.h>
@@ -583,7 +584,7 @@ static void art_poll_cb(lv_timer_t *timer) {
 			}
 			continue;
 		}
-		cover_free(&row_images[entry]);
+		sx_artview_release_cover(&row_images[entry]);
 		row_images[entry] = image;
 		row_has_image[entry] = true;
 		svclist_rebind_index(list, entry);
@@ -645,7 +646,7 @@ static void art_forget_rows(void) {
 	for (int entry = 0; entry < QOBUZ_MAX_HELD; entry++) {
 		row_has_image[entry] = false;
 		row_art_failed[entry] = false;
-		cover_free(&row_images[entry]);
+		sx_artview_release_cover(&row_images[entry]);
 	}
 	art_first = 0;
 	art_last = -1;
@@ -664,7 +665,7 @@ static void art_drop_pictures(void) {
 	// The rows let go of the pictures before they are freed.
 	svclist_rebind(list);
 	for (int entry = 0; entry < QOBUZ_MAX_HELD; entry++) {
-		cover_free(&row_images[entry]);
+		sx_artview_release_cover(&row_images[entry]);
 	}
 }
 
@@ -782,6 +783,7 @@ static void list_bind(lv_obj_t *row, int index) {
 			sx_row_set_number(row, t->track_number);
 		} else {
 			sx_row_set_thumb(row, image, svcui_tone(t->album[0] ? t->album : t->title));
+			sx_row_set_content(row, svcui_hue(t->album[0] ? t->album : t->title), false, image != NULL, image ? row_images[index].display_generation : 0);
 		}
 		sx_row_set_trail(row, SX_ROW_TRAIL_STAR);
 		sx_row_set_starred(row, qobuzsync_is_favorite(t->id));
@@ -797,6 +799,7 @@ static void list_bind(lv_obj_t *row, int index) {
 		sx_row_set_title(row, a->title);
 		sx_row_set_subtitle(row, detail, NULL, NULL);
 		sx_row_set_thumb(row, image, svcui_tone(a->title));
+		sx_row_set_content(row, svcui_hue(a->title), false, image != NULL, image ? row_images[index].display_generation : 0);
 		sx_row_set_trail(row, SX_ROW_TRAIL_CHEVRON);
 		sx_row_set_swipes(row, true, true);
 	} else if (list_kind == JOB_SEARCH_ARTISTS) {
@@ -804,6 +807,7 @@ static void list_bind(lv_obj_t *row, int index) {
 		sx_row_set_title(row, a->name);
 		sx_row_set_subtitle(row, detail, NULL, NULL);
 		sx_row_set_person(row, image, a->name);
+		sx_row_set_content(row, svcui_hue(a->name), false, image != NULL, image ? row_images[index].display_generation : 0);
 		sx_row_set_trail(row, SX_ROW_TRAIL_CHEVRON);
 		sx_row_set_swipes(row, false, false);
 	} else if (list_kind == JOB_USER_PLAYLISTS) {
@@ -811,6 +815,7 @@ static void list_bind(lv_obj_t *row, int index) {
 		sx_row_set_title(row, p->name);
 		sx_row_set_subtitle(row, detail, NULL, NULL);
 		sx_row_set_thumb(row, image, svcui_tone(p->name));
+		sx_row_set_content(row, svcui_hue(p->name), false, image != NULL, image ? row_images[index].display_generation : 0);
 		sx_row_set_trail(row, SX_ROW_TRAIL_CHEVRON);
 		sx_row_set_swipes(row, false, false);
 	}
@@ -2023,6 +2028,7 @@ static void build_search_page(gui_config_t *cfg) {
 	search_field = lv_textarea_create(search_screen);
 	lv_textarea_set_one_line(search_field, true);
 	lv_textarea_set_placeholder_text(search_field, tr("artist_album_or_track"));
+	lv_obj_add_style(search_field, &sx_style_search_placeholder, LV_PART_TEXTAREA_PLACEHOLDER);
 	field_style(search_field, cfg, top);
 	lv_obj_set_style_text_font(search_field, &font_ui_24, 0);
 	keyboard_style_caret(search_field);

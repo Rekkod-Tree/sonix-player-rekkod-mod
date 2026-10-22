@@ -1,12 +1,13 @@
 #include "cover.h"
 
 #include <dirent.h>
+#include <errno.h>
 #include <pthread.h>
+#include <signal.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <errno.h>
-#include <signal.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -21,6 +22,15 @@
 #include "src/system/image/png_scaled.h"
 #include "src/system/image/stb_image_decl.h"
 #include "src/system/core/utils.h"
+
+static atomic_uint display_generation;
+uint32_t cover_new_display_generation(void) {
+	unsigned value;
+	do {
+		value = atomic_fetch_add_explicit(&display_generation, 1, memory_order_relaxed) + 1;
+	} while (!value);
+	return value;
+}
 
 // The backdrop is blurred at half resolution and stretched back up. Blurring
 // the small copy (rather than relying on the stretch alone) is what keeps it
@@ -648,6 +658,7 @@ static bool pack_rgb565_dithered(const uint8_t *rgb, int w, int h, cover_image_t
 	out->dsc.header.stride = (uint32_t)w * 2;
 	out->dsc.data_size = (uint32_t)w * h * 2;
 	out->dsc.data = out->pixels;
+	out->display_generation = cover_new_display_generation();
 	return true;
 }
 
@@ -671,6 +682,7 @@ static bool pack_rgb565(const uint8_t *rgb, int w, int h, cover_image_t *out) {
 	out->dsc.header.stride = (uint32_t)w * 2;
 	out->dsc.data_size = (uint32_t)w * h * 2;
 	out->dsc.data = out->pixels;
+	out->display_generation = cover_new_display_generation();
 	return true;
 }
 
@@ -2071,6 +2083,7 @@ static bool image_from_column(sqlite3_stmt *stmt, int col, int w, int h, cover_i
 	out->dsc.header.stride = (uint32_t)w * 2;
 	out->dsc.data_size = (uint32_t)bytes;
 	out->dsc.data = pixels;
+	out->display_generation = cover_new_display_generation();
 	return true;
 }
 
@@ -2542,6 +2555,7 @@ static bool player_cover_load(uint64_t id, int w, int h, cover_image_t *out) {
 		out->dsc.header.stride = (uint32_t)w * 2;
 		out->dsc.data_size = (uint32_t)blob_len;
 		out->dsc.data = blob;
+		out->display_generation = cover_new_display_generation();
 		player_cover_store(id, w, h, out);
 	} else {
 		hit = blob_len > 2 && blob[0] == 0xFF && blob[1] == 0xD8 && image_from_jpeg(blob, blob_len, w, h, out);

@@ -1,4 +1,5 @@
 #include "radiopage.h"
+#include "src/gui/shell/artview.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -260,6 +261,7 @@ static void station_bind(lv_obj_t *row, const radio_station_t *s, bool with_code
 	sx_row_set_title(row, s->name);
 	sx_row_set_subtitle(row, sub, NULL, NULL);
 	sx_row_set_thumb(row, &icon_radio_custom, svcui_tone(s->name));
+	sx_row_set_content(row, svcui_hue(s->name), false, false, 0);
 	sx_row_set_trail(row, SX_ROW_TRAIL_STAR);
 	sx_row_set_starred(row, radio_fav_contains(s->uuid));
 	sx_row_set_playing(row, playing);
@@ -405,6 +407,7 @@ static void list_bind(lv_obj_t *row, int index) {
 		sx_row_set_title(row, t->label);
 		sx_row_set_subtitle(row, t->stationcount > 0 ? sub : "", NULL, NULL);
 		sx_row_set_letter(row, letter, svcui_tone(t->label), false);
+		sx_row_set_content(row, svcui_hue(t->label), false, false, 0);
 		sx_row_set_trail(row, SX_ROW_TRAIL_CHEVRON);
 		sx_row_set_playing(row, false);
 		lv_obj_set_style_opa(row, LV_OPA_COVER, 0);
@@ -1217,6 +1220,7 @@ static void build_search_page(gui_config_t *cfg) {
 	search_field = lv_textarea_create(radiosearch_screen);
 	lv_textarea_set_one_line(search_field, true);
 	lv_textarea_set_placeholder_text(search_field, tr("radio_station_name"));
+	lv_obj_add_style(search_field, &sx_style_search_placeholder, LV_PART_TEXTAREA_PLACEHOLDER);
 	lv_obj_set_size(search_field, cfg->screen_width - 2 * SX_BODY_PAD_L, 60);
 	lv_obj_set_scrollbar_mode(search_field, LV_SCROLLBAR_MODE_OFF);
 	lv_obj_align(search_field, LV_ALIGN_TOP_LEFT, SX_BODY_PAD_L, top);

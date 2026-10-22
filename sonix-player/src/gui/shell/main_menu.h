@@ -26,6 +26,8 @@ void main_menu_reload(void);
 void main_menu_refresh(void);
 void main_menu_open_settings(void);
 void main_menu_open_search(void);
+// A visible source switch on the three search input pages. UI thread only.
+void main_menu_search_header(lv_obj_t *screen, gui_config_t *cfg, home_item_t source);
 bool main_menu_get_entry(home_item_t item, grid_entry_t *out);
 void main_menu_hold(lv_event_t *e);
 

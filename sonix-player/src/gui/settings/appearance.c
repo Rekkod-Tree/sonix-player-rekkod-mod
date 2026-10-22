@@ -29,11 +29,14 @@ static lv_obj_t *btn_clock[4]; // left / centre / right / hidden
 // presets, preset i in slot i + 1.
 #define ACCENT_SLOT_GRAPHITE 0
 #define ACCENT_SLOT_COVER 1
-#define ACCENT_SLOTS (THEME_ACCENT_COUNT + 2)
+#define ACCENT_SLOT_PALETTE (THEME_ACCENT_COUNT + 2)
+#define ACCENT_SLOTS (THEME_ACCENT_COUNT + 3)
 static lv_obj_t *btn_accent[ACCENT_SLOTS];
 static lv_obj_t *accent_name;
 static lv_obj_t *cover_mark; // artwork marker on the cover-derived accent
 static lv_obj_t *tint_toggle;
+static lv_obj_t *palette_pill[THEME_PALETTE_COUNT], *lamp_pill[THEME_LCD_LAMP_COUNT];
+static lv_obj_t *lamp_card, *force_color_toggle, *mono_toggle;
 static lv_obj_t *battery_percent_toggle;
 static lv_obj_t *statusbar_always_toggle;
 static lv_obj_t *rounded_corners_toggle;
@@ -81,6 +84,51 @@ static void refresh_text_size_pills(void) {
 	}
 }
 
+static void refresh_palette_controls(void) {
+	int family = theme_get_palette();
+	for (int i = 0; i < THEME_PALETTE_COUNT; i++)
+		if (palette_pill[i])
+			settingsrow_pill_active(palette_pill[i], i == family);
+	for (int i = 0; i < THEME_LCD_LAMP_COUNT; i++)
+		if (lamp_pill[i])
+			settingsrow_pill_active(lamp_pill[i], i == theme_get_lcd_lamp());
+	if (lamp_card)
+		lv_obj_set_hidden(lamp_card, family != 3);
+	if (mono_toggle) {
+		if (theme_monochrome_covers())
+			lv_obj_add_state(mono_toggle, LV_STATE_CHECKED);
+		else
+			lv_obj_remove_state(mono_toggle, LV_STATE_CHECKED);
+	}
+	if (force_color_toggle) {
+		if (theme_force_color_placeholders())
+			lv_obj_add_state(force_color_toggle, LV_STATE_CHECKED);
+		else
+			lv_obj_remove_state(force_color_toggle, LV_STATE_CHECKED);
+	}
+}
+static void palette_pick_cb(lv_event_t *e) {
+	if (switcher_back_drag_active())
+		return;
+	theme_set_palette((int)(intptr_t)lv_event_get_user_data(e));
+	refresh_palette_controls();
+}
+static void lamp_pick_cb(lv_event_t *e) {
+	if (switcher_back_drag_active())
+		return;
+	theme_set_lcd_lamp((int)(intptr_t)lv_event_get_user_data(e));
+	refresh_palette_controls();
+}
+static void mono_cb(lv_event_t *e) {
+	(void)e;
+	theme_set_monochrome_covers(lv_obj_has_state(mono_toggle, LV_STATE_CHECKED));
+}
+
+static void force_color_cb(lv_event_t *e) {
+	(void)e;
+	theme_set_force_color_placeholders(lv_obj_has_state(force_color_toggle, LV_STATE_CHECKED));
+}
+
 // Applied at once, on every page: see fonts_set_large_text().
 static void text_size_cb(lv_event_t *e) {
 	if (switcher_back_drag_active()) {
@@ -103,7 +151,7 @@ static void refresh_buttons(void) {
 	settingsrow_pill_active(btn_light, !dark);
 }
 
-static int slot_accent(int slot) { return slot == ACCENT_SLOT_GRAPHITE ? THEME_ACCENT_GRAPHITE : slot == ACCENT_SLOT_COVER ? THEME_ACCENT_COVER : slot - 2; }
+static int slot_accent(int slot) { return slot == ACCENT_SLOT_PALETTE ? THEME_ACCENT_PALETTE : slot == ACCENT_SLOT_GRAPHITE ? THEME_ACCENT_GRAPHITE : slot == ACCENT_SLOT_COVER ? THEME_ACCENT_COVER : slot - 2; }
 
 // The active circle wears a ring in the text colour; the rest sit flat. The
 // cover's circle is in the colour the cover gives now -- it changes with the
@@ -112,7 +160,7 @@ static void refresh_accent_buttons(void) {
 	int active_accent = theme_get_accent();
 	if (accent_name) {
 		static const char *names[] = {"appearance_blue", "appearance_orange", "appearance_yellow", "appearance_green", "appearance_purple", "appearance_pink", "appearance_gray"};
-		const char *name = active_accent == THEME_ACCENT_COVER ? "appearance_cover" : active_accent == THEME_ACCENT_GRAPHITE ? "appearance_graphite" : names[active_accent];
+		const char *name = active_accent == THEME_ACCENT_PALETTE ? "appearance_recommended" : active_accent == THEME_ACCENT_COVER ? "appearance_cover" : active_accent == THEME_ACCENT_GRAPHITE ? "appearance_graphite" : names[active_accent];
 		lv_label_set_text(accent_name, tr(name));
 	}
 
@@ -261,6 +309,20 @@ void appearance_init(gui_config_t *cfg) {
 	if (corners_enabled()) {
 		lv_obj_add_state(rounded_corners_toggle, LV_STATE_CHECKED);
 	}
+
+	// Additive options follow the existing controls; no existing row is moved.
+	static const char *families[] = {"palette_graphite", "palette_mono", "palette_vivid", "palette_lcd", "palette_terminal", "palette_terminal_color", "palette_night_city", "palette_2077", "palette_netrunner"};
+	settingsrow_pills(container, "appearance_palette", &pills);
+	for (int i = 0; i < THEME_PALETTE_COUNT; i++)
+		palette_pill[i] = settingsrow_pill(pills, families[i], i, palette_pick_cb);
+	static const char *lamps[] = {"palette_lamp_olive", "palette_lamp_amber", "palette_lamp_ice", "palette_lamp_white", "palette_lamp_pink"};
+	lamp_card = settingsrow_pills(container, "palette_lcd_backlight", &pills);
+	for (int i = 0; i < THEME_LCD_LAMP_COUNT; i++)
+		lamp_pill[i] = settingsrow_pill(pills, lamps[i], i, lamp_pick_cb);
+	settingsrow_switch_card(container, "palette_mono_covers", "palette_mono_covers_note", &mono_toggle, mono_cb);
+	settingsrow_switch_card(container, "palette_force_color", "palette_force_color_note", &force_color_toggle, force_color_cb);
+	refresh_palette_controls();
+	theme_register_refresh(refresh_palette_controls);
 
 	refresh_buttons();
 	refresh_clock_buttons();

@@ -34,7 +34,7 @@ lv_obj_t *sx_card_nav_group(lv_obj_t *parent) {
 	lv_obj_set_size(group, lv_pct(100), LV_SIZE_CONTENT);
 	lv_obj_set_flex_flow(group, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_style_pad_row(group, 0, 0);
-	lv_obj_add_style(group, &sx_style_surface, 0);
+	lv_obj_add_style(group, &sx_style_panel, 0);
 	lv_obj_set_style_radius(group, SX_CARD_R, 0);
 	lv_obj_set_style_clip_corner(group, true, 0);
 	lv_obj_set_user_flag(group, 3, true);
@@ -59,8 +59,8 @@ void sx_card_style(lv_obj_t *obj) {
 	if (!obj) {
 		return;
 	}
-	lv_obj_add_style(obj, &sx_style_surface, 0);
-	lv_obj_add_style(obj, &sx_style_press, LV_STATE_PRESSED);
+	lv_obj_add_style(obj, &sx_style_panel, 0);
+	lv_obj_add_style(obj, &sx_style_panel_press, LV_STATE_PRESSED);
 	lv_obj_set_style_radius(obj, SX_CARD_R, 0);
 	lv_obj_set_style_border_width(obj, 0, 0);
 	lv_obj_set_style_shadow_width(obj, 0, 0);
@@ -80,9 +80,9 @@ void sx_pill_style(lv_obj_t *pill) {
 	lv_obj_set_style_border_width(pill, 0, 0);
 	lv_obj_set_style_shadow_width(pill, 0, 0);
 	lv_obj_set_style_bg_opa(pill, LV_OPA_COVER, 0);
-	lv_obj_add_style(pill, &sx_style_press, 0);
-	lv_obj_add_style(pill, &sx_style_text, 0);
-	lv_obj_add_style(pill, &sx_style_surface, LV_STATE_PRESSED);
+	lv_obj_add_style(pill, &sx_style_panel_press, 0);
+	lv_obj_add_style(pill, &sx_style_panel_text, 0);
+	lv_obj_add_style(pill, &sx_style_panel, LV_STATE_PRESSED);
 	lv_obj_set_style_transform_width(pill, 0, LV_STATE_PRESSED);
 	lv_obj_set_style_transform_height(pill, 0, LV_STATE_PRESSED);
 	// Half the gap each way: a tap between two pills goes to the nearer one.
@@ -95,26 +95,26 @@ void sx_pill_set_active(lv_obj_t *pill, bool active) {
 	}
 	if (lv_obj_get_user_flag(lv_obj_get_parent(pill), 2)) {
 		lv_obj_t *label = lv_obj_get_child(pill, 0);
-		lv_obj_remove_style(pill, &sx_style_accent, 0);
-		lv_obj_remove_style(pill, &sx_style_accent_press, LV_STATE_PRESSED);
-		lv_obj_remove_style(label, &sx_style_text, 0);
-		lv_obj_remove_style(label, &sx_style_text2, 0);
+		lv_obj_remove_style(pill, &sx_style_panel_accent, 0);
+		lv_obj_remove_style(pill, &sx_style_panel_accent_press, LV_STATE_PRESSED);
+		lv_obj_remove_style(label, &sx_style_panel_text, 0);
+		lv_obj_remove_style(label, &sx_style_panel_text2, 0);
 		if (active)
 			lv_obj_add_state(pill, LV_STATE_CHECKED);
 		else {
 			lv_obj_remove_state(pill, LV_STATE_CHECKED);
-			lv_obj_add_style(label, &sx_style_text2, 0);
+			lv_obj_add_style(label, &sx_style_panel_text2, 0);
 		}
 		lv_obj_set_style_text_font(label, active ? &font_ui_22_bold : &font_ui_22, 0);
 		return;
 	}
 	// The accent's style goes on top of the neutral one, so it wins while
 	// there; both follow the palette by themselves.
-	lv_obj_remove_style(pill, &sx_style_accent, 0);
-	lv_obj_remove_style(pill, &sx_style_accent_press, LV_STATE_PRESSED);
+	lv_obj_remove_style(pill, &sx_style_panel_accent, 0);
+	lv_obj_remove_style(pill, &sx_style_panel_accent_press, LV_STATE_PRESSED);
 	if (active) {
-		lv_obj_add_style(pill, &sx_style_accent, 0);
-		lv_obj_add_style(pill, &sx_style_accent_press, LV_STATE_PRESSED);
+		lv_obj_add_style(pill, &sx_style_panel_accent, 0);
+		lv_obj_add_style(pill, &sx_style_panel_accent_press, LV_STATE_PRESSED);
 	}
 	// A label coloured by hand (the pages' own pills did that before 2.0)
 	// would hide the style's text colour.
@@ -140,7 +140,7 @@ void sx_choice_reflow(lv_obj_t *row) {
 		lv_obj_add_event_cb(row, choice_style_changed, LV_EVENT_STYLE_CHANGED, NULL);
 	}
 	lv_obj_set_user_flag(row, 2, true);
-	lv_obj_add_style(row, &sx_style_press, 0);
+	lv_obj_add_style(row, &sx_style_panel_press, 0);
 	lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
 	lv_obj_set_style_radius(row, SX_CARD_R, 0);
 	lv_obj_set_style_pad_all(row, 4, 0);
@@ -169,8 +169,8 @@ void sx_choice_reflow(lv_obj_t *row) {
 		lv_obj_set_style_pad_hor(button, 8, 0);
 		lv_obj_set_style_radius(button, 12, 0);
 		lv_obj_set_style_bg_opa(button, LV_OPA_TRANSP, 0);
-		lv_obj_add_style(button, &sx_style_accent, LV_STATE_CHECKED);
-		lv_obj_add_style(button, &sx_style_accent_press, LV_STATE_CHECKED | LV_STATE_PRESSED);
+		lv_obj_add_style(button, &sx_style_panel_accent, LV_STATE_CHECKED);
+		lv_obj_add_style(button, &sx_style_panel_accent_press, LV_STATE_CHECKED | LV_STATE_PRESSED);
 		lv_obj_set_style_bg_opa(button, LV_OPA_40, LV_STATE_PRESSED);
 		lv_obj_set_ext_click_area(button, 0);
 		lv_obj_t *label = lv_obj_get_child(button, 0);
@@ -187,8 +187,8 @@ void sx_switch_style(lv_obj_t *sw) {
 		return;
 	}
 	lv_obj_set_size(sw, SX_SWITCH_W, SX_SWITCH_H);
-	lv_obj_add_style(sw, &sx_style_press, LV_PART_MAIN);
-	lv_obj_add_style(sw, &sx_style_accent, LV_PART_INDICATOR | LV_STATE_CHECKED);
+	lv_obj_add_style(sw, &sx_style_panel_press, LV_PART_MAIN);
+	lv_obj_add_style(sw, &sx_style_panel_accent, LV_PART_INDICATOR | LV_STATE_CHECKED);
 	lv_obj_set_style_bg_color(sw, lv_color_white(), LV_PART_KNOB);
 	lv_obj_set_style_bg_opa(sw, LV_OPA_COVER, LV_PART_KNOB);
 	lv_obj_set_style_shadow_width(sw, 0, LV_PART_KNOB);
@@ -274,7 +274,7 @@ lv_obj_t *sx_card_title(lv_obj_t *card, const char *text) {
 		lv_obj_set_width(p->title, lv_pct(100));
 		lv_label_set_long_mode(p->title, LV_LABEL_LONG_WRAP);
 		lv_obj_set_style_text_font(p->title, &font_ui_24_bold, 0);
-		lv_obj_add_style(p->title, &sx_style_text, 0);
+		lv_obj_add_style(p->title, &sx_style_panel_text, 0);
 		lv_obj_move_to_index(p->title, 0);
 	}
 	lv_label_set_text(p->title, text ? text : "");
@@ -291,9 +291,9 @@ lv_obj_t *sx_card_subtitle(lv_obj_t *card, const char *text, bool mono) {
 		lv_obj_set_width(p->subtitle, lv_pct(100));
 		lv_label_set_long_mode(p->subtitle, LV_LABEL_LONG_WRAP);
 	}
-	lv_obj_remove_style(p->subtitle, &sx_style_text2, 0);
-	lv_obj_remove_style(p->subtitle, &sx_style_text_accent, 0);
-	lv_obj_add_style(p->subtitle, mono ? &sx_style_text_accent : &sx_style_text2, 0);
+	lv_obj_remove_style(p->subtitle, &sx_style_panel_text2, 0);
+	lv_obj_remove_style(p->subtitle, &sx_style_panel_action, 0);
+	lv_obj_add_style(p->subtitle, mono ? &sx_style_panel_action : &sx_style_panel_text2, 0);
 	lv_obj_set_style_text_font(p->subtitle, mono ? &font_ui_17 : &font_ui_22, 0);
 	lv_label_set_text(p->subtitle, text ? text : "");
 	lv_obj_set_hidden(p->subtitle, !text || !text[0]);
@@ -308,7 +308,7 @@ lv_obj_t *sx_card_value(lv_obj_t *card, const char *text) {
 	if (!p->value) {
 		p->value = lv_label_create(p->head);
 		lv_obj_set_style_text_font(p->value, &font_ui_22, 0);
-		lv_obj_add_style(p->value, &sx_style_text2, 0);
+		lv_obj_add_style(p->value, &sx_style_panel_text2, 0);
 		// Before the chevron or the switch, if either is there already.
 		lv_obj_move_to_index(p->value, 1);
 	}
@@ -340,7 +340,7 @@ lv_obj_t *sx_card_chevron(lv_obj_t *card) {
 	if (!p->chevron) {
 		p->chevron = lv_image_create(p->head);
 		lv_image_set_src(p->chevron, &icon_chevron_right);
-		lv_obj_add_style(p->chevron, &sx_style_icon, 0);
+		lv_obj_add_style(p->chevron, &sx_style_panel_icon, 0);
 		lv_obj_set_style_image_opa(p->chevron, LV_OPA_60, 0);
 		sx_card_nav_item(card);
 	}
@@ -402,11 +402,11 @@ lv_obj_t *sx_card_swatches(lv_obj_t *card) { return wrap_row(card, 12); }
 lv_obj_t *sx_card_bar(lv_obj_t *card, int percent) {
 	lv_obj_t *track = sx_box(card);
 	lv_obj_set_size(track, lv_pct(100), SX_BAR_H);
-	lv_obj_add_style(track, &sx_style_press, 0);
+	lv_obj_add_style(track, &sx_style_panel_press, 0);
 	lv_obj_set_style_radius(track, SX_BAR_H / 2, 0);
 	lv_obj_t *fill = sx_box(track);
 	lv_obj_set_height(fill, SX_BAR_H);
-	lv_obj_add_style(fill, &sx_style_accent, 0);
+	lv_obj_add_style(fill, &sx_style_panel_accent, 0);
 	lv_obj_set_style_radius(fill, SX_BAR_H / 2, 0);
 	sx_card_bar_set(track, percent);
 	return track;
@@ -449,9 +449,9 @@ void sx_card_set_active(lv_obj_t *card, bool active) {
 	if (!card) {
 		return;
 	}
-	lv_obj_remove_style(card, &sx_style_active, 0);
+	lv_obj_remove_style(card, &sx_style_panel_active, 0);
 	if (active) {
-		lv_obj_add_style(card, &sx_style_active, 0);
+		lv_obj_add_style(card, &sx_style_panel_active, 0);
 	}
 }
 

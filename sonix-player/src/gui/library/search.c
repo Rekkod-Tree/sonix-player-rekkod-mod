@@ -1,4 +1,5 @@
 #include "search.h"
+#include "src/gui/shell/artview.h"
 
 #include <ctype.h>
 #include <malloc.h>
@@ -16,6 +17,7 @@
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/keyboard.h"
 #include "src/gui/shell/settingsrow.h"
+#include "src/gui/shell/main_menu.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/sx_card.h"
 #include "src/gui/shell/sx_frame.h"
@@ -369,7 +371,7 @@ static void row_bind(row_t *r, int cat, int index, const char *name, const char 
 			rowart_bind(&r->art, album);
 		}
 		r->picture_shown = rowart_picture(&r->art) != NULL;
-		sx_row_set_thumb(r->row, rowart_picture(&r->art), rowart_tone(&r->art));
+		rowart_apply(&r->art, r->row);
 		if (cat == CAT_TRACKS) {
 			char badge[24], length[16];
 			listacts_track_badge(r->path, badge, sizeof(badge), length, sizeof(length));
@@ -538,7 +540,7 @@ static void thumbs_update(void) {
 		}
 		if (!rowart_wanted(&r->art)) {
 			if (!r->picture_shown && rowart_picture(&r->art)) {
-				sx_row_set_thumb(r->row, rowart_picture(&r->art), rowart_tone(&r->art));
+				rowart_apply(&r->art, r->row);
 				r->picture_shown = true;
 			}
 			continue;
@@ -549,7 +551,7 @@ static void thumbs_update(void) {
 		}
 		loads++;
 		if (rowart_load(&r->art)) {
-			sx_row_set_thumb(r->row, rowart_picture(&r->art), rowart_tone(&r->art));
+			rowart_apply(&r->art, r->row);
 			r->picture_shown = rowart_picture(&r->art) != NULL;
 		}
 	}
@@ -1104,7 +1106,7 @@ void search_init(gui_config_t *cfg) {
 	page_cfg = cfg;
 	search_screen = lv_obj_create(NULL);
 	lv_obj_add_style(search_screen, &theme_style_screen, 0);
-	settingsrow_title(search_screen, cfg, "search_2");
+	main_menu_search_header(search_screen, cfg, HOME_MUSIC);
 
 	int top = settingsrow_content_top(cfg);
 	int w = (int)cfg->screen_width - 2 * cfg->padding;

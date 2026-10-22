@@ -10,6 +10,7 @@
 #include <limits.h>
 #include <pthread.h>
 #include <stdint.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -389,6 +390,12 @@ typedef enum {
 } gen_domain_t;
 
 static unsigned generation[GEN_COUNT] = {1, 1, 1};
+static atomic_uint database_epoch = 1;
+static atomic_bool database_online;
+static unsigned playlist_stage_serial, playlist_stage_active;
+static atomic_bool playlist_stage_busy;
+static library_playlist_writer_t *playlist_writer_active;
+static void playlist_writer_close_locked(void);
 
 static gen_domain_t domain_of(library_list_t kind) {
 	switch (kind) {
@@ -405,9 +412,18 @@ static gen_domain_t domain_of(library_list_t kind) {
 static void bump_generation(gen_domain_t domain) { generation[domain]++; }
 
 static void bump_all_generations(void) {
+	if (++database_epoch == 0)
+		database_epoch++;
+	playlist_stage_active = 0;
+	atomic_store(&playlist_stage_busy, false);
+	atomic_store(&database_online, db != NULL);
 	for (int i = 0; i < GEN_COUNT; i++) {
 		generation[i]++;
 	}
+}
+
+unsigned library_database_epoch(void) {
+	return atomic_load(&database_online) ? atomic_load(&database_epoch) : 0;
 }
 
 unsigned library_revision(library_list_t kind) {
@@ -2050,6 +2066,7 @@ void library_close(void) {
 
 	pthread_mutex_lock(&db_lock);
 	if (db) {
+		playlist_writer_close_locked();
 		finalize_statements();
 		finalize_known();
 		int rc = sqlite3_close(db);
@@ -2149,6 +2166,7 @@ static bool replace_damaged(void) {
 	sortkeys_ready = false;
 
 	pthread_mutex_lock(&db_lock);
+	playlist_writer_close_locked();
 	finalize_statements();
 	finalize_known();
 	if (db) {
@@ -4018,6 +4036,63 @@ void library_index_describe(const library_index_t *ix, library_index_spec_t *out
 	out->desc = ix->desc;
 	snprintf(out->value, sizeof(out->value), "%s", ix->value);
 	out->valid = true;
+}
+
+bool library_index_export_source(const library_index_t *ix, library_export_source_t *out) {
+	if (!ix || !out)
+		return false;
+	memset(out, 0, sizeof(*out));
+	library_index_describe(ix, &out->spec);
+	out->generation = ix->generation;
+	out->database_epoch = library_database_epoch();
+	return out->spec.valid && out->database_epoch != 0;
+}
+
+bool library_index_export_id(const library_index_t *ix, int position, int32_t *out) {
+	if (!ix || !out || position < 0 || position >= ix->count)
+		return false;
+	*out = ix->rows[row_slot(ix, position)];
+	return true;
+}
+
+bool library_index_export_ack(library_index_t *ix, const library_export_receipt_t *receipt) {
+	if (!ix || !receipt || !receipt->valid || !receipt->source.spec.valid ||
+		ix->kind != LIBRARY_LIST_PLAYLIST || receipt->source.spec.kind != LIBRARY_LIST_PLAYLIST ||
+		library_database_epoch() != receipt->source.database_epoch || ix->generation != receipt->source.generation ||
+		ix->filter != receipt->source.spec.filter || ix->order != receipt->source.spec.order ||
+		ix->desc != receipt->source.spec.desc || strcmp(ix->value, receipt->source.spec.value) != 0)
+		return false;
+	// The receipt describes an earlier committed point. A later global mutation
+	// still differs from new_generation and the next worker will reject it.
+	ix->generation = receipt->new_generation;
+	return true;
+}
+
+bool library_export_paths(const library_export_source_t *source, const int32_t *ids, int count, char paths[][512]) {
+	if (!source || !source->spec.valid || count < 0 || count > 16 || (count && (!ids || !paths)))
+		return false;
+	char buffer[PLAYLIST_TABLE_MAX + 384];
+	const char *query = row_by_id_sql(source->spec.kind, source->spec.value, buffer, sizeof(buffer));
+	if (!query)
+		return false;
+	pthread_mutex_lock(&db_lock);
+	bool ok = source->database_epoch == database_epoch && db && source->generation == generation[domain_of(source->spec.kind)];
+	sqlite3_stmt *stmt = NULL;
+	if (ok && count)
+		ok = sqlite3_prepare_v2(db, query, -1, &stmt, NULL) == SQLITE_OK;
+	for (int i = 0; ok && i < count; i++) {
+		ok = sqlite3_reset(stmt) == SQLITE_OK && sqlite3_bind_int64(stmt, 1, ids[i]) == SQLITE_OK;
+		if (ok)
+			ok = sqlite3_step(stmt) == SQLITE_ROW;
+		const char *path = ok ? (const char *)sqlite3_column_text(stmt, 1) : NULL;
+		if (!path || !path[0] || strlen(path) >= 512)
+			ok = false;
+		if (ok)
+			snprintf(paths[i], 512, "%s", path);
+	}
+	sqlite3_finalize(stmt);
+	pthread_mutex_unlock(&db_lock);
+	return ok;
 }
 
 // Where a row id sits in the list as it reads, -1 when it is not in it. A walk
@@ -8230,22 +8305,28 @@ static bool playlist_create_locked(const char *quoted) {
 	return exec(sql);
 }
 
-static bool playlist_table_exists_locked(const char *name) {
+static bool playlist_table_lookup_locked(const char *name, bool *found) {
+	*found = false;
 	char table[PLAYLIST_TABLE_MAX];
-	if (!db) {
+	if (!db || !name || snprintf(table, sizeof(table), LIBRARY_PLAYLIST_PREFIX "%s", name) >= (int)sizeof(table))
 		return false;
-	}
-	// By value, not by name in the statement: this one can be bound.
-	snprintf(table, sizeof(table), LIBRARY_PLAYLIST_PREFIX "%s", name);
 	sqlite3_stmt *stmt = NULL;
-	bool found = false;
-	if (sqlite3_prepare_v2(db, "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", -1, &stmt, NULL) ==
-		SQLITE_OK) {
-		sqlite3_bind_text(stmt, 1, table, -1, SQLITE_TRANSIENT);
-		found = sqlite3_step(stmt) == SQLITE_ROW;
-		sqlite3_finalize(stmt);
+	bool ok = sqlite3_prepare_v2(db, "SELECT 1 FROM sqlite_master WHERE type='table' AND name=? COLLATE NOCASE", -1, &stmt, NULL) == SQLITE_OK;
+	if (ok)
+		ok = sqlite3_bind_text(stmt, 1, table, -1, SQLITE_TRANSIENT) == SQLITE_OK;
+	if (ok) {
+		int rc = sqlite3_step(stmt);
+		ok = rc == SQLITE_ROW || rc == SQLITE_DONE;
+		*found = rc == SQLITE_ROW;
 	}
-	return found;
+	if (sqlite3_finalize(stmt) != SQLITE_OK)
+		ok = false;
+	return ok;
+}
+
+static bool playlist_table_exists_locked(const char *name) {
+	bool found;
+	return playlist_table_lookup_locked(name, &found) && found;
 }
 
 bool library_playlist_exists(const char *name) {
@@ -8316,15 +8397,18 @@ void library_playlist_names_free(char **names, int count) {
 	free(names);
 }
 
+static bool playlist_stage_finish(bool ok, const char *name);
+
 bool library_playlist_create(const char *name) {
 	char quoted[PLAYLIST_TABLE_MAX];
 	if (!playlist_table(name, quoted, sizeof(quoted))) {
 		return false;
 	}
 	pthread_mutex_lock(&db_lock);
-	bool ok = false;
-	if (db && !playlist_table_exists_locked(name)) {
-		ok = playlist_create_locked(quoted);
+	bool ok = false, exists;
+	if (db && sqlite3_get_autocommit(db) && exec_quiet("SAVEPOINT playlist_crud")) {
+		ok = playlist_table_lookup_locked(name, &exists) && !exists && playlist_create_locked(quoted);
+		ok = playlist_stage_finish(ok, "playlist_crud");
 	}
 	if (ok) {
 		bump_generation(GEN_PLAYLISTS);
@@ -8340,10 +8424,12 @@ bool library_playlist_drop(const char *name) {
 	}
 	pthread_mutex_lock(&db_lock);
 	bool ok = false;
-	if (db && playlist_table_exists_locked(name)) {
+	if (db && sqlite3_get_autocommit(db) && exec_quiet("SAVEPOINT playlist_crud")) {
+		bool exists;
 		char sql[PLAYLIST_TABLE_MAX + 32];
 		snprintf(sql, sizeof(sql), "DROP TABLE %s", quoted);
-		ok = exec(sql);
+		ok = playlist_table_lookup_locked(name, &exists) && exists && exec(sql);
+		ok = playlist_stage_finish(ok, "playlist_crud");
 	}
 	if (ok) {
 		bump_generation(GEN_PLAYLISTS);
@@ -8357,15 +8443,17 @@ bool library_playlist_rename(const char *name, const char *new_name) {
 	if (!playlist_table(name, from, sizeof(from)) || !playlist_table(new_name, to, sizeof(to))) {
 		return false;
 	}
-	if (strcmp(name, new_name) == 0) {
+	pthread_mutex_lock(&db_lock);
+	if (db && sqlite3_get_autocommit(db) && strcmp(name, new_name) == 0) {
+		pthread_mutex_unlock(&db_lock);
 		return true;
 	}
-	pthread_mutex_lock(&db_lock);
-	bool ok = false;
-	if (db && playlist_table_exists_locked(name) && !playlist_table_exists_locked(new_name)) {
+	bool ok = false, from_exists, to_exists;
+	if (db && sqlite3_get_autocommit(db) && exec_quiet("SAVEPOINT playlist_crud")) {
 		char sql[2 * PLAYLIST_TABLE_MAX + 32];
 		snprintf(sql, sizeof(sql), "ALTER TABLE %s RENAME TO %s", from, to);
-		ok = exec(sql);
+		ok = playlist_table_lookup_locked(name, &from_exists) && from_exists && playlist_table_lookup_locked(new_name, &to_exists) && !to_exists && exec(sql);
+		ok = playlist_stage_finish(ok, "playlist_crud");
 	}
 	if (ok) {
 		bump_generation(GEN_PLAYLISTS);
@@ -8383,13 +8471,13 @@ static bool playlist_append_locked(const char *quoted, const library_playlist_ro
 	if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
 		return false;
 	}
-	sqlite3_bind_text(stmt, 1, row->path, -1, SQLITE_TRANSIENT);
-	sqlite3_bind_text(stmt, 2, row->title, -1, SQLITE_TRANSIENT);
-	sqlite3_bind_text(stmt, 3, row->artist, -1, SQLITE_TRANSIENT);
-	sqlite3_bind_int64(stmt, 4, row->seconds);
-	sqlite3_bind_int(stmt, 5, row->present ? 1 : 0);
-	bool ok = sqlite3_step(stmt) == SQLITE_DONE;
-	sqlite3_finalize(stmt);
+	bool ok = sqlite3_bind_text(stmt, 1, row->path, -1, SQLITE_TRANSIENT) == SQLITE_OK &&
+			  sqlite3_bind_text(stmt, 2, row->title, -1, SQLITE_TRANSIENT) == SQLITE_OK &&
+			  sqlite3_bind_text(stmt, 3, row->artist, -1, SQLITE_TRANSIENT) == SQLITE_OK &&
+			  sqlite3_bind_int64(stmt, 4, row->seconds) == SQLITE_OK &&
+			  sqlite3_bind_int(stmt, 5, row->present ? 1 : 0) == SQLITE_OK && sqlite3_step(stmt) == SQLITE_DONE;
+	if (sqlite3_finalize(stmt) != SQLITE_OK)
+		ok = false;
 	return ok;
 }
 
@@ -8399,7 +8487,11 @@ bool library_playlist_append(const char *name, const library_playlist_row_t *row
 		return false;
 	}
 	pthread_mutex_lock(&db_lock);
-	bool ok = db && playlist_create_locked(quoted) && playlist_append_locked(quoted, row);
+	bool ok = false;
+	if (db && sqlite3_get_autocommit(db) && exec_quiet("SAVEPOINT playlist_crud")) {
+		ok = playlist_create_locked(quoted) && playlist_append_locked(quoted, row);
+		ok = playlist_stage_finish(ok, "playlist_crud");
+	}
 	if (ok) {
 		bump_generation(GEN_PLAYLISTS);
 	}
@@ -8497,110 +8589,323 @@ int library_playlist_rows(const char *name, library_playlist_row_t **rows_out) {
 }
 
 // ---------------------------------------------------------------------------
-// Writing one, a row at a time
+// Compatibility append writer
 //
-// An import resolves its entries one by one and a backup reads them back one by
-// one, so neither has any reason to hold the whole playlist -- and at two
-// kilobytes a row, holding five thousand of them is nine megabytes on a device
-// with ten. The transaction stays: one commit for the lot, because a commit
-// each would be one card write each.
-//
-// The lock is taken per row and given back between them, not held for the
-// length of the write. That is not tidiness: what a caller does between two
-// rows is work out what the next one says, and working that out means asking
-// the index for a track's name -- which takes this same lock, which is not
-// recursive. Held across the write, the first such question would be a deadlock.
-// The scan works the same way for the same reason.
-//
-// A transaction that will not start -- a scan has one open, and this connection
-// allows one at a time -- is not a failure: the rows go in one at a time
-// instead, which is slower and just as correct.
+// Import, migration and append_all use short stages below. The retained low-
+// level interface must not be used as a connection-wide transaction arbiter:
+// its locks protect individual calls, not unrelated SQL between those calls.
+// begin rejects a foreign transaction before any table mutation. Close/rebuild
+// revokes its statement before the connection can move to another card.
 // ---------------------------------------------------------------------------
 
 struct library_playlist_writer {
 	sqlite3_stmt *stmt;
+	unsigned epoch;
 	bool failed;
 	bool owns_transaction;
 };
 
+static bool playlist_writer_current(const library_playlist_writer_t *writer) { return writer && playlist_writer_active == writer && writer->epoch == database_epoch && db && writer->owns_transaction && !sqlite3_get_autocommit(db); }
+
+// Called under db_lock before either connection-close path. The caller still
+// owns the heap object, but no statement may keep the old card open afterward.
+static void playlist_writer_close_locked(void) {
+	library_playlist_writer_t *writer = playlist_writer_active;
+	if (!writer)
+		return;
+	bool current = playlist_writer_current(writer);
+	sqlite3_finalize(writer->stmt);
+	writer->stmt = NULL;
+	if (current)
+		exec_quiet("ROLLBACK");
+	writer->failed = true;
+	writer->owns_transaction = false;
+	playlist_writer_active = NULL;
+}
+
 library_playlist_writer_t *library_playlist_write_begin(const char *name) {
 	char quoted[PLAYLIST_TABLE_MAX];
-	if (!playlist_table(name, quoted, sizeof(quoted))) {
+	if (!playlist_table(name, quoted, sizeof(quoted)))
 		return NULL;
-	}
 	library_playlist_writer_t *writer = calloc(1, sizeof(*writer));
-	if (!writer) {
+	if (!writer)
 		return NULL;
-	}
-
 	char sql[PLAYLIST_TABLE_MAX + 160];
 	snprintf(sql, sizeof(sql), "INSERT INTO %s(path,title,artist,seconds,present) VALUES(?,?,?,?,?)", quoted);
-
 	pthread_mutex_lock(&db_lock);
-	if (!db || !playlist_create_locked(quoted) || sqlite3_prepare_v2(db, sql, -1, &writer->stmt, NULL) != SQLITE_OK) {
+	if (!db || playlist_writer_active || !sqlite3_get_autocommit(db) || !exec_quiet("BEGIN")) {
 		pthread_mutex_unlock(&db_lock);
 		free(writer);
 		return NULL;
 	}
-	writer->owns_transaction = exec_quiet("BEGIN");
+	if (!playlist_create_locked(quoted) || sqlite3_prepare_v2(db, sql, -1, &writer->stmt, NULL) != SQLITE_OK) {
+		sqlite3_finalize(writer->stmt);
+		exec_quiet("ROLLBACK");
+		pthread_mutex_unlock(&db_lock);
+		free(writer);
+		return NULL;
+	}
+	writer->epoch = database_epoch;
+	writer->owns_transaction = true;
+	playlist_writer_active = writer;
 	pthread_mutex_unlock(&db_lock);
 	return writer;
 }
 
 bool library_playlist_write_row(library_playlist_writer_t *writer, const library_playlist_row_t *row) {
-	if (!writer || !row || writer->failed) {
+	if (!writer)
 		return false;
-	}
 	pthread_mutex_lock(&db_lock);
-	sqlite3_reset(writer->stmt);
-	sqlite3_bind_text(writer->stmt, 1, row->path, -1, SQLITE_TRANSIENT);
-	sqlite3_bind_text(writer->stmt, 2, row->title, -1, SQLITE_TRANSIENT);
-	sqlite3_bind_text(writer->stmt, 3, row->artist, -1, SQLITE_TRANSIENT);
-	sqlite3_bind_int64(writer->stmt, 4, row->seconds);
-	sqlite3_bind_int(writer->stmt, 5, row->present ? 1 : 0);
-	bool ok = sqlite3_step(writer->stmt) == SQLITE_DONE;
-	pthread_mutex_unlock(&db_lock);
-
-	if (!ok) {
+	bool ok = row && playlist_writer_current(writer) && !writer->failed && writer->stmt;
+	if (ok)
+		ok = sqlite3_reset(writer->stmt) == SQLITE_OK && sqlite3_bind_text(writer->stmt, 1, row->path, -1, SQLITE_TRANSIENT) == SQLITE_OK && sqlite3_bind_text(writer->stmt, 2, row->title, -1, SQLITE_TRANSIENT) == SQLITE_OK && sqlite3_bind_text(writer->stmt, 3, row->artist, -1, SQLITE_TRANSIENT) == SQLITE_OK && sqlite3_bind_int64(writer->stmt, 4, row->seconds) == SQLITE_OK && sqlite3_bind_int(writer->stmt, 5, row->present ? 1 : 0) == SQLITE_OK && sqlite3_step(writer->stmt) == SQLITE_DONE;
+	if (!ok)
 		writer->failed = true;
-	}
+	pthread_mutex_unlock(&db_lock);
 	return ok;
 }
 
 bool library_playlist_write_end(library_playlist_writer_t *writer, bool keep) {
-	if (!writer) {
+	if (!writer)
 		return false;
-	}
-	bool ok = keep && !writer->failed;
 	pthread_mutex_lock(&db_lock);
-	sqlite3_finalize(writer->stmt);
-	if (writer->owns_transaction) {
-		exec(ok ? "COMMIT" : "ROLLBACK");
-	} else if (!ok) {
-		// Nothing to roll back to, since every row went in on its own. The
-		// half-written playlist is dropped instead, which is what a rollback
-		// would have left behind.
+	bool current = playlist_writer_current(writer);
+	bool ok = current && keep && !writer->failed;
+	if (sqlite3_finalize(writer->stmt) != SQLITE_OK)
 		ok = false;
+	writer->stmt = NULL;
+	if (current) {
+		if (ok)
+			ok = exec_quiet("COMMIT");
+		if (!ok)
+			exec_quiet("ROLLBACK");
 	}
-	bump_generation(GEN_PLAYLISTS);
+	if (playlist_writer_active == writer)
+		playlist_writer_active = NULL;
+	if (ok)
+		bump_generation(GEN_PLAYLISTS);
 	pthread_mutex_unlock(&db_lock);
 	free(writer);
 	return ok;
 }
 
+// Reserved internal table: it deliberately has no M3U_ prefix and is never
+// offered by library_playlist_names(). A new job clears an orphan left by
+// process exit, but cannot displace another active job.
+#define PLAYLIST_STAGE_TABLE "SONIX_QUEUE_STAGE"
+struct library_playlist_stage {
+	unsigned epoch, serial;
+	int rows;
+	unsigned namespace_revision;
+	bool guard_namespace;
+};
+
+static bool playlist_stage_current(const library_playlist_stage_t *stage) {
+	return stage && stage->epoch == database_epoch && stage->serial == playlist_stage_active && db;
+}
+
+static bool export_source_current_locked(const library_export_source_t *source) {
+	return !source || (source->spec.valid && source->database_epoch == database_epoch &&
+		source->generation == generation[domain_of(source->spec.kind)]);
+}
+
+static library_playlist_stage_t *playlist_stage_begin(unsigned epoch, const library_export_source_t *source, bool guard_namespace, unsigned namespace_revision) {
+	library_playlist_stage_t *stage = calloc(1, sizeof(*stage));
+	if (!stage)
+		return NULL;
+	pthread_mutex_lock(&db_lock);
+	bool ok = epoch == database_epoch && export_source_current_locked(source) && !playlist_stage_active && db && sqlite3_get_autocommit(db) && (!guard_namespace || namespace_revision == generation[GEN_PLAYLISTS]);
+	if (ok)
+		ok = exec_quiet("DROP TABLE IF EXISTS " PLAYLIST_STAGE_TABLE) &&
+			 exec_quiet("CREATE TABLE " PLAYLIST_STAGE_TABLE "(idx INTEGER PRIMARY KEY,path TEXT,title TEXT,artist TEXT,seconds INT,present INT,mount INT)");
+	if (ok) {
+		if (++playlist_stage_serial == 0)
+			playlist_stage_serial++;
+		stage->epoch = epoch;
+		stage->guard_namespace = guard_namespace;
+		stage->namespace_revision = namespace_revision;
+		stage->serial = playlist_stage_active = playlist_stage_serial;
+		atomic_store(&playlist_stage_busy, true);
+	}
+	pthread_mutex_unlock(&db_lock);
+	if (!ok) {
+		free(stage);
+		return NULL;
+	}
+	return stage;
+}
+
+library_playlist_stage_t *library_playlist_stage_begin(unsigned epoch, const library_export_source_t *source) { return playlist_stage_begin(epoch, source, false, 0); }
+
+library_playlist_stage_t *library_playlist_stage_begin_import(unsigned epoch, unsigned namespace_revision) { return playlist_stage_begin(epoch, NULL, true, namespace_revision); }
+
+static bool playlist_stage_namespace_current(const library_playlist_stage_t *stage) { return !stage->guard_namespace || stage->namespace_revision == generation[GEN_PLAYLISTS]; }
+
+// Callers begin only in autocommit mode, so a full ROLLBACK here owns
+// no caller transaction. Never RELEASE a savepoint whose rollback failed.
+static bool playlist_stage_finish(bool ok, const char *name) {
+	char sql[96];
+	if (!ok) {
+		snprintf(sql, sizeof(sql), "ROLLBACK TO %s", name);
+		if (!exec_quiet(sql)) {
+			if (!exec_quiet("ROLLBACK"))
+				fprintf(stderr, "library: queue save rollback failed\n");
+			return false;
+		}
+	}
+	snprintf(sql, sizeof(sql), "RELEASE %s", name);
+	if (!exec_quiet(sql)) {
+		if (!exec_quiet("ROLLBACK"))
+			fprintf(stderr, "library: queue save rollback failed\n");
+		return false;
+	}
+	return ok;
+}
+
+static bool playlist_stage_rows(library_playlist_stage_t *stage, const library_playlist_row_t *rows, int count, int limit) {
+	if (!stage || !rows || count <= 0 || count > limit)
+		return false;
+	pthread_mutex_lock(&db_lock);
+	bool begun = playlist_stage_current(stage) && playlist_stage_namespace_current(stage) && sqlite3_get_autocommit(db) && exec_quiet("SAVEPOINT queue_stage_batch");
+	bool ok = begun;
+	sqlite3_stmt *stmt = NULL;
+	if (ok)
+		ok = sqlite3_prepare_v2(db, "INSERT INTO " PLAYLIST_STAGE_TABLE "(path,title,artist,seconds,present) VALUES(?,?,?,?,?)", -1, &stmt, NULL) == SQLITE_OK;
+	for (int i = 0; ok && i < count; i++) {
+		if (!rows[i].path[0]) {
+			ok = false;
+			break;
+		}
+		ok = sqlite3_reset(stmt) == SQLITE_OK &&
+			 sqlite3_bind_text(stmt, 1, rows[i].path, -1, SQLITE_TRANSIENT) == SQLITE_OK &&
+			 sqlite3_bind_text(stmt, 2, rows[i].title, -1, SQLITE_TRANSIENT) == SQLITE_OK &&
+			 sqlite3_bind_text(stmt, 3, rows[i].artist, -1, SQLITE_TRANSIENT) == SQLITE_OK &&
+			 sqlite3_bind_int64(stmt, 4, rows[i].seconds) == SQLITE_OK &&
+			 sqlite3_bind_int(stmt, 5, rows[i].present ? 1 : 0) == SQLITE_OK;
+		if (ok)
+			ok = sqlite3_step(stmt) == SQLITE_DONE;
+	}
+	sqlite3_finalize(stmt);
+	if (begun)
+		ok = playlist_stage_finish(ok, "queue_stage_batch");
+	if (ok)
+		stage->rows += count;
+	pthread_mutex_unlock(&db_lock);
+	return ok;
+}
+
+bool library_playlist_stage_rows(library_playlist_stage_t *stage, const library_playlist_row_t *rows, int count) { return playlist_stage_rows(stage, rows, count, LIBRARY_PLAYLIST_STAGE_BATCH); }
+
+bool library_playlist_stage_import_rows(library_playlist_stage_t *stage, const library_playlist_row_t *rows, int count) { return stage && stage->guard_namespace && playlist_stage_rows(stage, rows, count, LIBRARY_PLAYLIST_IMPORT_BATCH); }
+
+bool library_playlist_stage_publish_receipt(library_playlist_stage_t *stage, const char *name, library_playlist_publish_t mode, const library_export_source_t *source, library_export_receipt_t *receipt) {
+	if (receipt)
+		memset(receipt, 0, sizeof(*receipt));
+	char quoted[PLAYLIST_TABLE_MAX], sql[PLAYLIST_TABLE_MAX + 256];
+	if (!stage || stage->rows < 0 || (stage->rows == 0 && (!stage->guard_namespace || mode != LIBRARY_PLAYLIST_CREATE)) || !playlist_table(name, quoted, sizeof(quoted)) ||
+		(mode != LIBRARY_PLAYLIST_APPEND && mode != LIBRARY_PLAYLIST_CREATE && mode != LIBRARY_PLAYLIST_REPLACE))
+		return false;
+	pthread_mutex_lock(&db_lock);
+	char source_table[PLAYLIST_TABLE_MAX];
+	bool unchanged_source = source && source->spec.valid && source->spec.kind == LIBRARY_LIST_PLAYLIST && playlist_table(source->spec.value, source_table, sizeof(source_table)) && sqlite3_stricmp(source_table, quoted) != 0;
+	bool ready = playlist_stage_current(stage) && playlist_stage_namespace_current(stage) && export_source_current_locked(source) && sqlite3_get_autocommit(db);
+	bool exists = false;
+	bool checked = ready && ((mode != LIBRARY_PLAYLIST_CREATE && (!stage->guard_namespace || mode != LIBRARY_PLAYLIST_REPLACE)) || playlist_table_lookup_locked(name, &exists));
+	bool begun = checked && (mode != LIBRARY_PLAYLIST_CREATE || !exists) && (!stage->guard_namespace || mode != LIBRARY_PLAYLIST_REPLACE || exists) && exec_quiet("SAVEPOINT queue_stage_publish");
+	bool ok = begun;
+	if (ok && mode == LIBRARY_PLAYLIST_REPLACE) {
+		snprintf(sql, sizeof(sql), "DROP TABLE IF EXISTS %s", quoted);
+		ok = exec_quiet(sql);
+		if (ok) {
+			snprintf(sql, sizeof(sql), "ALTER TABLE " PLAYLIST_STAGE_TABLE " RENAME TO %s", quoted);
+			ok = exec_quiet(sql);
+		}
+	} else if (ok) {
+		ok = playlist_create_locked(quoted);
+		if (ok) {
+			snprintf(sql, sizeof(sql), "INSERT INTO %s(path,title,artist,seconds,present) SELECT path,title,artist,seconds,present FROM " PLAYLIST_STAGE_TABLE " ORDER BY idx", quoted);
+			ok = exec_quiet(sql);
+		}
+		if (ok)
+			ok = exec_quiet("DROP TABLE " PLAYLIST_STAGE_TABLE);
+	}
+	if (begun)
+		ok = playlist_stage_finish(ok, "queue_stage_publish");
+	if (ok) {
+		playlist_stage_active = 0;
+		atomic_store(&playlist_stage_busy, false);
+		bump_generation(GEN_PLAYLISTS);
+		if (receipt && unchanged_source) {
+			receipt->source = *source;
+			receipt->new_generation = generation[GEN_PLAYLISTS];
+			receipt->valid = true;
+		}
+	}
+	pthread_mutex_unlock(&db_lock);
+	return ok;
+}
+
+bool library_playlist_stage_publish(library_playlist_stage_t *stage, const char *name, library_playlist_publish_t mode, const library_export_source_t *source) {
+	return library_playlist_stage_publish_receipt(stage, name, mode, source, NULL);
+}
+
+void library_playlist_stage_discard(library_playlist_stage_t *stage) {
+	if (!stage)
+		return;
+	pthread_mutex_lock(&db_lock);
+	if (playlist_stage_current(stage)) {
+		// If a scan owns a transaction, leave a hidden orphan for the next
+		// begin() rather than modifying someone else's transaction.
+		if (sqlite3_get_autocommit(db))
+			exec_quiet("DROP TABLE IF EXISTS " PLAYLIST_STAGE_TABLE);
+		playlist_stage_active = 0;
+		atomic_store(&playlist_stage_busy, false);
+	}
+	pthread_mutex_unlock(&db_lock);
+	free(stage);
+}
+
+bool library_playlist_stage_busy(void) { return atomic_load(&playlist_stage_busy); }
+
 bool library_playlist_append_all(const char *name, const library_playlist_row_t *rows, int count) {
-	if (!rows || count < 0) {
+	char quoted[PLAYLIST_TABLE_MAX];
+	if (!rows || count < 0 || !playlist_table(name, quoted, sizeof(quoted)))
 		return false;
+	// Keep the legacy zero-row create/success contract without leaving a
+	// transaction or prepared statement alive after this one locked call.
+	if (!count) {
+		pthread_mutex_lock(&db_lock);
+		bool begun = db && sqlite3_get_autocommit(db) && exec_quiet("SAVEPOINT playlist_empty");
+		bool ok = begun && playlist_create_locked(quoted);
+		if (begun)
+			ok = playlist_stage_finish(ok, "playlist_empty");
+		if (ok)
+			bump_generation(GEN_PLAYLISTS);
+		pthread_mutex_unlock(&db_lock);
+		return ok;
 	}
-	library_playlist_writer_t *writer = library_playlist_write_begin(name);
-	if (!writer) {
+	unsigned epoch = library_database_epoch();
+	unsigned revision = library_revision(LIBRARY_LIST_PLAYLIST);
+	library_playlist_stage_t *stage = library_playlist_stage_begin_import(epoch, revision);
+	if (!stage)
 		return false;
-	}
 	bool ok = true;
-	for (int i = 0; i < count && ok; i++) {
-		ok = library_playlist_write_row(writer, &rows[i]);
+	for (int offset = 0; ok && offset < count;) {
+		int batch = count - offset;
+		if (batch > LIBRARY_PLAYLIST_IMPORT_BATCH)
+			batch = LIBRARY_PLAYLIST_IMPORT_BATCH;
+		ok = library_playlist_stage_import_rows(stage, rows + offset, batch);
+		offset += batch;
 	}
-	return library_playlist_write_end(writer, ok);
+	if (ok)
+		ok = library_playlist_stage_publish(stage, name, LIBRARY_PLAYLIST_APPEND, NULL);
+	library_playlist_stage_discard(stage);
+	return ok;
+}
+
+static bool playlist_move_key(sqlite3_stmt *stmt, int64_t to, int64_t from) {
+	bool ok = sqlite3_bind_int64(stmt, 1, to) == SQLITE_OK && sqlite3_bind_int64(stmt, 2, from) == SQLITE_OK && sqlite3_step(stmt) == SQLITE_DONE;
+	return sqlite3_reset(stmt) == SQLITE_OK && ok;
 }
 
 // Moves one entry of a playlist from one position to another.
@@ -8634,82 +8939,57 @@ bool library_playlist_move(const char *name, int from, int to) {
 	// are permuted among the idx values they occupied and a hidden entry between
 	// two of them can end up on the other side. There is no better answer: it is
 	// an order between rows nobody is looking at.
-	snprintf(read_sql, sizeof(read_sql), "SELECT p.idx FROM %s p WHERE " PLAYLIST_SHOWN " ORDER BY p.idx LIMIT ? OFFSET ?",
-			 quoted);
+	snprintf(read_sql, sizeof(read_sql), "SELECT p.idx FROM %s p WHERE " PLAYLIST_SHOWN " ORDER BY p.idx LIMIT ? OFFSET ?", quoted);
 	snprintf(write_sql, sizeof(write_sql), "UPDATE %s SET idx=? WHERE idx=?", quoted);
 
 	int low = from < to ? from : to;
 	int high = from < to ? to : from;
+	if (high - low == INT_MAX)
+		return false;
 	int span = high - low + 1;
 
 	pthread_mutex_lock(&db_lock);
-	bool ok = db != NULL && playlist_table_exists_locked(name);
+	bool exists;
+	bool begun = db && sqlite3_get_autocommit(db) && exec_quiet("SAVEPOINT playlist_order");
+	bool ok = begun && playlist_table_lookup_locked(name, &exists) && exists;
 
-	// Only the stretch that moves is read back, which is what keeps a drag of
-	// two rows from touching a list of ten thousand.
+	// Only the affected stretch is read and changed, under one owned savepoint.
 	int64_t *keys = ok ? calloc((size_t)span, sizeof(int64_t)) : NULL;
-	int got = 0;
-	if (keys) {
-		sqlite3_stmt *stmt = NULL;
-		if (sqlite3_prepare_v2(db, read_sql, -1, &stmt, NULL) == SQLITE_OK) {
-			sqlite3_bind_int(stmt, 1, span);
-			sqlite3_bind_int(stmt, 2, low);
-			while (got < span && sqlite3_step(stmt) == SQLITE_ROW) {
-				keys[got++] = sqlite3_column_int64(stmt, 0);
-			}
-			sqlite3_finalize(stmt);
-		}
-	}
-	ok = keys != NULL && got == span;
-
+	ok = ok && keys != NULL;
+	sqlite3_stmt *stmt = NULL;
 	if (ok) {
-		exec("BEGIN");
-		sqlite3_stmt *stmt = NULL;
+		ok = sqlite3_prepare_v2(db, read_sql, -1, &stmt, NULL) == SQLITE_OK && sqlite3_bind_int(stmt, 1, span) == SQLITE_OK && sqlite3_bind_int(stmt, 2, low) == SQLITE_OK;
+		for (int i = 0; i < span && ok; i++) {
+			ok = sqlite3_step(stmt) == SQLITE_ROW;
+			if (ok)
+				keys[i] = sqlite3_column_int64(stmt, 0);
+		}
+		if (sqlite3_finalize(stmt) != SQLITE_OK)
+			ok = false;
+		stmt = NULL;
+	}
+	if (ok) {
 		ok = sqlite3_prepare_v2(db, write_sql, -1, &stmt, NULL) == SQLITE_OK;
-
-		// A key below every real one: idx is INTEGER PRIMARY KEY and the table
-		// is written with positive values only, so nothing can be sitting here.
 		const int64_t parked = -1;
 		int64_t moving = keys[from - low];
-
-		if (ok) {
-			sqlite3_bind_int64(stmt, 1, parked);
-			sqlite3_bind_int64(stmt, 2, moving);
-			ok = sqlite3_step(stmt) == SQLITE_DONE;
-			sqlite3_reset(stmt);
-		}
-
-		// Dragged down: everything under it comes up one slot, taken in the
-		// order that leaves the destination free. Dragged up: the mirror.
+		if (ok)
+			ok = playlist_move_key(stmt, parked, moving);
 		if (from < to) {
-			for (int i = from + 1; i <= to && ok; i++) {
-				sqlite3_bind_int64(stmt, 1, keys[i - 1 - low]);
-				sqlite3_bind_int64(stmt, 2, keys[i - low]);
-				ok = sqlite3_step(stmt) == SQLITE_DONE;
-				sqlite3_reset(stmt);
-			}
+			for (int i = from + 1; i <= to && ok; i++)
+				ok = playlist_move_key(stmt, keys[i - 1 - low], keys[i - low]);
 		} else {
-			for (int i = from - 1; i >= to && ok; i--) {
-				sqlite3_bind_int64(stmt, 1, keys[i + 1 - low]);
-				sqlite3_bind_int64(stmt, 2, keys[i - low]);
-				ok = sqlite3_step(stmt) == SQLITE_DONE;
-				sqlite3_reset(stmt);
-			}
+			for (int i = from - 1; i >= to && ok; i--)
+				ok = playlist_move_key(stmt, keys[i + 1 - low], keys[i - low]);
 		}
-
-		if (ok) {
-			sqlite3_bind_int64(stmt, 1, keys[to - low]);
-			sqlite3_bind_int64(stmt, 2, parked);
-			ok = sqlite3_step(stmt) == SQLITE_DONE;
-			sqlite3_reset(stmt);
-		}
-
-		sqlite3_finalize(stmt);
-		exec(ok ? "COMMIT" : "ROLLBACK");
-		if (ok) {
-			bump_generation(GEN_PLAYLISTS);
-		}
+		if (ok)
+			ok = playlist_move_key(stmt, keys[to - low], parked);
+		if (sqlite3_finalize(stmt) != SQLITE_OK)
+			ok = false;
 	}
+	if (begun)
+		ok = playlist_stage_finish(ok, "playlist_order");
+	if (ok)
+		bump_generation(GEN_PLAYLISTS);
 
 	free(keys);
 	pthread_mutex_unlock(&db_lock);
@@ -8722,18 +9002,17 @@ bool library_playlist_remove_path(const char *name, const char *path) {
 		return false;
 	}
 	char sql[PLAYLIST_TABLE_MAX * 2 + 160];
-	snprintf(sql, sizeof(sql), "DELETE FROM %s WHERE idx=(SELECT idx FROM %s WHERE path=? ORDER BY idx LIMIT 1)",
-			 quoted, quoted);
+	snprintf(sql, sizeof(sql), "DELETE FROM %s WHERE idx=(SELECT idx FROM %s WHERE path=? ORDER BY idx LIMIT 1)", quoted, quoted);
 
 	pthread_mutex_lock(&db_lock);
-	bool ok = false;
-	if (db && playlist_table_exists_locked(name)) {
+	bool ok = false, exists;
+	bool begun = db && sqlite3_get_autocommit(db) && exec_quiet("SAVEPOINT playlist_order");
+	if (begun) {
 		sqlite3_stmt *stmt = NULL;
-		if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
-			sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT);
-			ok = sqlite3_step(stmt) == SQLITE_DONE && sqlite3_changes(db) > 0;
-			sqlite3_finalize(stmt);
-		}
+		ok = playlist_table_lookup_locked(name, &exists) && exists && sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK && sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT) == SQLITE_OK && sqlite3_step(stmt) == SQLITE_DONE && sqlite3_changes(db) > 0;
+		if (sqlite3_finalize(stmt) != SQLITE_OK)
+			ok = false;
+		ok = playlist_stage_finish(ok, "playlist_order");
 	}
 	if (ok) {
 		bump_generation(GEN_PLAYLISTS);
@@ -8774,8 +9053,7 @@ int library_playlist_remove_positions(const char *name, const int *positions, in
 	// since each deletion moves the positions after it.
 	char read_sql[PLAYLIST_TABLE_MAX + 160];
 	char delete_sql[PLAYLIST_TABLE_MAX + 40];
-	snprintf(read_sql, sizeof(read_sql), "SELECT p.idx FROM %s p WHERE " PLAYLIST_SHOWN " ORDER BY p.idx LIMIT 1 OFFSET ?",
-			 quoted);
+	snprintf(read_sql, sizeof(read_sql), "SELECT p.idx FROM %s p WHERE " PLAYLIST_SHOWN " ORDER BY p.idx LIMIT 1 OFFSET ?", quoted);
 	snprintf(delete_sql, sizeof(delete_sql), "DELETE FROM %s WHERE idx=?", quoted);
 
 	int64_t *keys = calloc((size_t)count, sizeof(*keys));
@@ -8785,40 +9063,49 @@ int library_playlist_remove_positions(const char *name, const int *positions, in
 
 	pthread_mutex_lock(&db_lock);
 	int removed = 0;
-	if (db && playlist_table_exists_locked(name)) {
-		int found = 0;
-		sqlite3_stmt *stmt = NULL;
-		if (sqlite3_prepare_v2(db, read_sql, -1, &stmt, NULL) == SQLITE_OK) {
-			for (int i = 0; i < count; i++) {
-				if (positions[i] < 0) {
-					continue;
-				}
-				sqlite3_bind_int(stmt, 1, positions[i]);
-				if (sqlite3_step(stmt) == SQLITE_ROW) {
+	bool exists;
+	bool begun = db && sqlite3_get_autocommit(db) && exec_quiet("SAVEPOINT playlist_order");
+	bool ok = begun && playlist_table_lookup_locked(name, &exists) && exists;
+	int found = 0;
+	sqlite3_stmt *stmt = NULL;
+	if (ok) {
+		ok = sqlite3_prepare_v2(db, read_sql, -1, &stmt, NULL) == SQLITE_OK;
+		for (int i = 0; i < count && ok; i++) {
+			if (positions[i] < 0)
+				continue;
+			ok = sqlite3_bind_int(stmt, 1, positions[i]) == SQLITE_OK;
+			if (ok) {
+				int rc = sqlite3_step(stmt);
+				if (rc == SQLITE_ROW)
 					keys[found++] = sqlite3_column_int64(stmt, 0);
-				}
-				sqlite3_reset(stmt);
+				else if (rc != SQLITE_DONE)
+					ok = false;
 			}
-			sqlite3_finalize(stmt);
+			if (sqlite3_reset(stmt) != SQLITE_OK)
+				ok = false;
 		}
-
-		exec("BEGIN");
-		bool ok = sqlite3_prepare_v2(db, delete_sql, -1, &stmt, NULL) == SQLITE_OK;
-		for (int i = 0; i < found && ok; i++) {
-			sqlite3_bind_int64(stmt, 1, keys[i]);
-			ok = sqlite3_step(stmt) == SQLITE_DONE;
-			removed += ok && sqlite3_changes(db) > 0 ? 1 : 0;
-			sqlite3_reset(stmt);
-		}
-		sqlite3_finalize(stmt);
-		exec(ok ? "COMMIT" : "ROLLBACK");
-		if (!ok) {
-			removed = 0;
-		}
-		if (removed > 0) {
-			bump_generation(GEN_PLAYLISTS);
-		}
+		if (sqlite3_finalize(stmt) != SQLITE_OK)
+			ok = false;
+		stmt = NULL;
 	}
+	if (ok) {
+		ok = sqlite3_prepare_v2(db, delete_sql, -1, &stmt, NULL) == SQLITE_OK;
+		for (int i = 0; i < found && ok; i++) {
+			ok = sqlite3_bind_int64(stmt, 1, keys[i]) == SQLITE_OK && sqlite3_step(stmt) == SQLITE_DONE;
+			if (ok && sqlite3_changes(db) > 0)
+				removed++;
+			if (sqlite3_reset(stmt) != SQLITE_OK)
+				ok = false;
+		}
+		if (sqlite3_finalize(stmt) != SQLITE_OK)
+			ok = false;
+	}
+	if (begun)
+		ok = playlist_stage_finish(ok, "playlist_order");
+	if (!ok)
+		removed = 0;
+	if (removed > 0)
+		bump_generation(GEN_PLAYLISTS);
 	pthread_mutex_unlock(&db_lock);
 	free(keys);
 	return removed;
@@ -8858,13 +9145,17 @@ bool library_playlists_migrated(void) {
 	return done;
 }
 
-void library_playlists_set_migrated(void) {
+bool library_playlists_set_migrated_at(unsigned epoch) {
 	pthread_mutex_lock(&db_lock);
-	if (db) {
-		exec("INSERT OR REPLACE INTO PLAYLIST_MIGRATION(id,done) VALUES(0,1)");
-	}
+	bool begun = db && epoch && epoch == database_epoch && sqlite3_get_autocommit(db) && exec_quiet("SAVEPOINT playlist_migration");
+	bool ok = begun && exec_quiet("INSERT OR REPLACE INTO PLAYLIST_MIGRATION(id,done) VALUES(0,1)");
+	if (begun)
+		ok = playlist_stage_finish(ok, "playlist_migration");
 	pthread_mutex_unlock(&db_lock);
+	return ok;
 }
+
+void library_playlists_set_migrated(void) { library_playlists_set_migrated_at(library_database_epoch()); }
 
 int library_playlist_count_get(const char *path, long mtime, long size) {
 	if (!path || !path[0]) {

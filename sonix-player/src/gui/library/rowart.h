@@ -33,6 +33,8 @@
 typedef struct {
 	int64_t album_id; // 0: no album (the plaque in the neutral cover tone)
 	lv_color_t tone;
+	float identity_hue;
+	uint32_t display_generation;
 	bool tone_known;	// stable identity colour has been bound
 	bool has_picture;	// `dsc` shows this album's thumbnail
 	bool asked;			// covertone_request() made for it
@@ -51,6 +53,7 @@ void rowart_bind_id(rowart_t *art, int64_t album_id, const char *title);
 
 // The plaque's colour.
 lv_color_t rowart_tone(const rowart_t *art);
+void rowart_apply(rowart_t *art, lv_obj_t *row);
 
 // The picture, or NULL while there is none.
 const lv_image_dsc_t *rowart_picture(const rowart_t *art);

@@ -56,7 +56,7 @@ void sx_mini_set_progress(double position, double total);
 // The cover's thumbnail, SX_MINI_COVER square (or larger: it is clipped to the
 // rounded plaque, centred). NULL goes back to the tone plaque. The image is
 // borrowed: it must stay valid until replaced or cleared.
-void sx_mini_set_cover(const lv_image_dsc_t *thumbnail);
+void sx_mini_set_cover(const lv_image_dsc_t *thumbnail, uint32_t generation);
 
 // The player opened (true) or closed: the mini player gives way to it.
 void sx_mini_player_shown(bool open);

@@ -55,6 +55,8 @@ void keyboard_refresh_layout(void);
 // LV_STATE_FOCUSED and would otherwise put its thin default caret straight
 // back the moment the field is touched.
 void keyboard_style_caret(lv_obj_t *field);
+// Reconcile a kept input layer after its ancestor is shown or hidden.
+void keyboard_refresh_caret(lv_obj_t *field);
 
 // Turns a field's caret on or off. Needed where there are two fields (the
 // Qobuz login page): LVGL blinks every textarea's caret from the moment it is

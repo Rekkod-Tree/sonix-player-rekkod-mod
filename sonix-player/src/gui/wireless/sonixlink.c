@@ -414,15 +414,20 @@ static void apply_selection(const sonixlink_command_t *cmd) {
 		break;
 	}
 	case SONIXLINK_CMD_PLAYLIST_ADD:
-		playlistpage_add_tracks_to(cmd->value, paths, cmd->path_count);
+		if (!playlistpage_add_tracks_to(cmd->value, paths, cmd->path_count))
+			toast_error("playlist_cannot_add_the_tracks");
 		break;
 	case SONIXLINK_CMD_PLAYLIST_REMOVE: {
 		int removed = 0;
 		for (int i = 0; i < cmd->path_count; i++) {
 			removed += playlists_remove_track(cmd->value, paths[i]) ? 1 : 0;
 		}
-		if (removed > 0) {
+		if (removed == cmd->path_count) {
 			toast_success(removed == 1 ? "medialist_track_removed" : "medialist_tracks_removed");
+		} else if (removed > 0) {
+			toast_error("medialist_some_tracks_not_removed");
+		} else {
+			toast_error("medialist_remove_failed");
 		}
 		break;
 	}

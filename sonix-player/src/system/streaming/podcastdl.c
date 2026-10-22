@@ -1,5 +1,8 @@
 #define _GNU_SOURCE
 #include "podcastdl.h"
+#include "podcastpair.h"
+#include "src/system/core/sha256.h"
+#include <dirent.h>
 
 #include <errno.h>
 #include <fcntl.h>
@@ -30,14 +33,25 @@ typedef struct {
 	char folder[512];
 	char path[768];
 	char image[PODCAST_URL_MAX];
-	char show[DL_NAME_MAX + 1], file[180], staging[240];
+	char show[256], file[180], staging[240];
+	sha256_ctx sha;
+	long long saved_bytes;
+	bool recovery;
+	bool (*recovery_cancel)(void *user);
+	void *recovery_user;
 	dev_t root_dev, part_dev;
 	ino_t root_ino, part_ino;
 	bool part_created;
+	bool show_bound;
+	dev_t show_dev;
+	ino_t show_ino;
+	bool tags_owned;
+	struct stat tags_stat;
 } job_t;
 
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static podcastdl_state_t state = PODCASTDL_IDLE;
+static podcastpair_result_t last_pair_result = PODCASTPAIR_OK;
 static long long bytes_done;
 static long long bytes_total;
 static _Atomic bool cancel_asked;
@@ -167,10 +181,73 @@ bool podcastdl_path(const podcast_episode_t *episode, const char *feed_title, ch
 	return podcastdl_root(base, sizeof(base)) && folder_of(base, feed_title && feed_title[0] ? feed_title : episode->feed_title, folder, sizeof(folder)) && path_in_folder(episode, folder, out, size);
 }
 
+// Native sidecars identify an RSS episode. Markerless files without that
+// field remain ordinary user files; malformed/mismatched native IDs do not
+// make another same-title episode look downloaded or authorize its overwrite.
+static bool native_id_at(int dir, const char *file, long long wanted) {
+	char tags[256];
+	int n = snprintf(tags, sizeof(tags), "%s.tags", file);
+	if (n < 0 || (size_t)n >= sizeof(tags))
+		return false;
+	int fd = openat(dir, tags, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+	if (fd < 0)
+		return errno == ENOENT;
+	struct stat st;
+	bool ok = fstat(fd, &st) == 0 && S_ISREG(st.st_mode) && st.st_size >= 0 && st.st_size <= 16384;
+	FILE *f = ok ? fdopen(fd, "r") : NULL;
+	if (!f) {
+		close(fd);
+		return false;
+	}
+	char line[1024];
+	bool beginning = true, match = false;
+	unsigned ids = 0;
+	size_t read_bytes = 0;
+	for (;;) {
+		memset(line, 0xff, sizeof(line));
+		if (!fgets(line, sizeof(line), f))
+			break;
+		size_t length = strlen(line);
+		if (memchr(line + length + 1, 0, sizeof(line) - length - 1)) {
+			ok = false;
+			break;
+		}
+		read_bytes += length;
+		if (read_bytes > 16384) {
+			ok = false;
+			break;
+		}
+		if (beginning && !strncmp(line, "episode_id=", 11)) {
+			ids++;
+			char *value = line + 11, *end;
+			errno = 0;
+			long long id = strtoll(value, &end, 10);
+			match = ids == 1 && *value >= '0' && *value <= '9' && errno != ERANGE && id > 0 && id == wanted && (!*end || !strcmp(end, "\n") || !strcmp(end, "\r\n"));
+		}
+		beginning = strchr(line, '\n') != NULL;
+	}
+	ok = ok && !ferror(f);
+	if (fclose(f) != 0)
+		ok = false;
+	return ok && (!ids || match);
+}
+
 bool podcastdl_exists(const podcast_episode_t *episode, const char *feed_title) {
 	char path[768];
 	struct stat st;
-	return podcastdl_path(episode, feed_title, path, sizeof(path)) && stat(path, &st) == 0 && st.st_size > 0;
+	if (!podcastdl_path(episode, feed_title, path, sizeof(path)) || stat(path, &st) != 0 || st.st_size <= 0 || !podcastpair_ready(path))
+		return false;
+	const char *file = strrchr(path, '/') + 1;
+	char folder[768];
+	size_t n = (size_t)(file - path - 1);
+	memcpy(folder, path, n);
+	folder[n] = 0;
+	int dir = open(folder, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+	if (dir < 0)
+		return false;
+	bool ready = native_id_at(dir, file, episode->id);
+	close(dir);
+	return ready;
 }
 
 static void set_state(podcastdl_state_t s) {
@@ -183,8 +260,10 @@ static void set_state(podcastdl_state_t s) {
 // unmount during local I/O; relative lookup also survives a forced/lazy detach
 // without resolving a replacement card through the old absolute pathname.
 static int job_dir(const job_t *job, bool create, bool cleanup) {
-	if ((!cleanup && cancel_asked) || job->state_epoch != podcaststate_card_epoch())
+	if ((!cleanup && cancel_asked) || job->state_epoch != podcaststate_card_epoch()) {
+		errno = cancel_asked ? ECANCELED : ESTALE;
 		return -1;
+	}
 	char root[512];
 	int pin = storage_pin_card(root, sizeof(root));
 	struct stat st;
@@ -192,6 +271,7 @@ static int job_dir(const job_t *job, bool create, bool cleanup) {
 		return -1;
 	if (job->state_epoch != podcaststate_card_epoch() || fstat(pin, &st) != 0 || st.st_dev != job->root_dev || st.st_ino != job->root_ino || (!cleanup && cancel_asked)) {
 		close(pin);
+		errno = ESTALE;
 		return -1;
 	}
 	if (create && mkdirat(pin, PODCASTDL_FOLDER, 0755) != 0 && errno != EEXIST) {
@@ -206,8 +286,15 @@ static int job_dir(const job_t *job, bool create, bool cleanup) {
 		close(parent);
 		return -1;
 	}
-	int dir = openat(parent, job->show, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+	int dir = job->show[0] ? openat(parent, job->show, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC) : fcntl(parent, F_DUPFD_CLOEXEC, 0);
 	close(parent);
+	if (dir >= 0 && job->show_bound) {
+		struct stat st;
+		if (fstat(dir, &st) != 0 || st.st_dev != job->show_dev || st.st_ino != job->show_ino) {
+			close(dir);
+			dir = -1;
+		}
+	}
 	return dir;
 }
 
@@ -220,6 +307,14 @@ static bool create_part(job_t *job) {
 	int dir = job_dir(job, true, false);
 	if (dir < 0)
 		return false;
+	struct stat show;
+	if (fstat(dir, &show) != 0) {
+		close(dir);
+		return false;
+	}
+	job->show_dev = show.st_dev;
+	job->show_ino = show.st_ino;
+	job->show_bound = true;
 	int fd = -1;
 	for (int attempt = 0; attempt < 16; attempt++) {
 		unsigned serial = __atomic_add_fetch(&temp_serial, 1, __ATOMIC_RELAXED);
@@ -260,6 +355,8 @@ static bool append_part(job_t *job, const char *buf, size_t size, long long have
 			ok = false;
 			break;
 		}
+		sha256_update(&job->sha, buf, (size_t)n);
+		job->saved_bytes += n;
 		buf += n;
 		size -= (size_t)n;
 	}
@@ -283,6 +380,7 @@ static void cleanup_part(const job_t *job) {
 }
 
 static bool download_body(job_t *job) {
+	sha256_init(&job->sha);
 	http_stream_t *st = calloc(1, sizeof(*st));
 	if (!st)
 		return false;
@@ -369,7 +467,14 @@ static void fetch_cover(const job_t *job) {
 
 // The sidecar podcastcache.c writes for an episode it streams, with the id of
 // the episode added: here the file name is its title, not its id.
-static bool prepare_tags(const job_t *job, int dir, char *tmp, size_t size) {
+static void tag_field(FILE *f, const char *key, const char *value) {
+	fprintf(f, "%s=", key);
+	for (const unsigned char *p = (const unsigned char *)value; *p; p++)
+		fputc(*p < 32 ? ' ' : *p, f);
+	fputc('\n', f);
+}
+
+static bool prepare_tags(job_t *job, int dir, char *tmp, size_t size) {
 	char tags[200];
 	snprintf(tags, sizeof(tags), "%s.tags", job->file);
 	snprintf(tmp, size, ".%s-%ld-%u.tmp", tags, (long)getpid(), __atomic_add_fetch(&temp_serial, 1, __ATOMIC_RELAXED));
@@ -384,15 +489,19 @@ static bool prepare_tags(const job_t *job, int dir, char *tmp, size_t size) {
 		return false;
 	}
 	const podcast_episode_t *e = &job->episode;
-	fprintf(f, "title=%s\n", e->title);
-	fprintf(f, "artist=%s\n", job->feed_title);
-	fprintf(f, "album=%s\n", job->feed_title);
+	tag_field(f, "title", e->title);
+	tag_field(f, "artist", job->feed_title);
+	tag_field(f, "album", job->feed_title);
 	fprintf(f, "feed_id=%lld\n", e->feed_id);
-	fprintf(f, "feed_author=%s\n", job->feed_author);
-	fprintf(f, "feed_image=%s\n", job->image);
-	fprintf(f, "cover_url=%s\n", e->image);
+	tag_field(f, "feed_author", job->feed_author);
+	tag_field(f, "feed_image", job->image);
+	tag_field(f, "cover_url", e->image);
 	fprintf(f, "episode_id=%lld\n", e->id);
 	bool ok = !ferror(f) && fflush(f) == 0 && fsync(fileno(f)) == 0;
+	if (ok) {
+		ok = fstat(fileno(f), &job->tags_stat) == 0;
+		job->tags_owned = ok;
+	}
 	if (fclose(f) != 0)
 		ok = false;
 	if (!ok)
@@ -400,11 +509,56 @@ static bool prepare_tags(const job_t *job, int dir, char *tmp, size_t size) {
 	return ok;
 }
 
+static int pair_open_dir(void *user) {
+	job_t *job = user;
+	int dir = job_dir(job, false, true);
+	if (dir >= 0 && !job->show_bound) {
+		struct stat st;
+		if (fstat(dir, &st) != 0) {
+			close(dir);
+			return -1;
+		}
+		job->show_dev = st.st_dev;
+		job->show_ino = st.st_ino;
+		job->show_bound = true;
+	}
+	return dir;
+}
+static bool pair_cancelled(void *user) {
+	job_t *job = user;
+	return job->recovery ? job->recovery_cancel && job->recovery_cancel(job->recovery_user) : cancel_asked;
+}
+
 static void *download_main(void *arg) {
 	job_t *job = arg;
 	thread_be_low_priority("podcast save"); // the card on screen is waiting for it
 
-	bool ok = !cancel_asked && download_body(job);
+	podcastpair_result_t paired = PODCASTPAIR_FAILED;
+	bool new_record_possible = false;
+	bool allowed = !cancel_asked;
+	if (allowed) {
+		int existing = pair_open_dir(job);
+		if (existing >= 0) {
+			bool pending = podcastpair_pending_fd(existing);
+			close(existing);
+			if (pending) {
+				podcastpair_io_t io = {.open_dir = pair_open_dir, .cancelled = pair_cancelled, .user = job};
+				paired = podcastpair_recover(&io);
+				allowed = paired == PODCASTPAIR_OK;
+			}
+			if (allowed) {
+				int check = pair_open_dir(job);
+				if (check < 0 || !native_id_at(check, job->file, job->episode.id)) {
+					allowed = false;
+					paired = PODCASTPAIR_CONFLICT;
+				}
+				if (check >= 0)
+					close(check);
+			}
+		} else if (errno != ENOENT)
+			allowed = false;
+	}
+	bool ok = allowed && !cancel_asked && download_body(job);
 	int dir = ok ? job_dir(job, false, false) : -1;
 	int fd = dir >= 0 ? openat(dir, job->staging, O_RDONLY | O_NOFOLLOW | O_CLOEXEC) : -1;
 	ok = ok && same_part(job, fd);
@@ -412,33 +566,53 @@ static void *download_main(void *arg) {
 		struct timespec times[2] = {{.tv_sec = job->episode.published}, {.tv_sec = job->episode.published}};
 		ok = futimens(fd, times) == 0;
 	}
-	char tags_tmp[240] = "", tags[200];
-	snprintf(tags, sizeof(tags), "%s.tags", job->file);
+	char tags_tmp[240] = "";
+	if (ok && !native_id_at(dir, job->file, job->episode.id)) {
+		ok = false;
+		paired = PODCASTPAIR_CONFLICT;
+	}
 	if (ok)
 		ok = fsync(fd) == 0 && prepare_tags(job, dir, tags_tmp, sizeof(tags_tmp));
-	if (ok)
-		ok = !cancel_asked && job->state_epoch == podcaststate_card_epoch() && renameat(dir, job->staging, dir, job->file) == 0;
-	if (ok)
-		ok = renameat(dir, tags_tmp, dir, tags) == 0;
-	if (tags_tmp[0] && dir >= 0)
-		unlinkat(dir, tags_tmp, 0);
-	// Unsupported directory fsync is normal on some filesystems; real I/O
-	// failure must not be announced as a completed download.
-	if (ok && fsync(dir) != 0 && errno != EINVAL && errno != ENOTSUP)
-		ok = false;
 	if (fd >= 0)
 		close(fd);
 	if (dir >= 0)
 		close(dir);
-	if (!ok) {
+	if (ok) {
+		podcastpair_audio_t audio = {.dev = job->part_dev, .ino = job->part_ino, .size = job->saved_bytes};
+		sha256_final_hex(&job->sha, audio.sha256);
+		podcastpair_io_t io = {.open_dir = pair_open_dir, .cancelled = pair_cancelled, .user = job};
+		new_record_possible = true;
+		paired = podcastpair_publish(&io, job->staging, tags_tmp, job->file, &audio);
+		ok = paired == PODCASTPAIR_OK;
+	}
+	bool recovery = paired == PODCASTPAIR_RECOVERY || paired == PODCASTPAIR_CONFLICT || paired == PODCASTPAIR_BUSY;
+	if (!ok && (!recovery || !new_record_possible)) {
 		cleanup_part(job);
-	} else {
+		// The tag temporary was created O_EXCL by this worker; pair rollback may
+		// already have removed it. Never remove any final/backup by absolute path.
+		if (tags_tmp[0] && job->tags_owned) {
+			dir = job_dir(job, false, true);
+			if (dir >= 0) {
+				int tags = openat(dir, tags_tmp, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+				struct stat st;
+				if (tags >= 0 && fstat(tags, &st) == 0 && S_ISREG(st.st_mode) && st.st_dev == job->tags_stat.st_dev && st.st_ino == job->tags_stat.st_ino && st.st_size == job->tags_stat.st_size && st.st_mtim.tv_sec == job->tags_stat.st_mtim.tv_sec && st.st_mtim.tv_nsec == job->tags_stat.st_mtim.tv_nsec)
+					unlinkat(dir, tags_tmp, 0);
+				if (tags >= 0)
+					close(tags);
+				close(dir);
+			}
+		}
+	} else if (ok) {
 		podcaststate_downloaded(job->episode.id, job->path, job->state_epoch);
 		fetch_cover(job);
 	}
+	podcastpair_release(job);
 
 	printf("podcastdl: %s %s\n", job->path, ok ? "complete" : cancel_asked ? "cancelled" : "failed");
-	set_state(ok ? PODCASTDL_DONE : cancel_asked ? PODCASTDL_CANCELLED : PODCASTDL_FAILED);
+	pthread_mutex_lock(&lock);
+	last_pair_result = paired;
+	state = ok ? PODCASTDL_DONE : recovery ? PODCASTDL_RECOVERY_REQUIRED : cancel_asked ? PODCASTDL_CANCELLED : PODCASTDL_FAILED;
+	pthread_mutex_unlock(&lock);
 	free(job);
 	return NULL;
 }
@@ -460,6 +634,7 @@ bool podcastdl_start(const podcast_episode_t *episode, const char *feed_title, c
 	bool busy = state == PODCASTDL_RUNNING;
 	if (!busy) {
 		state = PODCASTDL_RUNNING;
+		last_pair_result = PODCASTPAIR_OK;
 		bytes_done = bytes_total = 0;
 		cancel_asked = false;
 	}
@@ -496,14 +671,24 @@ bool podcastdl_start(const podcast_episode_t *episode, const char *feed_title, c
 	snprintf(job->file, sizeof(job->file), "%s", strrchr(job->path, '/') + 1);
 	snprintf(job->image, sizeof(job->image), "%s", feed_image && feed_image[0] ? feed_image : episode->image);
 
+	if (!podcastpair_reserve(job)) {
+		free(job);
+		set_state(PODCASTDL_IDLE);
+		return false;
+	}
 	pthread_t thread;
 	pthread_attr_t attr;
-	pthread_attr_init(&attr);
-	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-	pthread_attr_setstacksize(&attr, 256 * 1024);
-	bool started = pthread_create(&thread, &attr, download_main, job) == 0;
+	if (pthread_attr_init(&attr) != 0) {
+		podcastpair_release(job);
+		free(job);
+		set_state(PODCASTDL_FAILED);
+		return false;
+	}
+	bool valid_attr = pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED) == 0 && pthread_attr_setstacksize(&attr, 256 * 1024) == 0;
+	bool started = valid_attr && pthread_create(&thread, &attr, download_main, job) == 0;
 	pthread_attr_destroy(&attr);
 	if (!started) {
+		podcastpair_release(job);
 		free(job);
 		set_state(PODCASTDL_FAILED);
 		return false;
@@ -544,3 +729,115 @@ void podcastdl_acknowledge(void) {
 }
 
 bool podcastdl_busy(void) { return podcastdl_state(NULL, NULL) == PODCASTDL_RUNNING; }
+
+// A local recovery job reserves only RAM. Directory enumeration and each hash
+// chunk close their descriptors before admitting the next filesystem operation.
+podcastpair_result_t podcastdl_recover_card(unsigned epoch, bool (*stop)(void *), void *user) {
+	job_t job = {0};
+	job.recovery = true;
+	job.recovery_cancel = stop;
+	job.recovery_user = user;
+	job.state_epoch = epoch;
+	if (!podcastpair_reserve(&job))
+		return PODCASTPAIR_BUSY;
+	podcastpair_result_t result = PODCASTPAIR_OK;
+	char root[512];
+	int pin = -1;
+	long cursor = 0;
+	if (epoch != podcaststate_card_epoch() || (pin = storage_pin_card(root, sizeof(root))) < 0) {
+		result = PODCASTPAIR_RECOVERY;
+		goto done;
+	}
+	struct stat st;
+	if (fstat(pin, &st) != 0 || epoch != podcaststate_card_epoch()) {
+		result = PODCASTPAIR_RECOVERY;
+		close(pin);
+		goto done;
+	}
+	job.root_dev = st.st_dev;
+	job.root_ino = st.st_ino;
+	close(pin);
+	// A moved/copied owned record can also accompany loose files at Podcast/.
+	// Unknown root records are reported instead of silently hiding those files.
+	int loose = pair_open_dir(&job);
+	if (loose >= 0) {
+		bool pending = podcastpair_pending_fd(loose);
+		close(loose);
+		if (pending) {
+			podcastpair_io_t io = {.open_dir = pair_open_dir, .cancelled = pair_cancelled, .user = &job};
+			result = podcastpair_recover(&io);
+		}
+	} else if (errno != ENOENT)
+		result = PODCASTPAIR_RECOVERY;
+	job.show_bound = false;
+	for (;;) {
+		if (stop && stop(user)) {
+			result = PODCASTPAIR_RECOVERY;
+			break;
+		}
+		if (epoch != podcaststate_card_epoch() || (pin = storage_pin_card(root, sizeof(root))) < 0) {
+			result = PODCASTPAIR_RECOVERY;
+			break;
+		}
+		if (fstat(pin, &st) != 0 || st.st_dev != job.root_dev || st.st_ino != job.root_ino || epoch != podcaststate_card_epoch()) {
+			close(pin);
+			result = PODCASTPAIR_RECOVERY;
+			break;
+		}
+		int parent = openat(pin, PODCASTDL_FOLDER, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+		close(pin);
+		if (parent < 0) {
+			if (errno != ENOENT)
+				result = PODCASTPAIR_RECOVERY;
+			break;
+		}
+		DIR *stream = fdopendir(parent);
+		if (!stream) {
+			close(parent);
+			result = PODCASTPAIR_RECOVERY;
+			break;
+		}
+		// Linux directory cookies are filesystem offsets. Reopen at the next cookie
+		// rather than retain the public mount descriptor while hashing a show.
+		if (cursor)
+			seekdir(stream, cursor);
+		errno = 0;
+		struct dirent *entry = readdir(stream);
+		if (!entry) {
+			if (errno && result < PODCASTPAIR_RECOVERY)
+				result = PODCASTPAIR_RECOVERY;
+			closedir(stream);
+			break;
+		}
+		long next = telldir(stream);
+		bool show = entry->d_name[0] != '.' && strlen(entry->d_name) < sizeof(job.show) && fstatat(dirfd(stream), entry->d_name, &st, AT_SYMLINK_NOFOLLOW) == 0 && S_ISDIR(st.st_mode);
+		if (show) {
+			job.show_bound = false;
+			snprintf(job.show, sizeof(job.show), "%s", entry->d_name);
+		}
+		closedir(stream);
+		if (next < 0 || next == cursor) {
+			result = PODCASTPAIR_RECOVERY;
+			break;
+		}
+		cursor = next;
+		if (show) {
+			podcastpair_io_t io = {.open_dir = pair_open_dir, .cancelled = pair_cancelled, .user = &job};
+			podcastpair_result_t one = podcastpair_recover(&io);
+			if (one > result)
+				result = one;
+		}
+	}
+done:
+	podcastpair_release(&job);
+	return result;
+}
+
+bool podcastdl_recovery_busy(void) { return podcastpair_busy() && !podcastdl_busy(); }
+
+podcastpair_result_t podcastdl_pair_result(void) {
+	pthread_mutex_lock(&lock);
+	podcastpair_result_t result = last_pair_result;
+	pthread_mutex_unlock(&lock);
+	return result;
+}

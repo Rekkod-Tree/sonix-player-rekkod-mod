@@ -97,7 +97,8 @@ lv_obj_t *svcui_note(lv_obj_t *parent, const char *text) {
 	return label;
 }
 
-lv_color_t svcui_tone(const char *name) { return sx_placeholder_name(name && name[0] ? name : "?"); }
+float svcui_hue(const char *name) { return sx_palette_hue_of_name(name && name[0] ? name : "?"); }
+lv_color_t svcui_tone(const char *name) { return sx_placeholder_tone(svcui_hue(name)); }
 
 // ---------------------------------------------------------------------------
 // Queueing, with "Undo"

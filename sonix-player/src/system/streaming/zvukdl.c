@@ -7,6 +7,7 @@
 
 #include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -1187,114 +1188,178 @@ static void spoken_scan_async(void *user) {
 	free(scan);
 }
 
-static bool save_book(const entry_t *entry, unsigned asked, char *saved_path, size_t path_size, char *why, size_t why_size) {
-	char card[400], directory[512];
-	why[0] = '\0';
-	pthread_mutex_lock(&lock);
-	unsigned epoch = card_epoch;
-	pthread_mutex_unlock(&lock);
-	int pin = storage_pin_card(card, sizeof(card));
-	if (pin < 0) {
-		snprintf(why, why_size, "%s", tr("download_no_card"));
-		return false;
-	}
-	bool ok = false;
-	bookdownload_t *transaction = NULL;
-	zvuk_spoken_part_t *parts = NULL;
-	char *cover = NULL;
-	size_t cover_size = 0;
-	if (!save_allowed(asked, why, why_size))
-		goto done;
-	if (!bookdownload_path(card, entry->book_folder, "zvuk", entry->track.album_id, directory, sizeof(directory)))
-		goto done;
-	if (bookdownload_ready(directory, saved_path, path_size)) {
-		ok = true;
-		goto done;
-	}
+typedef struct {
+	char root[400];
+	unsigned epoch, asked;
+	dev_t dev;
+	ino_t ino;
+} spoken_book_scope_t;
+static int spoken_book_scope_open(void *user) {
+	spoken_book_scope_t *scope = user;
+	int pin = spoken_pin(scope->root, scope->epoch);
+	if (pin < 0)
+		return -1;
 	struct stat st;
-	if (lstat(directory, &st) == 0) {
-		snprintf(why, why_size, "%s", tr("book_download_conflict"));
-		goto done;
-	}
-	close(pin);
-	pin = -1;
-	parts = calloc(BOOKDOWNLOAD_MAX_PARTS, sizeof(*parts));
-	transaction = calloc(1, sizeof(*transaction));
-	if (!parts || !transaction) {
-		snprintf(why, why_size, "%s", tr("out_of_memory"));
-		goto done;
-	}
-	zvuk_spoken_t book;
-	int count = zvuk_book_parts(entry->track.album_id, parts, BOOKDOWNLOAD_MAX_PARTS, &book);
-	if (count < 0) {
-		snprintf(why, why_size, "%s", zvuk_last_error());
-		goto done;
-	}
-	if (count == 1)
-		snprintf(parts[0].track.title, sizeof(parts[0].track.title), "%s", book.title);
-	if (!save_allowed(asked, why, why_size) || (pin = spoken_pin(card, epoch)) < 0)
-		goto done;
-	char parent[512];
-	snprintf(parent, sizeof(parent), "%s", directory);
-	*strrchr(parent, '/') = '\0';
-	if (!make_dirs(card, parent) || !bookdownload_begin(transaction, directory))
-		goto done;
-	close(pin);
-	pin = -1;
-	for (int i = 0; i < count; i++) {
-		zvuk_stream_t stream;
-		if (!save_allowed(asked, why, why_size))
-			goto done;
-		if (!zvuk_spoken_stream(parts[i].track.id, &stream)) {
-			snprintf(why, why_size, "%s", zvuk_last_error());
-			goto done;
-		}
-		if (!save_allowed(asked, why, why_size) || (pin = spoken_pin(card, epoch)) < 0)
-			goto done;
-		char filename[80], path[512];
-		if (snprintf(filename, sizeof(filename), "%04d-%s.mp3", i + 1, parts[i].track.id) >= (int)sizeof(filename) || snprintf(path, sizeof(path), "%s/%s", transaction->folder, filename) >= (int)sizeof(path))
-			goto done;
-		if (!save_spoken_file(&parts[i].track, &stream, asked, card, epoch, path, count, why, why_size) || !book_tags(path, &parts[i].track) || !bookdownload_record(transaction, filename))
-			goto done;
+	if (fstat(pin, &st) != 0 || !S_ISDIR(st.st_mode) || st.st_dev != scope->dev || st.st_ino != scope->ino) {
 		close(pin);
-		pin = -1;
+		errno = ESTALE;
+		return -1;
 	}
-	if (!save_allowed(asked, why, why_size))
-		goto done;
-	if (book.cover[0])
-		http_get_ex(book.cover, zvuk_stream_headers(), false, &cover, &cover_size, STREAMCOVER_MAX_BYTES, 15, NULL);
-	if (!save_allowed(asked, why, why_size) || (pin = spoken_pin(card, epoch)) < 0)
-		goto done;
-	char artwork[600];
-	if (cover && snprintf(artwork, sizeof(artwork), "%s/cover.jpg", transaction->folder) < (int)sizeof(artwork))
-		streamcover_store(artwork, cover, cover_size);
-	if (!bookdownload_publish(transaction, count))
-		goto done;
-	ok = bookdownload_ready(directory, saved_path, path_size);
+	return pin;
+}
+
+static bool spoken_book_scope_cancelled(void *user) {
+	spoken_book_scope_t *scope = user;
+	pthread_mutex_lock(&lock);
+	bool stop = scope->asked != generation;
+        pthread_mutex_unlock(&lock);
+        return stop;
+}
+
+static bool save_book(const entry_t *entry, unsigned asked, char *saved_path,
+                      size_t path_size, char *why, size_t why_size) {
+  char card[400], directory[512];
+  why[0] = '\0';
+  pthread_mutex_lock(&lock);
+  unsigned epoch = card_epoch;
+  pthread_mutex_unlock(&lock);
+  int pin = storage_pin_card(card, sizeof(card));
+  if (pin < 0) {
+    snprintf(why, why_size, "%s", tr("download_no_card"));
+    return false;
+  }
+  spoken_book_scope_t scope = {.epoch = epoch, .asked = asked};
+  snprintf(scope.root, sizeof(scope.root), "%s", card);
+  struct stat admitted_root;
+  if (fstat(pin, &admitted_root) != 0) {
+    close(pin);
+    return false;
+  }
+  scope.dev = admitted_root.st_dev;
+  scope.ino = admitted_root.st_ino;
+  bookdownload_io_t io = {.open_root = spoken_book_scope_open,
+                          .cancelled = spoken_book_scope_cancelled,
+                          .user = &scope};
+  bool ok = false;
+  bookdownload_t *transaction = NULL;
+  zvuk_spoken_part_t *parts = NULL;
+  char *cover = NULL;
+  size_t cover_size = 0;
+  if (!save_allowed(asked, why, why_size))
+    goto done;
+  if (!bookdownload_path(card, entry->book_folder, "zvuk",
+                         entry->track.album_id, directory, sizeof(directory)))
+    goto done;
+  if (bookdownload_ready_admitted(card, directory, &io, saved_path,
+                                  path_size)) {
+    ok = true;
+    goto done;
+  }
+  struct stat st;
+  if (fstatat(pin, directory + strlen(card) + 1, &st, AT_SYMLINK_NOFOLLOW) ==
+      0) {
+    snprintf(why, why_size, "%s", tr("book_download_conflict"));
+    goto done;
+  }
+  close(pin);
+  pin = -1;
+  parts = calloc(BOOKDOWNLOAD_MAX_PARTS, sizeof(*parts));
+  transaction = calloc(1, sizeof(*transaction));
+  if (!parts || !transaction) {
+    snprintf(why, why_size, "%s", tr("out_of_memory"));
+    goto done;
+  }
+  zvuk_spoken_t book;
+  int count = zvuk_book_parts(entry->track.album_id, parts,
+                              BOOKDOWNLOAD_MAX_PARTS, &book);
+  if (count < 0) {
+    snprintf(why, why_size, "%s", zvuk_last_error());
+    goto done;
+  }
+  if (count == 1)
+    snprintf(parts[0].track.title, sizeof(parts[0].track.title), "%s",
+             book.title);
+  if (!save_allowed(asked, why, why_size) ||
+      (pin = spoken_pin(card, epoch)) < 0)
+    goto done;
+  if (!bookdownload_begin_admitted(transaction, card, directory, &io))
+    goto done;
+  close(pin);
+  pin = -1;
+  for (int i = 0; i < count; i++) {
+    zvuk_stream_t stream;
+    if (!save_allowed(asked, why, why_size))
+      goto done;
+    if (!zvuk_spoken_stream(parts[i].track.id, &stream)) {
+      snprintf(why, why_size, "%s", zvuk_last_error());
+      goto done;
+    }
+    if (!save_allowed(asked, why, why_size) ||
+        (pin = spoken_pin(card, epoch)) < 0)
+      goto done;
+    int stage_fd = bookdownload_open_stage(transaction);
+    if (stage_fd < 0)
+      goto done;
+    char filename[80], path[512];
+    if (snprintf(filename, sizeof(filename), "%04d-%s.mp3", i + 1,
+                 parts[i].track.id) >= (int)sizeof(filename) ||
+        snprintf(path, sizeof(path), "/proc/self/fd/%d/%s", stage_fd,
+                 filename) >= (int)sizeof(path)) {
+      close(stage_fd);
+      goto done;
+    }
+    bool saved = save_spoken_file(&parts[i].track, &stream, asked, card, epoch,
+                                  path, count, why, why_size) &&
+                 book_tags(path, &parts[i].track);
+    close(stage_fd);
+    if (!saved || !bookdownload_record(transaction, filename))
+      goto done;
+    close(pin);
+    pin = -1;
+  }
+  if (!save_allowed(asked, why, why_size))
+    goto done;
+  if (book.cover[0])
+    http_get_ex(book.cover, zvuk_stream_headers(), false, &cover, &cover_size,
+                STREAMCOVER_MAX_BYTES, 15, NULL);
+  if (!save_allowed(asked, why, why_size) ||
+      (pin = spoken_pin(card, epoch)) < 0)
+    goto done;
+  int cover_dir = bookdownload_open_stage(transaction);
+  if (cover_dir < 0)
+    goto done;
+  char artwork[96];
+  if (cover && snprintf(artwork, sizeof(artwork), "/proc/self/fd/%d/cover.jpg",
+                        cover_dir) < (int)sizeof(artwork))
+    streamcover_store(artwork, cover, cover_size);
+  close(cover_dir);
+  if (!bookdownload_publish(transaction, count))
+    goto done;
+  ok = bookdownload_ready_admitted(card, directory, &io, saved_path, path_size);
 done:
-	if (transaction && transaction->owned && spoken_same_card(card, epoch)) {
-		if (pin < 0)
-			pin = spoken_pin(card, epoch);
-		if (pin >= 0)
-			bookdownload_abort(transaction);
-	}
-	free(parts);
-	free(transaction);
-	free(cover);
-	if (pin >= 0)
-		close(pin);
-	if (ok) {
-		spoken_scan_t *scan = calloc(1, sizeof(*scan));
-		if (scan) {
-			snprintf(scan->folder, sizeof(scan->folder), "%s", directory);
-			*strrchr(scan->folder, '/') = '\0';
-			scan->generation = asked;
-			if (!gui_post(spoken_scan_async, scan))
-				free(scan);
-		}
-	} else if (!why[0])
-		snprintf(why, why_size, "%s", tr("download_failed"));
-	return ok;
+  if (transaction && transaction->owned && spoken_same_card(card, epoch)) {
+    if (pin < 0)
+      pin = spoken_pin(card, epoch);
+    if (pin >= 0)
+      bookdownload_abort(transaction);
+  }
+  free(parts);
+  free(transaction);
+  free(cover);
+  if (pin >= 0)
+    close(pin);
+  if (ok) {
+    spoken_scan_t *scan = calloc(1, sizeof(*scan));
+    if (scan) {
+      snprintf(scan->folder, sizeof(scan->folder), "%s", directory);
+      *strrchr(scan->folder, '/') = '\0';
+      scan->generation = asked;
+      if (!gui_post(spoken_scan_async, scan))
+        free(scan);
+    }
+  } else if (!why[0])
+    snprintf(why, why_size, "%s", tr("download_failed"));
+  return ok;
 }
 
 static bool save_episode(const zvuk_track_t *episode, unsigned asked, char *saved_path, size_t path_size, char *why, size_t why_size) {

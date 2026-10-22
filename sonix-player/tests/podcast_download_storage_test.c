@@ -1,14 +1,18 @@
 /* From sonix-player: cc -std=gnu11 -Wall -Wextra -Werror -O1 -g
  * -fsanitize=address,undefined -fno-omit-frame-pointer -I.
- * tests/podcast_download_storage_test.c -pthread -o /tmp/podcast-storage-test
+ * tests/podcast_download_storage_test.c src/system/core/sha256.c -pthread -o /tmp/podcast-storage-test
  * ASAN_OPTIONS=detect_leaks=1 /tmp/podcast-storage-test
  * Real downloader, synthetic card directories and deterministic network faults.
  */
 #define _GNU_SOURCE
+#include <errno.h>
 #include <pthread.h>
+static int fail_thread;
 static pthread_t worker;
 static int joinable_create(pthread_t *t, const pthread_attr_t *a, void *(*fn)(void *), void *arg) {
 	(void)a;
+	if (fail_thread)
+		return EAGAIN;
 	int rc = pthread_create(t, NULL, fn, arg);
 	if (!rc)
 		worker = *t;
@@ -27,6 +31,7 @@ static ssize_t checked_write(int fd, const void *buf, size_t n) {
 #define pthread_create joinable_create
 #define write checked_write
 #include "src/system/streaming/podcastdl.c"
+#include "src/system/streaming/podcastpair.c"
 #undef pthread_create
 #undef write
 #include <assert.h>
@@ -36,7 +41,7 @@ static char root[512];
 static unsigned epoch = 1, notices;
 static int reads, mode, pins, initial_fds;
 static int fd_count(void);
-enum { GOOD, NO_CARD, CONNECT_FAIL, TRUNCATED, NO_SPACE, CANCEL_CONNECT, REPLACE_CONNECT, REPLACE_BODY, REPLACE_COVER, LARGE };
+enum { GOOD, NO_CARD, CONNECT_FAIL, TRUNCATED, NO_SPACE, CANCEL_CONNECT, REPLACE_CONNECT, REPLACE_BODY, REPLACE_COVER, LARGE, CREATE_FAIL };
 static void replace(void) {
 	char old[600], path[600];
 	snprintf(old, sizeof(old), "%s-old", root);
@@ -72,7 +77,7 @@ void thread_be_low_priority(const char *s) { (void)s; }
 bool http_stream_open(http_stream_t *s, const char *url, int timeout) {
 	(void)url;
 	(void)timeout;
-	assert(pins == 1);
+	assert(pins == 2);
 	assert(fd_count() == initial_fds); /* Initial admission has closed before connecting. */
 	if (mode == CANCEL_CONNECT)
 		podcastdl_cancel();
@@ -123,12 +128,13 @@ static int fd_count(void) {
 }
 int main(int argc, char **argv) {
 	alarm(30);
+	setbuf(stdout, NULL);
 	char tmp[256];
 	int len = snprintf(tmp, sizeof(tmp), "%s/sonix-podcast-storage-XXXXXX", argc > 1 ? argv[1] : "/tmp");
 	assert(len > 0 && (size_t)len < sizeof(tmp));
 	assert(mkdtemp(tmp));
 	printf("fixtures=%s safe_card=%d\n", tmp, argc > 1);
-	for (mode = GOOD; mode <= LARGE; mode++) {
+	for (mode = GOOD; mode <= CREATE_FAIL; mode++) {
 		if (argc > 1 && mode != GOOD && mode != NO_SPACE && mode != CANCEL_CONNECT && mode != LARGE)
 			continue;
 		snprintf(root, sizeof(root), "%s/case%d", tmp, mode);
@@ -136,15 +142,16 @@ int main(int argc, char **argv) {
 		epoch++;
 		reads = pins = notices = 0;
 		fail_write = mode == NO_SPACE;
+		fail_thread = mode == CREATE_FAIL;
 		podcast_episode_t e = {.id = 7, .published = 12345};
 		snprintf(e.title, sizeof(e.title), "Episode");
 		snprintf(e.enclosure, sizeof(e.enclosure), "fixture://body");
 		int before = initial_fds = fd_count();
 		bool started = podcastdl_start(&e, "Show", "Author", "fixture://cover");
-		assert(started == (mode != NO_CARD));
+		assert(started == (mode != NO_CARD && mode != CREATE_FAIL));
 		if (started)
 			assert(!pthread_join(worker, NULL));
-		assert(fd_count() == before);
+		assert(fd_count() == before && !podcastpair_busy());
 		char path[700];
 		snprintf(path, sizeof(path), "%s/Podcast/Show/Episode.mp3", root);
 		if (mode >= REPLACE_CONNECT && mode <= REPLACE_COVER) {
@@ -168,7 +175,7 @@ int main(int argc, char **argv) {
 		if (mode != GOOD && mode != LARGE && mode != REPLACE_COVER)
 			assert(!notices);
 		if (mode == LARGE)
-			assert(pins == 69); // One pin per 32 KiB; no per-byte work.
+			assert(pins >= 69 && pins <= 100); // One pin per 32 KiB plus bounded pair publication metadata.
 		printf("PASS mode=%d pins=%d state=%d descriptors=%d\n", mode, pins, podcastdl_state(NULL, NULL), before);
 		podcastdl_acknowledge();
 	}

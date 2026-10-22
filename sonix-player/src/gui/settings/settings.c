@@ -1,4 +1,5 @@
 #include "settings.h"
+#include "src/gui/shell/sx_palette.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -232,8 +233,8 @@ static void screensettings_loaded_cb(lv_event_t *e) {
 static void refresh_brightness_slider(void) {
 	theme_apply_slider_knob(brightness_slider);
 	if (brightness_slider) {
-		lv_obj_set_style_bg_color(brightness_slider, theme()->accent, LV_PART_INDICATOR);
-		lv_obj_set_style_bg_color(brightness_slider, theme()->text_secondary, LV_PART_MAIN);
+		lv_obj_set_style_bg_color(brightness_slider, sx_pal()->panel_accent, LV_PART_INDICATOR);
+		lv_obj_set_style_bg_color(brightness_slider, sx_pal()->panel_text2, LV_PART_MAIN);
 	}
 }
 
@@ -249,19 +250,19 @@ static void build_screen_page(gui_config_t *cfg) {
 	// The 2.0 card's look, as on the slider cards under it (settingsrow.c):
 	// not a button, so no pressed fill.
 	sx_card_style(card);
-	lv_obj_remove_style(card, &sx_style_press, LV_STATE_PRESSED);
+	lv_obj_remove_style(card, &sx_style_panel_press, LV_STATE_PRESSED);
 	lv_obj_set_style_pad_ver(card, 14, 0);
 	lv_obj_set_scrollable(card, false);
 	lv_obj_set_event_bubble(card, true);
 
 	lv_obj_t *label = lv_label_create(card);
 	lv_label_set_text(label, tr("brightness"));
-	lv_obj_add_style(label, &theme_style_text, 0);
+	lv_obj_add_style(label, &sx_style_panel_text, 0);
 	lv_obj_set_style_text_font(label, &font_ui_24, 0);
 	lv_obj_align(label, LV_ALIGN_TOP_LEFT, 0, 0);
 
 	brightness_value = lv_label_create(card);
-	lv_obj_add_style(brightness_value, &theme_style_text_dim, 0);
+	lv_obj_add_style(brightness_value, &sx_style_panel_text2, 0);
 	lv_obj_set_style_text_font(brightness_value, &font_ui_22, 0);
 	lv_obj_align(brightness_value, LV_ALIGN_TOP_RIGHT, 0, 0);
 	lv_label_set_text(brightness_value, "");
@@ -274,11 +275,11 @@ static void build_screen_page(gui_config_t *cfg) {
 	lv_slider_set_range(brightness_slider, 5, 100);
 
 	lv_obj_set_style_radius(brightness_slider, LV_RADIUS_CIRCLE, LV_PART_MAIN);
-	lv_obj_set_style_bg_color(brightness_slider, theme()->text_secondary, LV_PART_MAIN);
+	lv_obj_set_style_bg_color(brightness_slider, sx_pal()->panel_text2, LV_PART_MAIN);
 	lv_obj_set_style_bg_opa(brightness_slider, LV_OPA_40, LV_PART_MAIN);
 
 	lv_obj_set_style_radius(brightness_slider, LV_RADIUS_CIRCLE, LV_PART_INDICATOR);
-	lv_obj_set_style_bg_color(brightness_slider, theme()->accent, LV_PART_INDICATOR);
+	lv_obj_set_style_bg_color(brightness_slider, sx_pal()->panel_accent, LV_PART_INDICATOR);
 
 	lv_obj_set_style_radius(brightness_slider, LV_RADIUS_CIRCLE, LV_PART_KNOB);
 	lv_obj_set_style_bg_color(brightness_slider, lv_color_white(), LV_PART_KNOB);

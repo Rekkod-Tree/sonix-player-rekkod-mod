@@ -119,6 +119,10 @@ static void feedback_states(void) {
 		player_sheet_open(false);
 		break;
 	case 2: {
+		// The large import may overrun the runner period. Flush pending sheet
+		// geometry before the next timer callback injects pointer coordinates.
+		lv_obj_update_layout(lv_layer_top());
+		assert(player_sheet_is_open() && lv_obj_get_y(player_screen) == 0);
 		device_state_get(&state);
 		audio_status_t before = state.status;
 		input(16, 260, true);
@@ -129,6 +133,7 @@ static void feedback_states(void) {
 		assert(slider);
 		lv_area_t bounds;
 		lv_obj_get_coords(slider, &bounds);
+		assert(bounds.y1 > 0 && bounds.y2 < lv_display_get_vertical_resolution(lv_display_get_default()));
 		input(240, bounds.y1 - 12, true);
 		input(240, bounds.y1 - 12, false);
 		device_state_get(&state);

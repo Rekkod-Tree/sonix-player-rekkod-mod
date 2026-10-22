@@ -1,5 +1,5 @@
 #include "podcastpage.h"
-
+#include "src/gui/shell/artview.h"
 
 #include <stdatomic.h>
 #include <pthread.h>
@@ -160,13 +160,14 @@ static void note_wifi_row_cb(lv_event_t *e);
 
 typedef enum {
 	JOB_NONE = 0,
-	JOB_SEARCH,	  // search podcasts by name
-	JOB_TRENDING, // the current chart
-	JOB_FEED,	  // one podcast's episodes, for its page (podcastcard.c)
-	JOB_FOLLOWED, // the followed podcasts, which live on the card
-	JOB_PLAY,	  // download an episode and start it
-	JOB_CARD,	  // the podcasts in the card's Podcast folder: drawn on the spot, never queued
-	JOB_RESUME,	  // an episode of the catalogue left halfway: its podcast's list, then play it
+	JOB_SEARCH,		  // search podcasts by name
+	JOB_TRENDING,	  // the current chart
+	JOB_FEED,		  // one podcast's episodes, for its page (podcastcard.c)
+	JOB_FOLLOWED,	  // the followed podcasts, which live on the card
+	JOB_PLAY,		  // download an episode and start it
+	JOB_CARD,		  // the podcasts in the card's Podcast folder: drawn on the spot, never queued
+	JOB_RESUME,		  // an episode of the catalogue left halfway: its podcast's list, then play it
+	JOB_CARD_RECOVER, // local files only, on the existing worker
 } job_kind_t;
 
 typedef struct {
@@ -181,6 +182,7 @@ typedef struct {
 	// list can open asking for more than one page, and a continuation keeps the
 	// rows already drawn and appends after them.
 	bool more;
+	unsigned epoch; // JOB_CARD_RECOVER: card captured on the GUI thread
 } job_t;
 
 static pthread_mutex_t job_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -189,6 +191,12 @@ static pthread_cond_t result_taken = PTHREAD_COND_INITIALIZER;
 static job_t pending;
 static bool have_pending;
 static bool worker_started;
+static _Atomic unsigned recovery_ticket, recovery_done_ticket, recovery_failed_ticket, recovery_failed_epoch;
+static unsigned recovery_pending_ticket;
+static bool recovery_reenter, recovery_after_download, recovery_idle_retry_used, recovery_after_feed;
+static void request_card_recovery(void);
+static void recovery_dropped(unsigned ticket);
+static void recovery_feed_finished(void);
 
 // The results. Two arrays and not one because a podcast and an episode do not
 // share fields, and merging them into a single struct would leave half the
@@ -230,7 +238,7 @@ static void list_nav_commit(void);
 static void fill_list(int from);
 static void busy_hide(void);
 static void prefetch_urgent(const char *wanted_path);
-static bool show_card_now(void);
+static bool show_card_now(bool recover);
 static void backfill_start(void);
 
 static void submit(const job_t *job) {
@@ -239,10 +247,17 @@ static void submit(const job_t *job) {
 	// another job is told, so that it asks again rather than wait for nothing.
 	bool dropped = have_pending && pending.kind == JOB_FEED && job->kind != JOB_FEED;
 	unsigned dropped_ticket = (unsigned)pending.index;
+	bool dropped_recovery = have_pending && pending.kind == JOB_CARD_RECOVER;
+	unsigned dropped_recovery_ticket = (unsigned)pending.index;
 	pending = *job;
 	have_pending = true;
 	pthread_cond_signal(&job_ready);
 	pthread_mutex_unlock(&job_lock);
+	if (dropped_recovery) {
+		recovery_dropped(dropped_recovery_ticket);
+		if (job->kind == JOB_FEED)
+			recovery_after_feed = true;
+	}
 	if (dropped) {
 		podcastcard_feed_loaded(dropped_ticket, -1, NULL, NULL);
 	}
@@ -464,11 +479,13 @@ static void paint_thumb(lv_obj_t *row, int index) {
 	lv_color_t tone = svcui_tone(index >= 0 ? entry_title(index) : "");
 	if (index >= 0 && row_has_image[index]) {
 		sx_row_set_thumb(row, &row_images[row_image_source[index]].dsc, tone);
+		sx_row_set_content(row, svcui_hue(entry_title(index)), false, true, row_images[row_image_source[index]].display_generation);
 		return;
 	}
 	// The microphone, not the musical note: a podcast row without a cover is
 	// not a track.
 	sx_row_set_thumb(row, &icon_podcast_list, tone);
+	sx_row_set_content(row, svcui_hue(index >= 0 ? entry_title(index) : ""), false, false, 0);
 }
 
 // Records that the picture belonging to `owner` is the one for `row`, and draws
@@ -553,7 +570,7 @@ static void art_poll_cb(lv_timer_t *timer) {
 			continue;
 		}
 
-		cover_free(&row_images[row]);
+		sx_artview_release_cover(&row_images[row]);
 		row_images[row] = image;
 		show_cover(row, row);
 		lend_cover(row);
@@ -586,7 +603,7 @@ static void art_poll_cb(lv_timer_t *timer) {
 			cover_free(&image);
 			continue;
 		}
-		cover_free(&row_images[row]);
+		sx_artview_release_cover(&row_images[row]);
 		row_images[row] = image;
 		row_has_image[row] = true;
 		row_image_source[row] = row;
@@ -626,7 +643,7 @@ static void card_art_request_visible(void) {
 		// the first time waits for the decoder.
 		cover_image_t image;
 		if (cover_thumb_cached(first, ROW_THUMB, &image)) {
-			cover_free(&row_images[row]);
+			sx_artview_release_cover(&row_images[row]);
 			row_images[row] = image;
 			row_has_image[row] = true;
 			row_image_source[row] = row;
@@ -809,7 +826,7 @@ static void art_forget_rows(void) {
 		row_image_source[row] = -1;
 		// Only an owner has pixels of its own; a row that borrowed one holds a
 		// zeroed image, and freeing that is nothing.
-		cover_free(&row_images[row]);
+		sx_artview_release_cover(&row_images[row]);
 	}
 }
 
@@ -830,7 +847,7 @@ static void art_drop_pictures(void) {
 	for (int row = 0; row < PODCAST_MAX_HELD; row++) {
 		row_has_image[row] = false;
 		row_image_source[row] = -1;
-		cover_free(&row_images[row]);
+		sx_artview_release_cover(&row_images[row]);
 	}
 	// Back to the microphone, after the state says there is no picture and
 	// before anything can draw the freed pixels.
@@ -875,6 +892,10 @@ static void list_loaded_cb(lv_event_t *e) {
 
 static void list_unloaded_cb(lv_event_t *e) {
 	(void)e;
+	atomic_fetch_add(&recovery_ticket, 1);
+	recovery_reenter = false;
+	recovery_after_download = false;
+	recovery_after_feed = false;
 	if (art_drop_timer) {
 		lv_timer_reset(art_drop_timer);
 		lv_timer_resume(art_drop_timer);
@@ -1187,7 +1208,7 @@ static void list_nav_commit(void) {
 }
 
 static void run(const job_t *job);
-static void start_worker(void);
+static bool start_worker(void);
 static void busy_show(void);
 
 // The back step is prepared by hand rather than through run(), so that
@@ -1211,7 +1232,7 @@ static bool list_back_guard(void) {
 	job_t previous = list_history[list_history_len - 1];
 	// The card's podcasts are not the worker's: they are drawn on the spot.
 	if (previous.kind == JOB_CARD) {
-		if (show_card_now()) {
+		if (show_card_now(true)) {
 			return true;
 		}
 	}
@@ -1233,18 +1254,23 @@ static bool list_back_guard(void) {
 // starting a job
 // ---------------------------------------------------------------------------
 
-static void start_worker(void) {
+static bool start_worker(void) {
 	if (worker_started) {
-		return;
+		return true;
 	}
 	pthread_t thread;
 	if (pthread_create(&thread, NULL, worker_main, NULL) == 0) {
 		pthread_detach(thread);
 		worker_started = true;
 	}
+	return worker_started;
 }
 
 static void run_ex(const job_t *job, bool root) {
+	atomic_fetch_add(&recovery_ticket, 1);
+	recovery_reenter = false;
+	recovery_after_download = false;
+	recovery_after_feed = false;
 	if (job_is_list(job->kind)) {
 		inflight_job = *job;
 		inflight_valid = true;
@@ -1632,6 +1658,7 @@ static void feed_done_cb(void *user) {
 	if (latest) {
 		podcastcard_feed_loaded(ticket, n, n < 0 ? error : NULL, has_info ? &info : NULL);
 	}
+	recovery_feed_finished();
 }
 
 // On the worker.
@@ -1797,6 +1824,118 @@ static bool play_queued_from(int index) {
 	return true;
 }
 
+typedef struct {
+	unsigned ticket, epoch;
+	podcastpair_result_t result;
+} recovery_note_t;
+static bool recovery_cancelled(void *user) { return (unsigned)(uintptr_t)user != atomic_load(&recovery_ticket); }
+static bool recovery_view(void) { return lv_screen_active() == podcast_screen && list_kind == JOB_CARD; }
+static void recovery_feed_finished(void) {
+	if (!recovery_after_feed)
+		return;
+	pthread_mutex_lock(&job_lock);
+	bool other = have_pending;
+	pthread_mutex_unlock(&job_lock);
+	if (other)
+		return;
+	recovery_after_feed = false;
+	if (recovery_view())
+		request_card_recovery();
+}
+static void recovery_dropped(unsigned ticket) {
+	if (recovery_pending_ticket == ticket)
+		recovery_pending_ticket = 0;
+}
+static void recovery_done_async(void *user) {
+	recovery_note_t *note = user;
+	bool owns_pending = recovery_pending_ticket == note->ticket;
+	if (owns_pending)
+		recovery_pending_ticket = 0;
+	bool catchup = false;
+	bool valid = owns_pending && note->ticket == atomic_load(&recovery_ticket) && note->epoch == podcaststate_card_epoch() && recovery_view();
+	if (valid) {
+		if (note->result == PODCASTPAIR_BUSY) {
+			recovery_after_download = true;
+			if (!podcastdl_busy() && !podcastdl_recovery_busy() && !recovery_idle_retry_used) {
+				recovery_idle_retry_used = true;
+				recovery_after_download = false;
+				catchup = true;
+			}
+		} else {
+			recovery_after_download = false;
+			show_card_now(false);
+			if (note->result == PODCASTPAIR_CONFLICT)
+				toast_error(tr("podcast_recovery_conflict"));
+			else if (note->result != PODCASTPAIR_OK)
+				toast_error(tr("podcast_recovery_required"));
+		}
+	}
+	bool again = owns_pending && (recovery_reenter || catchup) && !recovery_pending_ticket && recovery_view();
+	if (owns_pending)
+		recovery_reenter = false;
+	free(note);
+	if (again)
+		request_card_recovery();
+}
+static void request_card_recovery(void) {
+	if (recovery_pending_ticket == atomic_load(&recovery_done_ticket))
+		recovery_pending_ticket = 0;
+	if (recovery_pending_ticket) {
+		recovery_reenter = true;
+		return;
+	}
+	pthread_mutex_lock(&job_lock);
+	bool other = have_pending && pending.kind != JOB_CARD_RECOVER;
+	bool feed = other && pending.kind == JOB_FEED;
+	pthread_mutex_unlock(&job_lock);
+	if (other) {
+		if (feed)
+			recovery_after_feed = true;
+		return;
+	}
+	if (podcastdl_busy()) {
+		recovery_after_download = true;
+		return;
+	}
+	recovery_after_download = false;
+	recovery_reenter = false;
+	recovery_after_feed = false;
+	if (!start_worker()) {
+		toast_error(tr("podcast_recovery_start_failed"));
+		return;
+	}
+	unsigned ticket = atomic_fetch_add(&recovery_ticket, 1) + 1;
+	if (!ticket)
+		ticket = atomic_fetch_add(&recovery_ticket, 1) + 1;
+	job_t job = {.kind = JOB_CARD_RECOVER, .index = (int)ticket, .epoch = podcaststate_card_epoch()};
+	recovery_pending_ticket = ticket;
+	submit(&job);
+}
+static void recovery_allocation_failed_async(void *user) {
+	unsigned ticket = (unsigned)(uintptr_t)user;
+	if (recovery_pending_ticket == ticket)
+		recovery_pending_ticket = 0;
+	if (ticket == atomic_load(&recovery_failed_ticket) && ticket == atomic_load(&recovery_ticket) && atomic_load(&recovery_failed_epoch) == podcaststate_card_epoch() && recovery_view())
+		toast_error(tr("out_of_memory"));
+}
+static void run_recovery_job(const job_t *job) {
+	recovery_note_t *note = calloc(1, sizeof(*note));
+	if (note) {
+		note->ticket = (unsigned)job->index;
+		note->epoch = job->epoch;
+		note->result = podcastdl_recover_card(job->epoch, recovery_cancelled, (void *)(uintptr_t)(unsigned)job->index);
+	}
+	atomic_store(&recovery_done_ticket, (unsigned)job->index);
+	if (note) {
+		if (!gui_post(recovery_done_async, note))
+			free(note);
+	} else {
+		atomic_store(&recovery_failed_epoch, job->epoch);
+		atomic_store(&recovery_failed_ticket, (unsigned)job->index);
+		gui_post(recovery_allocation_failed_async, (void *)(uintptr_t)(unsigned)job->index);
+	}
+}
+
 static void *worker_main(void *arg) {
 	(void)arg;
 	thread_be_background("podcast worker");
@@ -1823,6 +1962,10 @@ static void *worker_main(void *arg) {
 		have_pending = false;
 		pthread_mutex_unlock(&job_lock);
 
+		if (job.kind == JOB_CARD_RECOVER) {
+			run_recovery_job(&job);
+			continue;
+		}
 		// A podcast's page: its own answer, which leaves the list on this page
 		// as it is.
 		if (job.kind == JOB_FEED) {
@@ -2099,7 +2242,7 @@ static int dl_queue_count;
 static int dl_queue_next;
 static int dl_queue_done;
 static int dl_queue_failed;
-static bool dl_queue_cancelled;
+static bool dl_queue_cancelled, dl_queue_recovery, dl_queue_storage_busy, dl_queue_conflict;
 static char dl_feed_title[PODCAST_TITLE_MAX];
 
 static void dl_close(void) {
@@ -2138,6 +2281,11 @@ static bool dl_start_next(void) {
 			continue;
 		}
 		if (!podcastdl_start(episode, dl_feed_title, browsing_author, browsing_image)) {
+			if (podcastdl_recovery_busy()) {
+				dl_queue_storage_busy = true;
+				dl_queue_next = dl_queue_count;
+				return false;
+			}
 			dl_queue_failed++;
 			continue;
 		}
@@ -2157,6 +2305,18 @@ static bool dl_start_next(void) {
 
 // What the queue came to, once it is over.
 static void dl_report(void) {
+	if (dl_queue_conflict) {
+		toast_error(tr("podcast_recovery_conflict"));
+		return;
+	}
+	if (dl_queue_recovery) {
+		toast_error(tr("podcast_recovery_required"));
+		return;
+	}
+	if (dl_queue_storage_busy) {
+		toast_plain(tr("podcast_recovery_busy"));
+		return;
+	}
 	if (dl_queue_cancelled) {
 		return;
 	}
@@ -2186,6 +2346,11 @@ static void dl_poll_cb(lv_timer_t *timer) {
 	podcastdl_acknowledge();
 	if (state == PODCASTDL_DONE) {
 		dl_queue_done++;
+	} else if (state == PODCASTDL_RECOVERY_REQUIRED) {
+		dl_queue_conflict = podcastdl_pair_result() == PODCASTPAIR_CONFLICT;
+		dl_queue_failed++;
+		dl_queue_recovery = true;
+		dl_queue_next = dl_queue_count;
 	} else if (state == PODCASTDL_FAILED) {
 		dl_queue_failed++;
 	} else if (state == PODCASTDL_CANCELLED) {
@@ -2197,6 +2362,10 @@ static void dl_poll_cb(lv_timer_t *timer) {
 	dl_close();
 	dl_report();
 	dl_queue_free();
+	if (recovery_after_download && recovery_view()) {
+		recovery_idle_retry_used = false;
+		request_card_recovery();
+	}
 }
 
 static void dl_cancel_cb(lv_event_t *e) {
@@ -2292,6 +2461,7 @@ void podcastpage_feed_download_many(const int *indices, int count, const char *f
 	}
 	snprintf(dl_feed_title, sizeof(dl_feed_title), "%s", feed_title ? feed_title : "");
 	dl_queue_next = 0;
+	dl_queue_recovery = dl_queue_storage_busy = dl_queue_conflict = false;
 	dl_queue_done = 0;
 	dl_queue_failed = 0;
 	dl_queue_cancelled = false;
@@ -2528,8 +2698,9 @@ static void listen_thumb(listen_row_t *row, bool pictured) {
 		lv_obj_set_style_image_recolor_opa(row->thumb, LV_OPA_TRANSP, 0);
 		lv_obj_set_style_radius(row->thumb, SX_ROW_THUMB_R, 0);
 		lv_obj_set_style_clip_corner(row->thumb, true, 0);
-		lv_image_set_src(row->thumb, &row->image.dsc);
+		sx_artview_bind(row->thumb, &row->image.dsc, row->image.display_generation);
 	} else {
+		sx_artview_detach(row->thumb);
 		lv_image_set_src(row->thumb, &icon_podcast_list);
 		lv_obj_add_style(row->thumb, &sx_style_icon2, 0);
 		lv_obj_set_style_image_recolor_opa(row->thumb, LV_OPA_COVER, 0);
@@ -2551,7 +2722,7 @@ static void listen_cover(int k, const char *path) {
 	coverloader_release(PODCASTCARD_SLOT_LISTENING + k);
 	row->cover_waiting = false;
 	listen_thumb(row, false);
-	cover_free(&row->image);
+	sx_artview_release_cover(&row->image);
 	snprintf(row->cover_path, sizeof(row->cover_path), "%s", want);
 	if (!want[0]) {
 		return;
@@ -2577,7 +2748,7 @@ static void listen_art_poll(void) {
 		bool finished = false;
 		if (coverloader_take(PODCASTCARD_SLOT_LISTENING + k, &image, &finished)) {
 			listen_thumb(row, false);
-			cover_free(&row->image);
+			sx_artview_release_cover(&row->image);
 			row->image = image;
 			listen_thumb(row, true);
 			row->cover_waiting = false;
@@ -3142,6 +3313,7 @@ static void build_search_page(gui_config_t *cfg) {
 	search_field = lv_textarea_create(search_screen);
 	lv_textarea_set_one_line(search_field, true);
 	lv_textarea_set_placeholder_text(search_field, tr("podcast_name"));
+	lv_obj_add_style(search_field, &sx_style_search_placeholder, LV_PART_TEXTAREA_PLACEHOLDER);
 	lv_obj_set_size(search_field, cfg->screen_width - 2 * cfg->padding, 62);
 	lv_obj_set_scrollbar_mode(search_field, LV_SCROLLBAR_MODE_OFF);
 	lv_obj_align(search_field, LV_ALIGN_TOP_LEFT, cfg->padding, top);
@@ -3222,7 +3394,7 @@ static bool show_followed_now(void) {
 
 // The podcasts on the card, the same way: they are read from the card here and
 // now, with nothing to wait for.
-static bool show_card_now(void) {
+static bool show_card_now(bool recover) {
 	pthread_mutex_lock(&job_lock);
 	bool busy = have_pending || result_pending;
 	pthread_mutex_unlock(&job_lock);
@@ -3242,6 +3414,11 @@ static bool show_card_now(void) {
 	current_list_job = root;
 	have_current_list = true;
 	list_history_len = 0;
+	if (recover && podcastcard_scan_pending()) {
+		recovery_idle_retry_used = false;
+		atomic_fetch_add(&recovery_ticket, 1);
+		request_card_recovery();
+	}
 	return true;
 }
 
@@ -3250,7 +3427,7 @@ static void run_home_view(job_kind_t kind) {
 		return;
 	}
 	if (kind == JOB_CARD) {
-		show_card_now();
+		show_card_now(true);
 		return;
 	}
 	job_t job = {0};
@@ -3474,7 +3651,7 @@ static void states_follow(void) {
 			}
 			window_update();
 		} else {
-			show_card_now();
+			show_card_now(true);
 		}
 	}
 	refresh_listening();

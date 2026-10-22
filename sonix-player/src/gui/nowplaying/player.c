@@ -1,4 +1,6 @@
 #include "player.h"
+#include "src/gui/settings/screensaver.h"
+#include "src/gui/shell/artview.h"
 #include "src/gui/shell/bookresume.h"
 
 #include <pthread.h>
@@ -1817,7 +1819,7 @@ static void lyrics_look(bool on) {
 		on = false;
 	}
 	if (on) {
-		lv_image_set_src(studio_bg, backdrop);
+		sx_artview_bind(studio_bg, backdrop, layout_studio_now ? current_backdrop.display_generation : lyrics_screen_pic.display_generation);
 		lv_obj_set_hidden(studio_bg, false);
 		lv_obj_move_background(studio_bg);
 		lv_obj_set_style_bg_opa(cover_panel, LV_OPA_TRANSP, 0);
@@ -2615,7 +2617,7 @@ typedef struct {
 static void lyrics_bg_arrived(void *user) {
 	lyrics_bg_job_t *job = user;
 	if (job->generation == lyrics_bg_generation && job->out.pixels) {
-		cover_free(&lyrics_screen_pic);
+		sx_artview_release_cover(&lyrics_screen_pic);
 		lyrics_screen_pic = job->out;
 		lyrics_screen_pic.dsc.data = lyrics_screen_pic.pixels; // struct moved, buffer didn't
 		if (lyrics_progress > 0) {
@@ -2646,9 +2648,10 @@ static void lyrics_bg_forget(void) {
 		lyrics_look(false);
 	}
 	if (!layout_studio_now && studio_bg && lv_image_get_src(studio_bg) == &lyrics_screen_pic.dsc) {
+		sx_artview_detach(studio_bg);
 		lv_image_set_src(studio_bg, NULL);
 	}
-	cover_free(&lyrics_screen_pic);
+	sx_artview_release_cover(&lyrics_screen_pic);
 }
 
 // Starts the blur of the sleeve just put up. Not in Studio, which has its own
@@ -2809,7 +2812,7 @@ static void studio_refresh_cover(void) {
 		return;
 	}
 	bool have = current_cover.pixels != NULL;
-	lv_image_set_src(studio_cover, have ? &current_cover.dsc : NULL);
+	sx_artview_bind(studio_cover, have ? &current_cover.dsc : NULL, have ? current_cover.display_generation : 0);
 	if (have) {
 		lv_obj_set_hidden(studio_cover, false);
 	} else {
@@ -2838,13 +2841,14 @@ static void studio_refresh_cover(void) {
 	}
 
 	if (studio_bg) {
-		lv_image_set_src(studio_bg, current_backdrop.pixels ? &current_backdrop.dsc : NULL);
+		sx_artview_bind(studio_bg, current_backdrop.pixels ? &current_backdrop.dsc : NULL, current_backdrop.display_generation);
 		if (current_backdrop.pixels) {
 			lv_obj_set_hidden(studio_bg, false);
 		} else {
 			lv_obj_set_hidden(studio_bg, true);
 		}
 	}
+	sx_artview_refresh();
 }
 
 // In the standard arrangement the title is lowered until the middle of its
@@ -3409,6 +3413,7 @@ static void reload_cover(const char *filepath) {
 	// Detach the old pixels before freeing them, so nothing can draw from a
 	// buffer that's already gone. The placeholder covers the gap while the
 	// worker decodes.
+	sx_artview_detach(cover_img);
 	lv_image_set_src(cover_img, NULL);
 	// 2.0: the panel under the controls is the flat page canvas
 	// (np_paint_backgrounds), not the blurred copy any more; the copy is still
@@ -3418,10 +3423,12 @@ static void reload_cover(const char *filepath) {
 	// too: until the new one is made they are on a plain dark page.
 	lyrics_bg_forget();
 	if (layout_studio_now && studio_bg) {
-		lv_image_set_src(studio_bg, NULL); // Studio's points at the backdrop freed below
+		sx_artview_detach(studio_bg);
+		lv_image_set_src(studio_bg,
+						 NULL); // Studio's points at the backdrop freed below
 	}
-	cover_free(&current_cover);
-	cover_free(&current_backdrop);
+	sx_artview_release_cover(&current_cover);
+	sx_artview_release_cover(&current_backdrop);
 	bar_over_player_update();
 
 	cover_show(false);
@@ -3494,6 +3501,7 @@ static void refresh_cover(const char *filepath) {
 	}
 
 	cover_id_state = COVER_ID_IDLE;
+	sx_artview_refresh();
 	cover_incoming_id = 0;
 	reload_cover(filepath);
 }
@@ -3562,7 +3570,7 @@ static void apply_cover_result(void) {
 		current_cover = new_cover;
 		current_cover.dsc.data = current_cover.pixels; // struct moved, buffer didn't
 
-		lv_image_set_src(cover_img, &current_cover.dsc);
+		sx_artview_bind(cover_img, &current_cover.dsc, current_cover.display_generation);
 		lv_obj_set_size(cover_img, current_cover.dsc.header.w, current_cover.dsc.header.h);
 		lv_obj_center(cover_img);
 
@@ -3615,6 +3623,7 @@ static void apply_cover_result(void) {
 	if (lyrics_progress > 0) {
 		lyrics_look(true); // Studio's backdrop has arrived, or there is none
 	}
+	sx_artview_refresh();
 	cover_incoming_id = 0;
 
 	// Studio draws both of these itself -- the sleeve smaller and the blurred
@@ -3651,6 +3660,9 @@ static void cover_poll_start(void) {
 // refresh_cover() zeroes both before the buffers are freed.
 const lv_image_dsc_t *player_cover_image(void) { return current_cover.pixels ? &current_cover.dsc : NULL; }
 
+uint32_t player_cover_generation(void) { return current_cover.display_generation; }
+uint32_t player_backdrop_generation(void) { return current_backdrop.display_generation; }
+
 const lv_image_dsc_t *player_backdrop_image(void) { return current_backdrop.pixels ? &current_backdrop.dsc : NULL; }
 
 static void update_repeat_button(void);
@@ -3672,7 +3684,7 @@ static void player_refresh_theme(void) {
 	if (!studio_up && !lyrics_look_on) {
 		lv_obj_set_style_bg_color(cover_panel, sx_pal()->np_bg, 0);
 	}
-	lv_obj_set_style_image_recolor(cover_placeholder_icon, lv_color_white(), 0);
+	lv_obj_set_style_image_recolor(cover_placeholder_icon, sx_placeholder_ink(sx_pal()->mini_cover_tone), 0);
 	np_paint_backgrounds();
 	// The backdrop over a loaded cover is always the dark treatment -- same
 	// look in both themes; only the no-cover panel follows the theme.
@@ -3966,16 +3978,16 @@ static void update_fav_button(void) {
 	// last on every track change, so anything that tints the star elsewhere is
 	// overwritten.
 	//
-	// An empty star is drawn in the disc's own ink so that it reads on it; a
-	// filled one keeps the yellow, which is the same on every page of the
-	// player and is what says "favourite" rather than "here is the album's
-	// colour again".
+	// Keep the original family's star colors. New families use readable
+	// foreground roles: fixed yellow disappears on the bright 2077 page.
 	if (starred) {
 		lv_image_set_src(fav_btn_icon, &icon_star_filled);
-		lv_obj_set_style_image_recolor(fav_btn_icon, lv_color_make(246, 211, 45), 0); // Adwaita yellow
+		lv_obj_set_style_image_recolor(fav_btn_icon,
+			theme_get_palette() != 0 && !layout_alt_now && !layout_studio_now ? sx_pal()->star_on : lv_color_make(246, 211, 45), 0);
 	} else {
 		lv_image_set_src(fav_btn_icon, &icon_star);
-		lv_obj_set_style_image_recolor(fav_btn_icon, layout_alt_now ? alt_ink() : lv_color_make(150, 150, 150), 0);
+		lv_obj_set_style_image_recolor(fav_btn_icon,
+			layout_alt_now ? alt_ink() : theme_get_palette() != 0 && !layout_studio_now ? sx_pal()->np_text2 : lv_color_make(150, 150, 150), 0);
 	}
 	lv_obj_set_style_image_recolor_opa(fav_btn_icon, LV_OPA_COVER, 0);
 }
@@ -5056,6 +5068,12 @@ static void sheet_anim_y_cb(void *obj, int32_t value) {
 }
 
 // Moves the sheet to `y` (0 = fully open, sheet_height = fully out of the way).
+static void sheet_artwork_opened(lv_anim_t *animation) {
+	(void)animation;
+	if (sheet_open && lv_obj_get_y(player_screen) == 0 && !screensaver_is_visible())
+		sx_artview_opaque_overlay(player_screen);
+}
+
 static void sheet_move_to(int y, bool animate) {
 	if (y < 0) {
 		y = 0;
@@ -5074,6 +5092,8 @@ static void sheet_move_to(int y, bool animate) {
 		lv_obj_set_y(player_screen, y);
 		back_btn_translate_y(y >= sheet_height ? 0 : y);
 		topbar_hold_backdrop_blur(y != 0); // a drag: as in sheet_anim_y_cb
+		if (!screensaver_is_visible())
+			sx_artview_opaque_overlay(y == 0 && sheet_open ? player_screen : NULL);
 		return;
 	}
 
@@ -5082,6 +5102,7 @@ static void sheet_move_to(int y, bool animate) {
 	lv_anim_set_var(&a, player_screen);
 	lv_anim_set_exec_cb(&a, sheet_anim_y_cb);
 	lv_anim_set_values(&a, lv_obj_get_y(player_screen), y);
+	lv_anim_set_completed_cb(&a, sheet_artwork_opened);
 	lv_anim_set_duration(&a, SHEET_ANIM_MS);
 	lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
 	lv_anim_start(&a);
@@ -5193,6 +5214,7 @@ void player_sheet_open(bool animate) {
 		topbar_set_hidden(true);
 	}
 
+	sx_artview_overlay_will_show(player_screen);
 	sheet_move_to(0, animate);
 }
 
@@ -5200,6 +5222,7 @@ static void sheet_hidden_anim_ready_cb(lv_anim_t *a) {
 	(void)a;
 	if (!sheet_open) {
 		lv_obj_set_hidden(player_screen, true);
+		sx_artview_refresh();
 	}
 	// Whatever page the close landed on, the chevron's visibility is settled
 	// once more now that the last animation frame has run -- the fix for the
@@ -5210,6 +5233,8 @@ static void sheet_hidden_anim_ready_cb(lv_anim_t *a) {
 void player_sheet_close(bool animate) {
 	bool was_open = sheet_open;
 	sheet_open = false;
+	if (!screensaver_is_visible())
+		sx_artview_opaque_overlay(NULL);
 	chain_set_open(false); // the block is the player's, and does not wait for it
 	if (smooth_timer) {
 		lv_timer_pause(smooth_timer); // nothing of it shows under the page
@@ -5236,6 +5261,7 @@ void player_sheet_close(bool animate) {
 		lv_obj_set_y(player_screen, sheet_height);
 		back_btn_translate_y(0);
 		lv_obj_set_hidden(player_screen, true);
+		sx_artview_refresh();
 		back_btn_sync_visibility();
 		return;
 	}
@@ -5552,6 +5578,7 @@ static int64_t np_album_id;
 
 static uint8_t mini_thumb_buf[COVERTONE_THUMB_BYTES(COVERTONE_THUMB_SMALL)];
 static lv_image_dsc_t mini_thumb_dsc;
+static uint32_t mini_thumb_generation;
 static int64_t mini_thumb_album; // what mini_thumb_buf holds, 0 nothing
 // Outside the library: the decoded cover, scaled down, stands in.
 static cover_image_t mini_cover_copy;
@@ -5559,7 +5586,7 @@ static cover_image_t mini_cover_copy;
 static void np_mini_thumb_refresh(void) {
 	if (np_album_id == 0) {
 		if (mini_thumb_album) {
-			sx_mini_set_cover(NULL);
+			sx_mini_set_cover(NULL, 0);
 			mini_thumb_album = 0;
 		}
 		return;
@@ -5568,12 +5595,13 @@ static void np_mini_thumb_refresh(void) {
 		return;
 	}
 	// Let go of the buffer before it is written to.
-	sx_mini_set_cover(NULL);
-	cover_free(&mini_cover_copy);
+	sx_mini_set_cover(NULL, 0);
+	sx_artview_release_cover(&mini_cover_copy);
 	mini_thumb_album = 0;
 	if (covertone_thumb(np_album_id, COVERTONE_THUMB_SMALL, &mini_thumb_dsc, mini_thumb_buf, sizeof(mini_thumb_buf))) {
 		mini_thumb_album = np_album_id;
-		sx_mini_set_cover(&mini_thumb_dsc);
+		mini_thumb_generation = cover_new_display_generation();
+		sx_mini_set_cover(&mini_thumb_dsc, mini_thumb_generation);
 	} else {
 		covertone_request(np_album_id);
 	}
@@ -5585,11 +5613,11 @@ static void np_mini_from_cover(void) {
 	if (np_album_id != 0 || mini_thumb_album != 0) {
 		return;
 	}
-	sx_mini_set_cover(NULL);
-	cover_free(&mini_cover_copy);
+	sx_mini_set_cover(NULL, 0);
+	sx_artview_release_cover(&mini_cover_copy);
 	if (current_cover.pixels && cover_scaled_copy(&current_cover, SX_MINI_COVER, &mini_cover_copy)) {
 		mini_cover_copy.dsc.data = mini_cover_copy.pixels;
-		sx_mini_set_cover(&mini_cover_copy.dsc);
+		sx_mini_set_cover(&mini_cover_copy.dsc, mini_cover_copy.display_generation);
 	}
 }
 
@@ -5605,6 +5633,7 @@ static void np_thumb240_drop(void) {
 	}
 	if (cover_thumb_img) {
 		lv_obj_set_hidden(cover_thumb_img, true);
+		sx_artview_detach(cover_thumb_img);
 		lv_image_set_src(cover_thumb_img, NULL);
 	}
 	if (thumb240_held) {
@@ -5629,14 +5658,16 @@ static void thumb240_arrived(int64_t album_id, int size, const lv_image_dsc_t *d
 		return;
 	}
 	if (thumb240_held) {
+		sx_artview_detach(cover_thumb_img);
 		lv_image_set_src(cover_thumb_img, NULL);
 		covertone_thumb_free(&thumb240_dsc);
 	}
 	thumb240_dsc = copy;
 	thumb240_held = true;
 	thumb240_album = album_id;
-	lv_image_set_src(cover_thumb_img, &thumb240_dsc);
+	sx_artview_bind(cover_thumb_img, &thumb240_dsc, cover_new_display_generation());
 	lv_obj_set_hidden(cover_thumb_img, false);
+	sx_artview_refresh();
 	if (cover_placeholder_icon) {
 		lv_obj_set_hidden(cover_placeholder_icon, true);
 	}
@@ -5678,11 +5709,11 @@ static void np_album_changed(const char *path, bool live) {
 	}
 	np_album_id = id;
 	if (id == 0 && mini_thumb_album) {
-		sx_mini_set_cover(NULL);
+		sx_mini_set_cover(NULL, 0);
 		mini_thumb_album = 0;
 	}
 	if (id != 0) {
-		cover_free(&mini_cover_copy);
+		sx_artview_release_cover(&mini_cover_copy);
 	}
 	np_album_tone_known = np_album_tone_now();
 	np_mini_thumb_refresh();
@@ -6410,7 +6441,7 @@ static void np_outside_watch(const device_state_t *state) {
 			shown = true;
 			shown_serial = serial;
 			sx_mini_set_track(title, NULL, air.playing ? air.artist : NULL, true);
-			sx_mini_set_cover(NULL);
+			sx_mini_set_cover(NULL, 0);
 			mini_thumb_album = 0;
 			upnext_update();
 		}
@@ -7168,7 +7199,7 @@ void player_init(gui_config_t *cfg) {
 	cover_placeholder_icon = lv_image_create(cover_art);
 	lv_image_set_src(cover_placeholder_icon, &icon_music_note);
 	lv_obj_add_style(cover_placeholder_icon, &theme_style_text_dim, 0);
-	lv_obj_set_style_image_recolor(cover_placeholder_icon, lv_color_white(), 0);
+	lv_obj_set_style_image_recolor(cover_placeholder_icon, sx_placeholder_ink(sx_pal()->mini_cover_tone), 0);
 	lv_obj_set_style_image_recolor_opa(cover_placeholder_icon, LV_OPA_COVER, 0);
 	lv_obj_set_style_image_opa(cover_placeholder_icon, LV_OPA_50, 0);
 	lv_obj_center(cover_placeholder_icon);

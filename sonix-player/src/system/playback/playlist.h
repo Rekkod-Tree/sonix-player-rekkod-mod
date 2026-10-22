@@ -263,6 +263,23 @@ void playlist_set_custom(bool custom);
 // rather than rewriting on every track change.
 unsigned playlist_revision(void);
 
+// GUI-owned bounded export. No worker may read the live queue. A producer
+// fills one caller-owned batch; a changed order/query rejects the whole capture.
+typedef struct {
+	unsigned revision;
+	int count;
+	bool library_backed;
+	library_export_source_t source;
+} playlist_export_t;
+typedef struct {
+	bool indexed;
+	int32_t row_id;
+	char path[512];
+} playlist_export_item_t;
+bool playlist_export_begin(playlist_export_t *state);
+bool playlist_export_ack(const playlist_export_t *state, const library_export_receipt_t *receipt);
+bool playlist_export_batch(const playlist_export_t *state, int offset, playlist_export_item_t *items, int capacity, int *count);
+
 // A queue that IS a library list: the handle is taken over, and the queue holds
 // four bytes a track instead of a path each. Paths are read back from the
 // database as they are needed, so starting "All tracks" on a large library

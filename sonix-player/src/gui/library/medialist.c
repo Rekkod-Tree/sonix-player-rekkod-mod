@@ -1,4 +1,5 @@
 #include "medialist.h"
+#include "src/gui/shell/artview.h"
 
 #include <limits.h>
 
@@ -286,6 +287,8 @@ struct panel {
 	lv_obj_t *hint;		  // the first-visit card about the swipes (All tracks, Albums)
 	lv_obj_t *head;		  // the album page's head: cover, title, artist, figures, buttons
 	lv_obj_t *head_cover;
+	lv_obj_t *head_cover_frame;
+	float head_placeholder_hue;
 	lv_obj_t *head_cover_glyph;
 	lv_obj_t *head_play_label;
 	// The album page: on its own gradient and in its own hue while it is on
@@ -1674,7 +1677,7 @@ static void row_update_lead(panel_t *p, row_t *row, int index, const char *name,
 			rowart_bind(&row->art, album);
 		}
 		row->picture_shown = rowart_picture(&row->art) != NULL;
-		sx_row_set_thumb(row->row, rowart_picture(&row->art), rowart_tone(&row->art));
+		rowart_apply(&row->art, row->row);
 		return;
 	}
 	char letter[8];
@@ -1684,7 +1687,8 @@ static void row_update_lead(panel_t *p, row_t *row, int index, const char *name,
 	} else {
 		listacts_first_letter(name, letter, sizeof(letter));
 	}
-	sx_row_set_letter(row->row, letter, (kind == RK_YEAR || kind == RK_GENRE) ? sx_hex(SX_CATEGORY_BG) : listacts_name_tone(name), kind == RK_PERSON);
+	sx_row_set_letter(row->row, letter, (kind == RK_YEAR || kind == RK_GENRE) && !theme_force_color_placeholders() ? sx_hex(SX_CATEGORY_BG) : listacts_name_tone(name), kind == RK_PERSON);
+	sx_row_set_content(row->row, sx_palette_hue_of_name(name), kind == RK_YEAR || kind == RK_GENRE, false, 0);
 }
 
 static void row_bind(panel_t *p, row_t *row, int index) {
@@ -1831,7 +1835,7 @@ static void thumbs_update(panel_t *p) {
 		}
 		if (!rowart_wanted(&row->art)) {
 			if (!row->picture_shown && rowart_picture(&row->art)) {
-				sx_row_set_thumb(row->row, rowart_picture(&row->art), rowart_tone(&row->art));
+				rowart_apply(&row->art, row->row);
 				row->picture_shown = true;
 			}
 			continue;
@@ -1842,7 +1846,7 @@ static void thumbs_update(panel_t *p) {
 		}
 		loads++;
 		if (rowart_load(&row->art)) {
-			sx_row_set_thumb(row->row, rowart_picture(&row->art), rowart_tone(&row->art));
+			rowart_apply(&row->art, row->row);
 			row->picture_shown = rowart_picture(&row->art) != NULL;
 		}
 	}
@@ -3921,7 +3925,7 @@ static void album_places_load(panel_t *p) {
 				lv_obj_set_style_text_font(head, &font_ui_20_bold, 0);
 				if (p->album_page) {
 					// On the gradient: white, quieter.
-					lv_obj_set_style_text_color(head, lv_color_white(), 0);
+					lv_obj_set_style_text_color(head, theme_get_palette() ? sx_pal()->album_text : lv_color_white(), 0);
 					lv_obj_set_style_text_opa(head, LV_OPA_80, 0);
 				} else {
 					lv_obj_add_style(head, &sx_style_text2, 0);
@@ -4012,7 +4016,7 @@ static void head_cover_show(panel_t *p, const lv_image_dsc_t *dsc) {
 	if (!p->head_cover) {
 		return;
 	}
-	lv_image_set_src(p->head_cover, dsc);
+	sx_artview_bind(p->head_cover, dsc, dsc ? cover_new_display_generation() : 0);
 	lv_obj_set_hidden(p->head_cover_glyph, dsc != NULL);
 	int32_t w = dsc ? (int32_t)dsc->header.w : 0;
 	lv_image_set_scale(p->head_cover, w > 0 && w != HEAD_COVER_SIZE ? (uint32_t)(HEAD_COVER_SIZE * LV_SCALE_NONE / w)
@@ -4032,6 +4036,7 @@ static void head_large_cb(int64_t album_id, int size, const lv_image_dsc_t *dsc,
 		return;
 	}
 	if (p->head_has_large) {
+		sx_artview_detach(p->head_cover);
 		lv_image_set_src(p->head_cover, NULL);
 		covertone_thumb_free(&p->head_large_dsc);
 	}
@@ -4066,7 +4071,7 @@ static void album_paint(panel_t *p) {
 	if (p->back_float) {
 		lv_obj_set_style_bg_opa(p->back_float, pal->tinted ? LV_OPA_30 : LV_OPA_TRANSP, 0);
 	}
-	topbar_tint_on_screen(p->screen, true, pal->album_grad[0], pal->tinted ? lv_color_white() : pal->text);
+	topbar_tint_on_screen(p->screen, true, pal->album_grad[0], pal->album_text);
 	if (p->head_bar) {
 		lv_obj_set_style_bg_color(p->head_bar, pal->album_grad[0], 0);
 	}
@@ -4083,7 +4088,7 @@ static void album_paint(panel_t *p) {
 	}
 	lv_color_t around = pal->album_grad[1];
 	for (int i = 0; i < ROW_POOL; i++) {
-		sx_row_set_lift(p->rows[i].row, pal->tinted, around);
+		sx_row_set_lift(p->rows[i].row, pal->tinted && theme_get_palette() == 0, around);
 	}
 	if (p->head_play_label) {
 		lv_obj_set_style_text_color(p->head_play_label, pal->on_accent, 0);
@@ -4116,6 +4121,12 @@ static void album_page_enter(panel_t *p) {
 
 static void head_theme_refresh(void) {
 	panel_t *p = &panel_tracks;
+	if (p->head_cover_frame) {
+		lv_color_t tone = sx_placeholder_tone(p->head_placeholder_hue);
+		lv_obj_set_style_bg_color(p->head_cover_frame, tone, 0);
+		if (p->head_cover_glyph)
+			sx_set_recolor(p->head_cover_glyph, sx_placeholder_ink(tone));
+	}
 	if (!p->album_page || !p->hue_pushed) {
 		return;
 	}
@@ -4151,6 +4162,7 @@ static void head_clear(panel_t *p) {
 		lv_obj_delete(p->head); // the picture goes before its pixels do
 		p->head = NULL;
 		p->head_cover = NULL;
+		p->head_cover_frame = NULL;
 		p->head_cover_glyph = NULL;
 		p->head_play_label = NULL;
 	}
@@ -4349,11 +4361,13 @@ static void head_build(panel_t *p) {
 	lv_obj_set_style_pad_column(heading, 16, 0);
 	lv_obj_set_event_bubble(heading, true);
 	lv_obj_t *cover_frame = sx_box(heading);
+	p->head_cover_frame = cover_frame;
 	lv_obj_set_size(cover_frame, HEAD_COVER_SIZE, HEAD_COVER_SIZE);
 	lv_obj_set_style_radius(cover_frame, SX_ROW_THUMB_R, 0);
 	lv_obj_set_style_clip_corner(cover_frame, true, 0);
 	char placeholder_title[256];
 	library_album_title(p->filter_value, placeholder_title, sizeof(placeholder_title));
+	p->head_placeholder_hue = sx_palette_hue_of_name(placeholder_title);
 	lv_obj_set_style_bg_color(cover_frame, sx_placeholder_name(placeholder_title), 0);
 	lv_obj_set_style_bg_opa(cover_frame, LV_OPA_COVER, 0);
 	p->head_cover = lv_image_create(cover_frame);
@@ -4362,7 +4376,7 @@ static void head_build(panel_t *p) {
 	lv_obj_set_clickable(p->head_cover, false);
 	p->head_cover_glyph = lv_image_create(cover_frame);
 	lv_image_set_src(p->head_cover_glyph, &icon_album_big);
-	sx_set_recolor(p->head_cover_glyph, lv_color_white());
+	sx_set_recolor(p->head_cover_glyph, sx_placeholder_ink(sx_placeholder_name(placeholder_title)));
 	lv_obj_center(p->head_cover_glyph);
 	if (!p->head_small) {
 		p->head_small = malloc(COVERTONE_THUMB_BYTES(COVERTONE_THUMB_SMALL));

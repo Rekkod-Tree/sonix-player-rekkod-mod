@@ -38,6 +38,13 @@
 
 typedef struct svclist svclist_t;
 
+// A bounded navigation bookmark, never a retained response or row widget.
+typedef struct {
+	int index, offset;
+	char key[256];
+	bool valid;
+} svclist_anchor_t;
+
 typedef struct {
 	// Fills `row` for entry `index` (title, subtitle, lead, trail, star,
 	// playing, swipes). Called when the entry comes into view, and again on
@@ -52,13 +59,15 @@ typedef struct {
 	// Entries `first`..`last` are on screen now (after a scroll or a fill):
 	// the time to ask for their pictures or their details. May be NULL.
 	void (*visible)(int first, int last);
+	// Optional stable entry key. Memory-only: no metadata fetch, disk or network.
+	// False for an unavailable/truncated key; bookmark falls back to its index.
+	bool (*key)(int index, char *out, size_t size);
 } svclist_cbs_t;
 
 // Builds the list as a child of `parent`, filling it (the caller sizes and
 // places it afterwards with svclist_obj()). `pool` rows: enough for a screen
 // and a half. `handlers` and `cbs` are copied.
-svclist_t *svclist_create(lv_obj_t *parent, const sx_row_handlers_t *handlers, const svclist_cbs_t *cbs, int pool,
-						  bool compact);
+svclist_t *svclist_create(lv_obj_t *parent, const sx_row_handlers_t *handlers, const svclist_cbs_t *cbs, int pool, bool compact);
 
 // The scroller, to size and place.
 lv_obj_t *svclist_obj(const svclist_t *list);
@@ -67,6 +76,9 @@ lv_obj_t *svclist_obj(const svclist_t *list);
 // bottom (the view stays); otherwise a new list (back to the top). Every row
 // in view is bound again.
 void svclist_set_count(svclist_t *list, int count, bool keep_scroll);
+// New response + optional bookmark in one layout: bind/visible only the final
+// viewport, so a far-away Back never schedules the top rows' artwork/details.
+void svclist_set_count_at(svclist_t *list, int count, const svclist_anchor_t *anchor);
 int svclist_count(const svclist_t *list);
 
 // Room above the first entry, for objects the page puts in the scroller
@@ -81,6 +93,12 @@ void svclist_rebind_index(svclist_t *list, int index);
 
 // The entries on screen now, -1 / -2 for none.
 void svclist_visible(const svclist_t *list, int *first, int *last);
+
+// Capture the first visible entry and pixel offset; false for an empty list.
+// Restore after the matching response has been bound. A moved key wins over
+// its old index; missing keys/count changes use the nearest valid index.
+bool svclist_capture(const svclist_t *list, svclist_anchor_t *anchor);
+void svclist_restore(svclist_t *list, const svclist_anchor_t *anchor);
 
 // An entry's index from its row (sx_row_get_user), -1 for none.
 int svclist_index_of(lv_obj_t *row);

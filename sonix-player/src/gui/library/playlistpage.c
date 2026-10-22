@@ -1,6 +1,9 @@
 #include "playlistpage.h"
 
 #include <pthread.h>
+#include <errno.h>
+#include <stdatomic.h>
+#include <time.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
@@ -26,11 +29,13 @@
 #include "src/gui/shell/theme.h"
 #include "src/gui/shell/sx_styles.h"
 #include "src/gui/shell/toast.h"
+#include "src/gui/shell/sx_toast.h"
 #include "src/system/core/lang.h"
 #include "src/system/library/library.h"
 #include "src/system/library/playlists.h"
 #include "src/system/core/utils.h"
 #include "src/system/streaming/provider.h"
+#include "src/system/streaming/podcastcache.h"
 
 lv_obj_t *playlistpage_screen;
 
@@ -57,6 +62,8 @@ static lv_obj_t *title_label;
 
 // Picker mode: the track waiting for a playlist to be chosen.
 static bool picking;
+// A picker visit can reuse a screen already present deeper in history.
+static bool restore_browse_on_load;
 static char pending_track[512];
 
 // The streaming service the pending track comes from, NULL for a local file. It
@@ -72,14 +79,255 @@ static const stream_provider_t *pending_service;
 // paths waiting for a playlist, owned by this page. Always local files.
 static char **pending_many;
 static int pending_many_count;
+static bool pending_queue;
+static playlist_export_t pending_queue_source;
+static unsigned pending_queue_epoch;
 
 static void pending_many_free(void) {
+	pending_queue = false;
 	for (int i = 0; i < pending_many_count; i++) {
 		free(pending_many[i]);
 	}
 	free(pending_many);
 	pending_many = NULL;
 	pending_many_count = 0;
+}
+
+// The live queue belongs to the GUI. Only one bounded request can be in flight;
+// metadata and SQLite staging run on a worker without any live-queue/LVGL access.
+#define QUEUE_EXPORT_MAX 20000
+typedef struct {
+	atomic_uint refs;
+	pthread_mutex_t lock;
+	pthread_cond_t ready;
+	playlist_export_t source;
+	unsigned epoch, generation;
+	char name[PLAYLIST_NAME_MAX + 1];
+	library_playlist_publish_t mode;
+	int offset, raw_count, eligible;
+	playlist_export_item_t items[LIBRARY_PLAYLIST_STAGE_BATCH];
+	bool answered, valid, cancelled;
+} queue_export_job_t;
+static atomic_bool queue_export_running;
+static atomic_uint queue_export_callbacks;
+static unsigned queue_export_generation;
+static pthread_mutex_t queue_result_lock = PTHREAD_MUTEX_INITIALIZER;
+static struct {
+	unsigned generation;
+	int result;
+	bool pending;
+	playlist_export_t source;
+	library_export_receipt_t receipt;
+} queue_result;
+
+static void queue_export_release(queue_export_job_t *job) {
+	if (atomic_fetch_sub(&job->refs, 1) == 1) {
+		pthread_cond_destroy(&job->ready);
+		pthread_mutex_destroy(&job->lock);
+		free(job);
+	}
+}
+
+static void queue_export_batch_gui(void *arg) {
+	queue_export_job_t *job = arg;
+	pthread_mutex_lock(&job->lock);
+	bool valid = !job->cancelled;
+	pthread_mutex_unlock(&job->lock);
+	playlist_export_item_t items[LIBRARY_PLAYLIST_STAGE_BATCH];
+	int raw_count = 0;
+	if (valid && gui_card_available() && library_database_epoch() == job->epoch) {
+		valid = playlist_export_batch(&job->source, job->offset, items, LIBRARY_PLAYLIST_STAGE_BATCH, &raw_count);
+	} else
+		valid = false;
+	pthread_mutex_lock(&job->lock);
+	job->valid = valid && !job->cancelled;
+	job->raw_count = raw_count;
+	if (job->valid)
+		memcpy(job->items, items, (size_t)raw_count * sizeof(items[0]));
+	job->answered = true;
+	pthread_cond_signal(&job->ready);
+	pthread_mutex_unlock(&job->lock);
+	atomic_fetch_sub(&queue_export_callbacks, 1);
+	queue_export_release(job);
+}
+
+static bool queue_export_request(queue_export_job_t *job) {
+	pthread_mutex_lock(&job->lock);
+	job->answered = false;
+	pthread_mutex_unlock(&job->lock);
+	atomic_fetch_add(&job->refs, 1);
+	atomic_fetch_add(&queue_export_callbacks, 1);
+	if (!gui_post(queue_export_batch_gui, job)) {
+		atomic_fetch_sub(&queue_export_callbacks, 1);
+		queue_export_release(job);
+		return false;
+	}
+	struct timespec deadline;
+	clock_gettime(CLOCK_MONOTONIC, &deadline);
+	deadline.tv_sec += 15;
+	pthread_mutex_lock(&job->lock);
+	while (!job->answered) {
+		int rc = pthread_cond_timedwait(&job->ready, &job->lock, &deadline);
+		if (rc != 0) {
+			job->cancelled = true;
+			break;
+		}
+	}
+	bool ok = job->answered && !job->cancelled && job->valid;
+	pthread_mutex_unlock(&job->lock);
+	return ok;
+}
+
+static void queue_export_done_gui(void *unused) {
+	(void)unused;
+	pthread_mutex_lock(&queue_result_lock);
+	bool pending = queue_result.pending;
+	unsigned generation = queue_result.generation;
+	int result = queue_result.result;
+	playlist_export_t source = queue_result.source;
+	library_export_receipt_t receipt = queue_result.receipt;
+	queue_result.pending = false;
+	pthread_mutex_unlock(&queue_result_lock);
+	if (!pending || generation != queue_export_generation)
+		return;
+	if (result == 1)
+		playlist_export_ack(&source, &receipt);
+	toast_busy_end();
+	if (result == 1)
+		toast_success("playlist_tracks_added");
+	else if (result == 2)
+		gui_notify_popup("trackmenu_queue_nothing_to_save");
+	else
+		gui_notify_popup("playlist_queue_save_failed");
+}
+
+static void *queue_export_worker(void *arg) {
+	queue_export_job_t *job = arg;
+	thread_be_low_priority("queue save");
+	bool valid_count = job->source.count > 0 && job->source.count <= QUEUE_EXPORT_MAX;
+	const library_export_source_t *source = job->source.library_backed ? &job->source.source : NULL;
+	library_playlist_stage_t *stage = valid_count ? library_playlist_stage_begin(job->epoch, source) : NULL;
+	library_playlist_row_t *rows = calloc(LIBRARY_PLAYLIST_STAGE_BATCH, sizeof(*rows));
+	bool ok = stage && rows;
+	int added = 0;
+	library_export_receipt_t receipt = {0};
+	while (ok && job->offset < job->source.count) {
+		ok = queue_export_request(job);
+		if (!ok || job->raw_count <= 0) {
+			ok = false;
+			break;
+		}
+		char paths[LIBRARY_PLAYLIST_STAGE_BATCH][512], indexed[LIBRARY_PLAYLIST_STAGE_BATCH][512];
+		int32_t ids[LIBRARY_PLAYLIST_STAGE_BATCH];
+		int slots[LIBRARY_PLAYLIST_STAGE_BATCH], count = 0;
+		for (int i = 0; i < job->raw_count; i++) {
+			if (job->items[i].indexed) {
+				ids[count] = job->items[i].row_id;
+				slots[count++] = i;
+			} else
+				memcpy(paths[i], job->items[i].path, sizeof(paths[i]));
+		}
+		if (source)
+			ok = library_export_paths(source, ids, count, indexed);
+		for (int i = 0; ok && i < count; i++)
+			memcpy(paths[slots[i]], indexed[i], sizeof(paths[0]));
+		job->eligible = 0;
+		for (int i = 0; ok && i < job->raw_count; i++) {
+			if (stream_provider_owns(paths[i]) || podcastcache_owns(paths[i]))
+				continue;
+			ok = playlists_track_row(paths[i], &rows[job->eligible]);
+			if (ok)
+				job->eligible++;
+		}
+		if (ok && job->eligible)
+			ok = library_playlist_stage_rows(stage, rows, job->eligible);
+		if (ok) {
+			added += job->eligible;
+			job->offset += job->raw_count;
+		}
+	}
+	// One final GUI validation linearizes the completed capture. After it the
+	// staged paths are immutable; later queue edits cannot mix this result.
+	if (ok)
+		ok = queue_export_request(job);
+	if (ok && added)
+		ok = library_playlist_stage_publish_receipt(stage, job->name, job->mode, source, &receipt);
+	library_playlist_stage_discard(stage);
+	free(rows);
+	pthread_mutex_lock(&queue_result_lock);
+	queue_result.generation = job->generation;
+	queue_result.result = ok ? (added ? 1 : 2) : 0;
+	queue_result.source = job->source;
+	queue_result.receipt = receipt;
+	queue_result.pending = true;
+	pthread_mutex_unlock(&queue_result_lock);
+	atomic_store(&queue_export_running, false);
+	// The reserved channel carries only a static latest-state notification;
+	// no heap payload is lost if the ordinary post queue is full. On total
+	// refusal screen_loaded/add_queue also consume the pending result.
+	if (!gui_post_latest(queue_export_done_gui, NULL))
+		gui_post(queue_export_done_gui, NULL);
+	queue_export_release(job);
+	return NULL;
+}
+
+static bool queue_export_start(const char *name, library_playlist_publish_t mode) {
+	playlist_export_item_t check[LIBRARY_PLAYLIST_STAGE_BATCH];
+	int unused;
+	if (!pending_queue || !playlists_name_valid(name) || atomic_load(&queue_export_running) || atomic_load(&queue_export_callbacks) ||
+		!gui_card_available() || pending_queue_epoch != library_database_epoch() ||
+		!playlist_export_batch(&pending_queue_source, pending_queue_source.count, check, LIBRARY_PLAYLIST_STAGE_BATCH, &unused)) {
+		pending_queue = false;
+		gui_notify_popup("playlist_queue_save_failed");
+		return false;
+	}
+	queue_export_job_t *job = calloc(1, sizeof(*job));
+	if (!job) {
+		pending_queue = false;
+		gui_notify_popup("playlist_queue_save_failed");
+		return false;
+	}
+	atomic_init(&job->refs, 1);
+	if (pthread_mutex_init(&job->lock, NULL) != 0) {
+		free(job);
+		pending_queue = false;
+		gui_notify_popup("playlist_queue_save_failed");
+		return false;
+	}
+	pthread_condattr_t attr;
+	int rc = pthread_condattr_init(&attr);
+	bool attr_ready = rc == 0;
+	if (rc == 0)
+		rc = pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
+	if (rc == 0)
+		rc = pthread_cond_init(&job->ready, &attr);
+	if (attr_ready)
+		pthread_condattr_destroy(&attr);
+	if (rc != 0) {
+		pthread_mutex_destroy(&job->lock);
+		free(job);
+		pending_queue = false;
+		gui_notify_popup("playlist_queue_save_failed");
+		return false;
+	}
+	job->source = pending_queue_source;
+	job->epoch = pending_queue_epoch;
+	job->mode = mode;
+	job->generation = ++queue_export_generation;
+	snprintf(job->name, sizeof(job->name), "%s", name);
+	pending_queue = false;
+	atomic_store(&queue_export_running, true);
+	sx_toast_busy(tr("playlist_adding_tracks"), true);
+	pthread_t thread;
+	if (pthread_create(&thread, NULL, queue_export_worker, job) != 0) {
+		atomic_store(&queue_export_running, false);
+		queue_export_release(job);
+		toast_busy_end();
+		gui_notify_popup("playlist_queue_save_failed");
+		return false;
+	}
+	pthread_detach(thread);
+	return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -320,6 +568,11 @@ static void row_tap_cb(lv_obj_t *row, void *user) {
 		open_playlist(name);
 		return;
 	}
+	if (pending_queue) {
+		queue_export_start(name, LIBRARY_PLAYLIST_APPEND);
+		back_btn_cb(NULL);
+		return;
+	}
 
 	if (pending_many_count > 0) {
 		batch_start(name);
@@ -521,6 +774,7 @@ static void add_row(const char *name, const char *subtitle, const char *service_
 	char letter[8];
 	listacts_first_letter(name, letter, sizeof(letter));
 	sx_row_set_letter(row, letter, listacts_name_tone(name), false);
+	sx_row_set_content(row, sx_palette_hue_of_name(name), false, false, 0);
 	sx_row_set_title(row, name);
 	sx_row_set_subtitle(row, subtitle ? subtitle : "", NULL, NULL);
 	// Choosing where a track goes, a row is a destination: no chevron, no
@@ -940,6 +1194,7 @@ static void import_layer_hide(void) {
 	if (import_layer) {
 		lv_obj_set_hidden(import_layer, true);
 	}
+	sx_mini_input_overlay(playlistpage_screen, false);
 	back_btn_hide_on_screen(playlistpage_screen, false);
 	import_generation++;
 	import_count = 0;
@@ -1053,6 +1308,7 @@ static void import_btn_cb(lv_event_t *e) {
 	lv_label_set_text(import_action_label, tr("playlist_import"));
 	lv_obj_set_hidden(import_action, false);
 	lv_obj_set_hidden(import_layer, false);
+	sx_mini_input_overlay(playlistpage_screen, true);
 	lv_obj_move_foreground(import_layer);
 	lv_obj_scroll_to_y(import_body, 0, LV_ANIM_OFF);
 	back_btn_hide_on_screen(playlistpage_screen, true);
@@ -1065,6 +1321,7 @@ static void import_btn_cb(lv_event_t *e) {
 static void name_layer_hide(void) {
 	if (name_layer) {
 		lv_obj_set_hidden(name_layer, true);
+		keyboard_refresh_caret(name_field);
 		sx_mini_update_visibility(); // its keyboard comes or goes with it
 	}
 	// A rename that was cancelled, or a dialog put away on the way into the
@@ -1133,6 +1390,12 @@ static void name_accept_cb(lv_event_t *e) {
 		return;
 	}
 
+	if (picking && pending_queue) {
+		name_layer_hide();
+		queue_export_start(name, LIBRARY_PLAYLIST_CREATE);
+		back_btn_cb(NULL);
+		return;
+	}
 	if (!playlists_create(name)) {
 		gui_notify_popup("playlist_cannot_create_the_playlist");
 		return;
@@ -1168,6 +1431,7 @@ static void name_layer_show(const char *initial) {
 	lv_obj_add_state(name_field, LV_STATE_FOCUSED);
 	lv_obj_send_event(name_field, LV_EVENT_FOCUSED, NULL);
 	lv_obj_set_hidden(name_layer, false);
+	keyboard_refresh_caret(name_field);
 	sx_mini_update_visibility(); // its keyboard comes or goes with it
 	lv_obj_move_foreground(name_layer);
 }
@@ -1241,7 +1505,8 @@ static void rebuild_rows(void) {
 	}
 }
 
-void playlistpage_open(void) {
+static void prepare_browse_mode(void) {
+	restore_browse_on_load = false;
 	picking = false;
 	pending_track[0] = '\0';
 	pending_many_free();
@@ -1251,6 +1516,10 @@ void playlistpage_open(void) {
 	import_layer_hide();
 	lv_obj_set_hidden(import_btn, false);
 	rebuild_rows();
+}
+
+void playlistpage_open(void) {
+	prepare_browse_mode();
 	switch_screen(playlistpage_screen);
 }
 
@@ -1258,6 +1527,7 @@ void playlistpage_add_track(const char *track_path) {
 	if (!track_path || !track_path[0]) {
 		return;
 	}
+	restore_browse_on_load = false;
 	picking = true;
 	pending_many_free();
 	snprintf(pending_track, sizeof(pending_track), "%s", track_path);
@@ -1300,6 +1570,7 @@ void playlistpage_add_tracks(const char *const *paths, int count) {
 		pending_many_count++;
 	}
 
+	restore_browse_on_load = false;
 	picking = true;
 	pending_track[0] = '\0';
 	pending_service = NULL;
@@ -1311,8 +1582,53 @@ void playlistpage_add_tracks(const char *const *paths, int count) {
 	switch_screen(playlistpage_screen);
 }
 
-static void screen_loaded_cb(lv_event_t *e) {
+void playlistpage_add_queue(void) {
+	queue_export_done_gui(NULL);
+	if (atomic_load(&queue_export_running) || atomic_load(&queue_export_callbacks)) {
+		gui_notify_popup("playlist_adding_tracks");
+		return;
+	}
+	pending_many_free();
+	if (!gui_card_available()) {
+		gui_notify_no_card();
+		return;
+	}
+	if (!playlist_export_begin(&pending_queue_source)) {
+		gui_notify_popup(pending_queue_source.count > 0 ? "playlist_queue_save_failed" : "trackmenu_queue_nothing_to_save");
+		return;
+	}
+	if (pending_queue_source.count > QUEUE_EXPORT_MAX) {
+		gui_notify_popup("playlist_queue_too_large");
+		return;
+	}
+	pending_queue_epoch = library_database_epoch();
+	pending_queue = true;
+	restore_browse_on_load = false;
+	picking = true;
+	pending_track[0] = '\0';
+	pending_service = NULL;
+	lv_label_set_text(title_label, tr("playlist_add_to_playlist_2"));
+	name_layer_hide();
+	import_layer_hide();
+	lv_obj_set_hidden(import_btn, true);
+	rebuild_rows();
+	switch_screen(playlistpage_screen);
+}
+
+static void screen_unload_start_cb(lv_event_t *e) {
+	// UNLOADED is deferred and could arrive after a newer picker request.
 	(void)e;
+	if (picking)
+		restore_browse_on_load = true;
+}
+
+static void screen_loaded_cb(lv_event_t *e) {
+	if (restore_browse_on_load)
+		prepare_browse_mode();
+	// The screen binding cannot see the naming layer's hidden flag.
+	keyboard_refresh_caret(name_field);
+	(void)e;
+	queue_export_done_gui(NULL);
 	if (rows_revision != library_revision(LIBRARY_LIST_PLAYLIST)) {
 		rebuild_rows();
 	}
@@ -1465,6 +1781,7 @@ void playlistpage_init(gui_config_t *cfg) {
 	lv_obj_set_flex_flow(import_body, LV_FLEX_FLOW_COLUMN);
 
 	lv_obj_add_event_cb(playlistpage_screen, screen_loaded_cb, LV_EVENT_SCREEN_LOADED, NULL);
+	lv_obj_add_event_cb(playlistpage_screen, screen_unload_start_cb, LV_EVENT_SCREEN_UNLOAD_START, NULL);
 	switcher_attach_back_gesture(playlistpage_screen);
 	player_sheet_attach_drag(playlistpage_screen, true);
 }

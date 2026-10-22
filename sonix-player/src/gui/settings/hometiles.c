@@ -1,6 +1,7 @@
 #include "hometiles.h"
 
 #include <stdint.h>
+#include <stdio.h>
 
 #include "lvgl/lvgl.h"
 
@@ -10,8 +11,10 @@
 #include "src/gui/shell/main_menu.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
+#include "src/gui/shell/sx_row.h"
 #include "src/gui/shell/sx_sheet.h"
 #include "src/gui/shell/sx_styles.h"
+#include "src/gui/shell/sx_toast.h"
 #include "src/gui/shell/theme.h"
 #include "src/gui/shell/toast.h"
 #include "src/system/core/lang.h"
@@ -85,6 +88,7 @@ static void refresh(void) {
 		if (i >= row_count)
 			continue;
 		row_button[i] = main_menu_at(i);
+		sx_row_set_user(entries[i].row, (void *)(intptr_t)row_button[i]);
 		lv_obj_set_y(entries[i].row, in_use_top() + i * ROW_PITCH);
 		const lv_image_dsc_t *glyph = main_menu_icon(row_button[i]);
 		lv_image_set_src(entries[i].icon, glyph);
@@ -262,14 +266,14 @@ static void move_action(void *user) {
 	refresh();
 }
 
-static void row_menu_cb(lv_event_t *e) {
+static void row_menu_cb(lv_obj_t *row, void *user) {
+	(void)row;
 	if (drag_row >= 0 || player_sheet_drag_active() || switcher_back_drag_active())
 		return;
-	int index = (int)(intptr_t)lv_event_get_user_data(e);
-	if (index < 0 || index >= row_count)
-		return;
-	home_item_t item = row_button[index];
+	home_item_t item = (home_item_t)(intptr_t)user;
 	int at = position_of(item);
+	if (at < 0)
+		return;
 	sx_sheet_item_t items[3];
 	int n = 0;
 	if (at > 0)
@@ -278,6 +282,44 @@ static void row_menu_cb(lv_event_t *e) {
 		items[n++] = (sx_sheet_item_t){.label = tr("hometiles_later"), .icon = &icon_chevron_down, .action = move_action, .user = (void *)(intptr_t)(item * 4 + 2)};
 	items[n++] = (sx_sheet_item_t){.label = tr(at >= 0 ? (item <= HOME_CONTINUE_BOOK ? "hometiles_to_more" : "hometiles_remove") : "hometiles_to_main"), .icon = &icon_menu_more, .action = move_action, .user = (void *)(intptr_t)(item * 4 + (at >= 0 ? 0 : 3))};
 	sx_sheet_menu(tr(main_menu_tag(item)), NULL, items, n);
+}
+
+// Only the latest toast owns an undo. Insert this ID into the current order;
+// do not restore a whole snapshot over changes made after the swipe.
+static struct {
+	home_item_t item;
+	int position;
+	bool valid;
+} removed;
+
+static void undo_remove(void *unused) {
+	(void)unused;
+	if (!removed.valid)
+		return;
+	removed.valid = false;
+	if (main_menu_contains(removed.item))
+		return;
+	if (!main_menu_move(removed.item, removed.position))
+		toast_error("hometiles_full");
+	lv_async_call(refresh_async, NULL);
+}
+
+static void remove_swipe(lv_obj_t *row, void *user) {
+	(void)row;
+	if (drag_row >= 0 || player_sheet_drag_active() || switcher_back_drag_active())
+		return;
+	home_item_t item = (home_item_t)(intptr_t)user;
+	int at = position_of(item);
+	if (at < 0)
+		return;
+	removed.item = item;
+	removed.position = at;
+	removed.valid = true;
+	main_menu_hide(item);
+	char text[256];
+	snprintf(text, sizeof(text), "%s: %s", tr("hometiles_remove"), tr(main_menu_tag(item)));
+	sx_toast_undo(text, undo_remove, NULL);
+	lv_async_call(refresh_async, NULL);
 }
 
 static bool in_category(home_item_t item, int category) {
@@ -349,9 +391,13 @@ static lv_obj_t *make_heading(lv_obj_t *parent, const char *tag, int y) {
 }
 
 static void make_row(entry_t *entry, int width) {
-	lv_obj_t *row = lv_obj_create(body);
-	lv_obj_set_size(row, width, ROW_HEIGHT);
-	lv_obj_set_x(row, 0);
+	const sx_row_handlers_t handlers = {.on_tap = row_menu_cb, .on_swipe_end = remove_swipe, .end_is_remove = true, .remove_label_key = "hometiles_remove"};
+	lv_obj_t *row;
+	entry->row = sx_row_create_custom(body, &handlers, ROW_HEIGHT, &row);
+	lv_obj_set_size(entry->row, width, ROW_HEIGHT);
+	lv_obj_set_x(entry->row, 0);
+	lv_obj_set_style_radius(entry->row, ROW_RADIUS, 0);
+	lv_obj_set_layout(row, LV_LAYOUT_NONE);
 	lv_obj_add_style(row, &theme_style_card, 0);
 	lv_obj_set_style_radius(row, ROW_RADIUS, 0);
 	lv_obj_set_style_border_width(row, 0, 0);
@@ -360,8 +406,6 @@ static void make_row(entry_t *entry, int width) {
 	lv_obj_set_style_pad_ver(row, 0, 0);
 	lv_obj_set_scrollable(row, false);
 	lv_obj_set_clickable(row, true);
-	lv_obj_add_event_cb(row, row_menu_cb, LV_EVENT_CLICKED, (void *)(intptr_t)(entry - entries));
-	entry->row = row;
 
 	lv_obj_t *box = lv_obj_create(row);
 	lv_obj_remove_style_all(box);

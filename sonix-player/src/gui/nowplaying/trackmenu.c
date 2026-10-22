@@ -1,3 +1,4 @@
+#include "src/gui/shell/artview.h"
 #include "trackmenu.h"
 #include "src/gui/nowplaying/historypage.h"
 
@@ -105,6 +106,7 @@ typedef struct {
 	lv_obj_t *row;
 	int index;		// the entry bound, -1 for none
 	int64_t album;	// the album whose thumbnail is in `buf`, 0 for none
+	uint32_t display_generation;
 	uint8_t *buf;	// COVERTONE_THUMB_BYTES(56), on first use
 	lv_image_dsc_t dsc;
 } queue_row_t;
@@ -231,12 +233,14 @@ static void queue_row_cover(queue_row_t *q, const char *path, const char *fallba
 		id = covertone_album_id(album);
 		library_album_title(album, shown, sizeof(shown));
 	}
-	lv_color_t tone = sx_placeholder_file(path, shown[0] ? shown : fallback_album);
+	float hue=sx_placeholder_file_hue(path,shown[0]?shown:fallback_album);
+	lv_color_t tone = sx_placeholder_tone(hue);
 	if (id && id == q->album) {
 		return; // that thumbnail is up already
 	}
 	// Off the buffer before it is written to.
 	sx_row_set_thumb(q->row, NULL, tone);
+	sx_row_set_content(q->row,hue,false,false,0);
 	q->album = 0;
 	if (!id) {
 		return;
@@ -249,7 +253,9 @@ static void queue_row_cover(queue_row_t *q, const char *path, const char *fallba
 	}
 	if (covertone_thumb(id, COVERTONE_THUMB_SMALL, &q->dsc, q->buf, COVERTONE_THUMB_BYTES(COVERTONE_THUMB_SMALL))) {
 		q->album = id;
+		q->display_generation=cover_new_display_generation();
 		sx_row_set_thumb(q->row, &q->dsc, tone);
+		sx_row_set_content(q->row,hue,false,true,q->display_generation);
 	} else {
 		covertone_request(id); // the listener brings it (queue_covertone_changed)
 	}
@@ -744,56 +750,14 @@ static void queue_row_hold(lv_obj_t *row, void *user) {
 // The header's ⋮
 // ---------------------------------------------------------------------------
 
-// The queue as it would play, into the playlist picker -- the same picker, and
-// so the same writer, "Add to playlist" uses: the user chooses a playlist or
-// makes a new one there. Streamed tracks are left out: their files are a
+// The queue as it would play, through the existing playlist picker and a
+// bounded GUI producer/background stage: the user chooses a playlist or makes
+// a new one there. Streamed tracks are left out: their files are a
 // cache's and are gone a few albums later, which is also why the queue mirror
 // on the card never holds them.
-#define QUEUE_SAVE_MAX 2000
-
 static void queue_save_cb(void *user) {
 	(void)user;
-	int total = playlist_count();
-	int want = total < QUEUE_SAVE_MAX ? total : QUEUE_SAVE_MAX;
-	if (want <= 0) {
-		return;
-	}
-	char **paths = calloc((size_t)want, sizeof(*paths));
-	if (!paths) {
-		return;
-	}
-	int n = 0;
-	for (int i = 0; i < want; i++) {
-		char path[512];
-		if (!playlist_path_at(i, path, sizeof(path)) || stream_provider_owns(path) ||
-			podcastcache_is_episode(path)) {
-			continue;
-		}
-		paths[n] = strdup(path);
-		if (!paths[n]) {
-			break;
-		}
-		n++;
-	}
-	if (n == 0) {
-		gui_notify_popup("trackmenu_queue_nothing_to_save");
-	} else {
-		if (total > QUEUE_SAVE_MAX) {
-			// Said, not done silently: "All tracks" as the queue is a library,
-			// and a playlist of a library is not what anybody saving a queue
-			// has in mind.
-			char text[160];
-			snprintf(text, sizeof(text), tr("trackmenu_queue_save_capped"), QUEUE_SAVE_MAX);
-			toast_plain(text);
-		}
-		// The picker goes back to this page when it is done: the queue is
-		// where the user was, and where the result can be seen.
-		playlistpage_add_tracks((const char *const *)paths, n);
-	}
-	for (int i = 0; i < n; i++) {
-		free(paths[i]);
-	}
-	free(paths);
+	playlistpage_add_queue();
 }
 
 static void queue_shuffle_rest_cb(void *user) {

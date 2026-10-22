@@ -74,6 +74,9 @@ void theme_toggle(void);
 
 // Graphite (-2) is the default when the setting is absent. Cover (-1) and the
 // six saved preset indices (0..5) keep their meanings. Gray is appended at 6.
+#define THEME_ACCENT_PALETTE (-3)
+#define THEME_PALETTE_COUNT 9
+#define THEME_LCD_LAMP_COUNT 5
 #define THEME_ACCENT_COUNT 7
 #define THEME_ACCENT_GRAY 6
 #define THEME_ACCENT_COVER (-1)
@@ -94,6 +97,15 @@ void theme_set_dark(bool dark);
 // The hue itself moves without any call here: sx_palette_track_changed() and
 // sx_palette_push_hue() recolour the interface in place, running the refresh
 // callbacks above as a theme change does.
+bool theme_monochrome_covers(void);
+bool theme_set_monochrome_covers(bool on);
+int theme_get_palette(void);
+void theme_set_palette(int family);
+int theme_get_lcd_lamp(void);
+void theme_set_lcd_lamp(int lamp);
+bool theme_force_color_placeholders(void);
+void theme_set_force_color_placeholders(bool on);
+
 bool theme_dynamic_tint(void);
 void theme_set_dynamic_tint(bool on);
 

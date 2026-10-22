@@ -2,19 +2,19 @@
  * From sonix-player (Linux), no device/network or external dependencies:
  * cc -std=gnu11 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined \
  *   -fno-omit-frame-pointer -ffunction-sections -fdata-sections -I. \
- *   tests/podcast_download_storage_barrier_test.c -Wl,--gc-sections -pthread \
+ *   tests/podcast_download_storage_barrier_test.c src/system/core/sha256.c -Wl,--gc-sections -pthread \
  *   -o /tmp/podcast-storage-barrier-test
  * ASAN_OPTIONS=detect_leaks=1 /tmp/podcast-storage-barrier-test
  *
  * All fixtures use fresh /tmp directories and are printed for inspection.
  * Network waits must own no filesystem descriptors. Replacing a root with
  * matching staging sentinels must never redirect writes or cleanup into it.
- * Fault case rename=2 documents the known non-atomic audio/sidecar publication
- * tracked as backlog #30; its assertion describes a residual, not a fix.
+ * A final-tag rename fault now proves #30 restores the entire old pair.
  */
 #define _GNU_SOURCE
 #include <errno.h>
 #include <pthread.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -24,8 +24,16 @@ static int countfds(void);
 static int baseline_fds;
 static int fail_rename, fail_fsync, fsync_calls, pin_calls, hold_epoch;
 static int fixture_renameat(int a, const char *b, int c, const char *d) {
-	gate(strstr(b, "cover") ? PHASE_COVER_RENAME : strstr(d, ".tags") ? PHASE_TAG_RENAME : PHASE_PUBLISH);
-	if (fail_rename && ((fail_rename == 1 && !strstr(d, ".tags") && !strstr(b, "cover")) || (fail_rename == 2 && strstr(d, ".tags")))) {
+	bool cover = strstr(b, "cover") != NULL;
+	bool audio = !strcmp(d, "Episode.mp3"), tags = !strcmp(d, "Episode.mp3.tags");
+	if (cover)
+		gate(PHASE_COVER_RENAME);
+	else if (tags)
+		gate(PHASE_TAG_RENAME);
+	else if (audio)
+		gate(PHASE_PUBLISH);
+	if ((fail_rename == 1 && audio) || (fail_rename == 2 && tags)) {
+		fail_rename = 0;
 		errno = EIO;
 		return -1;
 	}
@@ -60,6 +68,7 @@ static int fixture_fsync(int fd) {
 #define unlinkat fixture_unlinkat
 #define write fixture_write
 #include "src/system/streaming/podcastdl.c"
+#include "src/system/streaming/podcastpair.c"
 #undef pthread_create
 #undef fsync
 #undef renameat
@@ -71,7 +80,7 @@ static int fixture_fsync(int fd) {
 #include <stdatomic.h>
 static pthread_mutex_t gate_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t gate_cv = PTHREAD_COND_INITIALIZER;
-static int gate_target, gate_at, gate_go, body_reads;
+static int gate_target, gate_at, gate_go, body_reads, http_opens;
 static char fixture_root[512];
 static _Atomic unsigned fixture_epoch;
 static unsigned accepted, refused;
@@ -119,6 +128,7 @@ void podcaststate_downloaded(long long id, const char *path, unsigned epoch) {
 		refused++;
 }
 bool http_stream_open(http_stream_t *s, const char *u, int secs) {
+	http_opens++;
 	(void)u;
 	(void)secs;
 	s->content_length = 8;
@@ -356,9 +366,9 @@ static void fault_case(const char *base, int renamefail, int syncfail) {
 		assert(!strcmp(c, "OLD-TAGS"));
 		assert(!accepted);
 	}
-	/* Known #30 residual: a second rename failure does not roll back audio. */
+	/* #30: failure of the tag publication restores both previous files. */
 	if (renamefail == 2) {
-		assert(!strcmp(b, "TESTTEST"));
+		assert(!strcmp(b, "OLD-AUDIO"));
 		assert(!strcmp(c, "OLD-TAGS"));
 		assert(!accepted);
 		assert(podcastdl_state(NULL, NULL) == PODCASTDL_FAILED);

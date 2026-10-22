@@ -44,6 +44,7 @@ lv_obj_t *svcui_note(lv_obj_t *parent, const char *text);
 // The plaque colour for something without a picture yet: the cover tone at
 // the hue `name` hashes to (a station, an album without art, a playlist).
 lv_color_t svcui_tone(const char *name);
+float svcui_hue(const char *name);
 
 // "Play next" / "Add to the end of the queue" from a streaming row: the
 // tracks (their files, or the cache paths their service fetches when they

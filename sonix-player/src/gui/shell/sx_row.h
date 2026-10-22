@@ -62,6 +62,8 @@ typedef struct {
 	void (*on_star)(lv_obj_t *row, void *user);
 	// The left swipe removes (the queue): red underlay, "✕ Remove".
 	bool end_is_remove;
+	// Optional static translation key for a contextual remove action.
+	const char *remove_label_key;
 } sx_row_handlers_t;
 
 typedef enum {
@@ -82,6 +84,12 @@ typedef enum {
 // `handlers` is copied. `compact`: the queue's 64 px row with a 48 px lead.
 lv_obj_t *sx_row_create(lv_obj_t *parent, const sx_row_handlers_t *handlers, bool compact);
 
+// A caller-drawn card using the same swipe/hold/scroll recognizer. The returned
+// content is the sliding, clickable parent for non-clickable artwork/text and
+// independent controls (e.g. a reorder grip). Only user/swipes setters apply;
+// the caller owns sizing/styles. The item's user is captured on press.
+lv_obj_t *sx_row_create_custom(lv_obj_t *parent, const sx_row_handlers_t *handlers, int height, lv_obj_t **content);
+
 // The row's height for `compact`, with Large rows as it is now: for a list
 // that lays its rows out itself.
 int sx_row_height(bool compact);
@@ -100,6 +108,10 @@ void sx_row_set_subtitle(lv_obj_t *row, const char *subtitle, const char *badge,
 // The lead. A thumbnail (`image` NULL: the tone plaque in `tone`), a track
 // number, or a letter or two on a tone plaque (`round` for an artist).
 void sx_row_set_thumb(lv_obj_t *row, const lv_image_dsc_t *image, lv_color_t tone);
+// After a lead setter, register known media content. Raw/status colors stay
+// raw. Photo generation changes only when complete source pixels are replaced.
+void sx_row_set_content(lv_obj_t *row, float identity_hue, bool category, bool photo, uint32_t generation);
+void sx_row_refresh_content(lv_obj_t *screen);
 void sx_row_set_person(lv_obj_t *row, const lv_image_dsc_t *image, const char *name);
 // A glyph (white, at its own size) on a tone plaque: a folder, a file that has
 // no picture of its own.

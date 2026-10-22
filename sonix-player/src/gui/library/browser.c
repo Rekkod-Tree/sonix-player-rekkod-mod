@@ -1,5 +1,6 @@
 #include "browser.h"
 #include "src/gui/library/rowart.h"
+#include "src/gui/shell/artview.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -261,6 +262,7 @@ static int entry_cmp(const void *a, const void *b) {
 typedef struct {
 	lv_obj_t *row; // the 2.0 row (sx_row.h)
 	lv_color_t art_tone;
+	float art_hue;
 
 	// Which entry this row is currently showing, or -1 when parked.
 	int index;
@@ -303,11 +305,16 @@ static void row_show_glyph(row_t *row, bool is_dir) {
 	if (!is_dir && rowart_album_of_track(path, album, sizeof(album))) {
 		library_album_title(album, title, sizeof(title));
 	}
+	row->art_hue = is_dir ? sx_palette_hue_of_name(name) : sx_placeholder_file_hue(path, title);
 	row->art_tone = is_dir ? sx_placeholder_name(name) : sx_placeholder_file(path, title);
 	sx_row_set_glyph(row->row, is_dir ? &icon_folder : &icon_music2, row->art_tone);
+	sx_row_set_content(row->row, row->art_hue, false, false, 0);
 }
 
-static void row_show_cover(row_t *row, const lv_image_dsc_t *dsc) { sx_row_set_thumb(row->row, dsc, row->art_tone); }
+static void row_show_cover(row_t *row, const lv_image_dsc_t *dsc) {
+	sx_row_set_thumb(row->row, dsc, sx_placeholder_tone(row->art_hue));
+	sx_row_set_content(row->row, row->art_hue, false, dsc != NULL, row->thumb.display_generation);
+}
 
 static int row_slot(const row_t *row) { return (int)(row - rows); }
 
@@ -319,7 +326,7 @@ static void row_drop_thumb(row_t *row) {
 		// The widget has to stop pointing at the pixels before they go.
 		bool is_dir = row->index >= 0 && (size_t)row->index < shown.count && shown.entries[row->index].is_dir;
 		row_show_glyph(row, is_dir);
-		cover_free(&row->thumb);
+		sx_artview_release_cover(&row->thumb);
 		row->has_thumb = false;
 	}
 

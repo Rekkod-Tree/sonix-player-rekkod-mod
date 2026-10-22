@@ -1,4 +1,5 @@
 #include "ebookpage.h"
+#include "src/gui/shell/artview.h"
 #include "src/gui/shell/sx_palette.h"
 
 #include <dirent.h>
@@ -109,7 +110,8 @@ static bool cover_ready(int index, const char *title, const cover_image_t *cover
 	// Kept: freed by shelf_free() with everything else.
 	entry->cover = *cover;
 	entry->has_cover = true;
-	lv_image_set_src(entry->image, &entry->cover.dsc);
+	lv_obj_set_hidden(entry->image, false);
+	sx_artview_bind(entry->image, &entry->cover.dsc, entry->cover.display_generation);
 	lv_obj_set_hidden(entry->image, false);
 	return true;
 }
@@ -166,7 +168,9 @@ static void worker_begin(void) {
 static void shelf_theme_refresh(void) {
 	for (int i = 0; i < shelf_count; i++) {
 		if (shelf[i].glyph) {
-			lv_obj_set_style_image_recolor(shelf[i].glyph, lv_color_white(), 0);
+			lv_color_t tone = sx_placeholder_name(shelf[i].name);
+			lv_obj_set_style_bg_color(lv_obj_get_parent(shelf[i].glyph), tone, 0);
+			lv_obj_set_style_image_recolor(shelf[i].glyph, sx_placeholder_ink(tone), 0);
 		}
 	}
 }
@@ -180,7 +184,7 @@ static void shelf_free(void) {
 	}
 	for (int i = 0; i < shelf_count; i++) {
 		if (shelf[i].has_cover) {
-			cover_free(&shelf[i].cover);
+			sx_artview_release_cover(&shelf[i].cover);
 		}
 	}
 	shelf_count = 0;
@@ -270,7 +274,7 @@ static void build_tiles(void) {
 		// Stored white, like every glyph drawn from an SVG, so it has to be
 		// recoloured or it is a white shape on a white card. Faint on purpose:
 		// it is what is there instead of a cover, not something to look at.
-		lv_obj_set_style_image_recolor(glyph, lv_color_white(), 0);
+		lv_obj_set_style_image_recolor(glyph, sx_placeholder_ink(sx_placeholder_name(entry->name)), 0);
 		lv_obj_set_style_image_recolor_opa(glyph, LV_OPA_COVER, 0);
 		lv_obj_set_style_image_opa(glyph, LV_OPA_90, 0);
 		entry->glyph = glyph;

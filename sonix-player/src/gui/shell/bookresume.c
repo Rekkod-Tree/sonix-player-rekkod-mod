@@ -10,6 +10,8 @@
 #include "switcher.h"
 #include "sx_sheet.h"
 #include "toast.h"
+#include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -18,7 +20,9 @@
 static char checked_file[512];
 static unsigned checked_serial;
 static char menu_book[512];
-static char menu_title[256];
+static char menu_title[1024];
+static uintptr_t menu_generation;
+static unsigned menu_card_epoch;
 
 static void selected_book(char *book, size_t size) {
 	size_t used = 0;
@@ -91,18 +95,13 @@ void bookresume_description(char *text, size_t size) {
 	const char *title = config_get_copy("home", "resume_title", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE);
 	snprintf(text, size, "%s", title[0] ? title : tr("home_choose_book"));
 }
-static void play(const char *book, bool confirmed) {
+static void play(const char *book) {
 	if (!book[0]) {
 		switch_screen(audiobooks_screen);
 		return;
 	}
 	if (!gui_card_available()) {
 		toast_error("home_card_unavailable");
-		return;
-	}
-	if (!confirmed && audiobookdb_is_finished(book)) {
-		// A finished selection needs an explicit choice, not an error toast.
-		bookresume_menu();
 		return;
 	}
 	char current[512], file[512];
@@ -127,11 +126,16 @@ static void play(const char *book, bool confirmed) {
 void bookresume_play(void) {
 	char book[512];
 	selected_book(book, sizeof(book));
-	play(book, false);
+	play(book);
 }
-static void continue_action(void *unused) {
-	(void)unused;
-	play(menu_book, true);
+static void continue_action(void *generation) {
+	if ((uintptr_t)generation != menu_generation)
+		return;
+	if (menu_card_epoch != audiobookdb_card_epoch()) {
+		toast_error("home_card_unavailable");
+		return;
+	}
+	play(menu_book);
 }
 static void other_action(void *unused) {
 	(void)unused;
@@ -152,13 +156,71 @@ static void settings_action(void *unused) {
 	(void)unused;
 	main_menu_open_settings();
 }
+// A single snapshot when the menu opens: no scanner, timer or checkpoint write.
+static void menu_checkpoint(void) {
+	char title[256], file[512] = "", place[512] = "";
+	config_get_copy("home", "resume_title", "", title, sizeof(title));
+	if (!menu_book[0]) {
+		snprintf(menu_title, sizeof(menu_title), "%s", tr("home_choose_book"));
+		return;
+	}
+	const char *problem = NULL;
+	double seconds = 0;
+	if (!gui_card_available()) {
+		problem = tr("home_card_unavailable");
+	} else {
+		bool saved = audiobookdb_get_position(menu_book, file, sizeof(file), &seconds);
+		char current[512], current_file[512];
+		unsigned serial = audiobook_serial();
+		device_state_t state;
+		device_state_get(&state);
+		if (audiobook_current_book(current, sizeof(current), current_file, sizeof(current_file)) && !strcmp(current, menu_book) && !strcmp(current_file, state.current_file) && (state.status == AUDIO_STATUS_PLAYING || state.status == AUDIO_STATUS_PAUSED)) {
+			char live_place[512];
+			audiobook_place_label(state.progress_current_secs, live_place, sizeof(live_place));
+			if (serial == audiobook_serial()) {
+				snprintf(file, sizeof(file), "%s", current_file);
+				snprintf(place, sizeof(place), "%s", live_place);
+				seconds = state.progress_current_secs;
+				saved = true;
+			}
+		}
+		if (!saved || !file[0] || access(file, R_OK))
+			problem = tr("home_book_unavailable");
+	}
+	if (problem) {
+		snprintf(menu_title, sizeof(menu_title), "%s\n%s", title, problem);
+		return;
+	}
+	// For a non-loaded book the saved filename is honest; loading tags or
+	// inventing an embedded chapter would add I/O and could describe another
+	// file.
+	if (!place[0]) {
+		const char *name = strrchr(file, '/');
+		snprintf(place, sizeof(place), "%s", name ? name + 1 : file);
+	}
+	if (!isfinite(seconds) || seconds < 0)
+		seconds = 0;
+	if (seconds > 2147483647.0)
+		seconds = 2147483647.0;
+	long total = (long)seconds;
+	char clock[40];
+	if (total >= 3600)
+		snprintf(clock, sizeof(clock), "%ld:%02ld:%02ld", total / 3600, total / 60 % 60, total % 60);
+	else
+		snprintf(clock, sizeof(clock), "%ld:%02ld", total / 60, total % 60);
+	bool finished = audiobookdb_is_finished(menu_book);
+	snprintf(menu_title, sizeof(menu_title), "%s\n%s · %s%s%s", title, place, clock, finished ? "\n" : "", finished ? tr("audiobook_finished") : "");
+}
 void bookresume_menu(void) {
+	if (++menu_generation == 0)
+		menu_generation++;
+	menu_card_epoch = audiobookdb_card_epoch();
 	selected_book(menu_book, sizeof(menu_book));
-	snprintf(menu_title, sizeof(menu_title), "%s", config_get_copy("home", "resume_title", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE));
+	menu_checkpoint();
 	sx_sheet_item_t items[5];
 	int n = 0;
 	if (menu_book[0])
-		items[n++] = (sx_sheet_item_t){.label = tr("home_resume_book"), .icon = &icon_menu_audiobook_continue, .action = continue_action};
+		items[n++] = (sx_sheet_item_t){.label = tr("home_resume_book"), .icon = &icon_menu_audiobook_continue, .action = continue_action, .user = (void *)menu_generation};
 	items[n++] = (sx_sheet_item_t){.label = tr("home_other_books"), .icon = &icon_menu_audiobook_library, .action = other_action};
 	items[n++] = (sx_sheet_item_t){.label = tr("audiobooks"), .icon = &icon_menu_audiobooks, .action = library_action};
 	items[n++] = (sx_sheet_item_t){.label = tr(main_menu_contains(HOME_CONTINUE_BOOK) ? "home_to_more" : "home_to_main"), .icon = &icon_menu_more, .action = move_action};

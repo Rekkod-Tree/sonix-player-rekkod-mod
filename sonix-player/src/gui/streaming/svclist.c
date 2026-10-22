@@ -34,6 +34,7 @@ struct svclist {
 	int top; // room above the first entry, for the page's own objects
 	lv_obj_t *headings[HEADING_POOL];
 	int heading_index[HEADING_POOL];
+	bool updating;		// layout/scroll updates bind only their final viewport
 	bool near_end_said; // once per approach, not once per scroll event
 };
 
@@ -193,14 +194,14 @@ static void bind_view(svclist_t *l, bool force) {
 
 static void scrolled_cb(lv_event_t *e) {
 	svclist_t *l = lv_event_get_user_data(e);
-	if (l) {
+	if (l && !l->updating) {
 		bind_view(l, false);
 	}
 }
 
 static void size_changed_cb(lv_event_t *e) {
 	svclist_t *l = lv_event_get_user_data(e);
-	if (l && l->count > 0) {
+	if (l && !l->updating && l->count > 0) {
 		bind_view(l, false);
 	}
 }
@@ -216,8 +217,7 @@ static void deleted_cb(lv_event_t *e) {
 	}
 }
 
-svclist_t *svclist_create(lv_obj_t *parent, const sx_row_handlers_t *handlers, const svclist_cbs_t *cbs, int pool,
-						  bool compact) {
+svclist_t *svclist_create(lv_obj_t *parent, const sx_row_handlers_t *handlers, const svclist_cbs_t *cbs, int pool, bool compact) {
 	svclist_t *l = calloc(1, sizeof(*l));
 	if (!l) {
 		return NULL;
@@ -263,10 +263,38 @@ svclist_t *svclist_create(lv_obj_t *parent, const sx_row_handlers_t *handlers, c
 
 lv_obj_t *svclist_obj(const svclist_t *list) { return list ? list->scroller : NULL; }
 
-void svclist_set_count(svclist_t *l, int count, bool keep_scroll) {
+static void restore_scroll(svclist_t *l, const svclist_anchor_t *anchor) {
+	if (!l || !anchor || !anchor->valid || l->count <= 0)
+		return;
+	int index = anchor->index < 0 ? 0 : anchor->index >= l->count ? l->count - 1 : anchor->index;
+	if (l->cbs.key && anchor->key[0]) {
+		char key[sizeof(anchor->key)];
+		// Most lists retain their order: the common Back path is one ID lookup.
+		if (!l->cbs.key(index, key, sizeof(key)) || strcmp(key, anchor->key)) {
+			int best = -1;
+			for (int i = 0; i < l->count; i++) {
+				if (l->cbs.key(i, key, sizeof(key)) && !strcmp(key, anchor->key) && (best < 0 || abs(i - index) < abs(best - index)))
+					best = i;
+			}
+			if (best >= 0)
+				index = best;
+		}
+	}
+	lv_obj_update_layout(l->scroller);
+	int y = entry_y(l, index) + anchor->offset;
+	int max = lv_obj_get_scroll_y(l->scroller) + lv_obj_get_scroll_bottom(l->scroller);
+	if (y < 0)
+		y = 0;
+	if (y > max)
+		y = max > 0 ? max : 0;
+	lv_obj_scroll_to_y(l->scroller, y, LV_ANIM_OFF);
+}
+
+static void set_count(svclist_t *l, int count, bool keep_scroll, const svclist_anchor_t *anchor) {
 	if (!l) {
 		return;
 	}
+	l->updating = true;
 	l->count = count > 0 ? count : 0;
 	// Large rows may have changed since the rows were made.
 	int pitch = sx_row_height(l->compact) + SX_ROW_GAP;
@@ -289,8 +317,15 @@ void svclist_set_count(svclist_t *l, int count, bool keep_scroll) {
 		l->heading_index[k] = -1;
 	}
 	lv_obj_update_layout(l->scroller);
+	if (anchor)
+		restore_scroll(l, anchor);
+	l->updating = false;
 	bind_view(l, true);
 }
+
+void svclist_set_count(svclist_t *l, int count, bool keep_scroll) { set_count(l, count, keep_scroll, NULL); }
+
+void svclist_set_count_at(svclist_t *l, int count, const svclist_anchor_t *anchor) { set_count(l, count, false, anchor); }
 
 int svclist_count(const svclist_t *list) { return list ? list->count : 0; }
 
@@ -325,6 +360,32 @@ void svclist_visible(const svclist_t *l, int *first, int *last) {
 	int scroll = lv_obj_get_scroll_y(l->scroller);
 	*first = entry_at(l, scroll < 0 ? 0 : scroll);
 	*last = entry_at(l, scroll + lv_obj_get_height(l->scroller));
+}
+
+bool svclist_capture(const svclist_t *l, svclist_anchor_t *anchor) {
+	if (!anchor)
+		return false;
+	memset(anchor, 0, sizeof(*anchor));
+	if (!l || l->count <= 0)
+		return false;
+	int scroll = lv_obj_get_scroll_y(l->scroller);
+	if (scroll < 0)
+		scroll = 0;
+	anchor->index = entry_at(l, scroll);
+	anchor->offset = scroll - entry_y(l, anchor->index);
+	anchor->valid = true;
+	if (l->cbs.key && !l->cbs.key(anchor->index, anchor->key, sizeof(anchor->key)))
+		anchor->key[0] = 0;
+	return true;
+}
+
+void svclist_restore(svclist_t *l, const svclist_anchor_t *anchor) {
+	if (!l)
+		return;
+	l->updating = true;
+	restore_scroll(l, anchor);
+	l->updating = false;
+	bind_view(l, true);
 }
 
 int svclist_index_of(lv_obj_t *row) { return row ? (int)(intptr_t)sx_row_get_user(row) : -1; }
