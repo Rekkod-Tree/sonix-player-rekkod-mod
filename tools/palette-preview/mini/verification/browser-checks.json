@@ -1,0 +1,49 @@
+{
+  "date": "2026-10-22",
+  "scope": "HTML proposal only; no device control or native changes",
+  "geometry": [
+    {
+      "gap": 0,
+      "hitHeight": 112.00008392333984,
+      "hitOverlap": 0.00000762939453125,
+      "mode": "normal",
+      "playWidth": 88.0000114440918
+    },
+    {
+      "gap": 0,
+      "hitHeight": 64.00003433227539,
+      "hitOverlap": 0,
+      "mode": "compact",
+      "playWidth": 63.99993896484375
+    },
+    {
+      "gap": 0,
+      "hitHeight": 64.00003433227539,
+      "hitOverlap": 0,
+      "mode": "minimal",
+      "playWidth": 63.99993896484375
+    }
+  ],
+  "lastRows": [
+    {
+      "lastRowAboveDock": true,
+      "mode": "normal",
+      "scrollTop": 236
+    },
+    {
+      "lastRowAboveDock": true,
+      "mode": "compact",
+      "scrollTop": 180
+    },
+    {
+      "lastRowAboveDock": true,
+      "mode": "minimal",
+      "scrollTop": 172
+    }
+  ],
+  "radioStopDidNotOpenDialog": true,
+  "bodyTapOpenedReferenceDialog": true,
+  "noTrackRemovedAllDocksAndReserves": true,
+  "settingsSelectionUpdatedReserveAndPreservedFocus": true,
+  "gesturesNotEmulated": true
+}
