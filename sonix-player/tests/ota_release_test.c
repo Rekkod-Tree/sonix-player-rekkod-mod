@@ -378,6 +378,25 @@ int main(void) {
 	assert(select_entries("1.3.0-ui3-alpha26", &bridge, 1) == OTA_OK);
 	// Omitting the actual-version marker would offer the alias again.
 
+	// The planned stable 1.4.0 tag is also a bridge for published alpha clients.
+	assert(legacy_parse_version("v1.4.0", legacy_alias));
+	assert(legacy_parse_version("1.3.0-ui3-alpha20", legacy_installed));
+	assert(legacy_version_cmp(legacy_alias, legacy_installed) > 0);
+	assert(legacy_parse_version("1.3.0-ui3-alpha25", legacy_installed));
+	assert(legacy_version_cmp(legacy_alias, legacy_installed) > 0);
+	checks += 2;
+	bridge.tag = "v1.4.0";
+	bridge.name = "v1.4.0";
+	bridge.body = "<!-- Sonix-Version: 1.4.0 -->";
+	bridge.url = "https://github.com/Rekkod-Tree/sonix-player-rekkod-mod/releases/download/v1.4.0/r1.upt";
+	assert(select_entries("1.3.0-ui3-alpha20", &bridge, 1) == OTA_OK);
+	assert(select_entries("1.3.0-ui3-alpha25", &bridge, 1) == OTA_OK);
+	assert(select_entries("1.4.0", &bridge, 1) == OTA_UP_TO_DATE);
+	assert(select_entries("1.4.1", &bridge, 1) == OTA_UP_TO_DATE);
+	bridge.body = NULL;
+	assert(select_entries("1.4.0", &bridge, 1) == OTA_UP_TO_DATE);
+	checks += 5;
+
 	// No retry storm or /latest fallback on offline, rate-limit, server or JSON errors.
 	snprintf(repo, sizeof(repo), "Rekkod-Tree/sonix-player-rekkod-mod");
 	snprintf(stem, sizeof(stem), "r1");
