@@ -1,5 +1,19 @@
 ﻿# Features
 
+## Bluetooth service lifecycle (main; replacement image pending)
+
+- A BlueZ or BlueALSA owner replacement invalidates cached endpoints and late
+  replies. The existing worker reopens the bus; recovery cannot be lost when
+  its ordinary command queue is full. Startup waits can reopen too, retaining
+  the original loss reason across reader retirement.
+- Ordinary BlueALSA codec restarts retain the existing handoff grace and
+  reconcile fresh device state. No new worker, polling timer or dependency is
+  added. A real R1 ordinary LTO/OFF run exercised LDAC330/990, OFF/ON, pause,
+  seek, track changes and screen-off playback at44.1kHz/S32.
+- This fixes client lifecycle handling, not the stock Bluetooth daemon crash
+  or RF stutter. The prepared PGO image documented in `RELEASE_1.4.0.md`
+  predates this change; replacement profiling and final-image checks remain.
+
 ## Release polish and responsiveness (1.4.0 prepared)
 
 - The training-only profile capture shares GCC 9's serialized flush entry with
