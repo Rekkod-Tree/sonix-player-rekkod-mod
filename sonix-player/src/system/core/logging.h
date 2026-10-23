@@ -93,6 +93,9 @@ void logging_flush(void);
 // Also marks other inherited descriptors close-on-exec, preventing a daemon
 // from retaining a decoded track or database. Stdio pipes installed by the
 // caller afterward still work: dup2 clears close-on-exec on the destination.
+// ALSA character descriptors (Linux major 116, fd >= 3) are closed in the
+// child immediately, before an instrumented exec may flush profile data.
+// This does not change the parent's handles or release inherited mappings.
 void logging_child_stdio(void);
 
 // Copies the kernel's warnings and errors printed since the last call into the

@@ -19,6 +19,7 @@
 #include <sys/reboot.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
+#include <sys/sysmacros.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -647,7 +648,20 @@ static void relay_start(void) {
 	pthread_attr_destroy(&tattr);
 }
 
-void logging_child_stdio(void) {
+#if defined(__has_attribute)
+#if __has_attribute(no_profile_instrument_function)
+#define CHILD_NO_PROFILE __attribute__((no_profile_instrument_function))
+#endif
+#endif
+#ifndef CHILD_NO_PROFILE
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ >= 9
+#define CHILD_NO_PROFILE __attribute__((no_profile_instrument_function))
+#else
+#define CHILD_NO_PROFILE
+#endif
+#endif
+
+CHILD_NO_PROFILE void logging_child_stdio(void) {
 	// Daemons must not retain a decoder's open track (some third-party
 	// decoders do not use O_CLOEXEC). Set flags in the forked child's own FD
 	// table, before making the deliberate stdout/stderr and relay-reader dup.
@@ -660,8 +674,26 @@ void logging_child_stdio(void) {
 		do {
 			rc = fcntl(fd, F_SETFD, FD_CLOEXEC);
 		} while (rc < 0 && errno == EINTR);
-		if (rc < 0 && errno != EBADF) {
+		if (rc < 0) {
+			if (errno == EBADF)
+				continue;
 			_exit(127);
+		}
+		struct stat st;
+		do {
+			rc = fstat(fd, &st);
+		} while (rc < 0 && errno == EINTR);
+		if (rc < 0) {
+			if (errno == EBADF)
+				continue;
+			_exit(127);
+		}
+		// CLOEXEC alone retains hardware until exec (including GCOV flush).
+		// Release only this child's sound reference before reaching that step.
+		if (S_ISCHR(st.st_mode) && major(st.st_rdev) == 116) {
+			// Linux releases the FD entry even on EINTR: never retry close.
+			if (close(fd) < 0 && errno != EINTR && errno != EBADF)
+				_exit(127);
 		}
 	}
 	if (relay_write < 0) {
