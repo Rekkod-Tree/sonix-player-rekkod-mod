@@ -15,7 +15,7 @@ parser.add_argument('--results', type=Path)
 args = parser.parse_args()
 root = Path(__file__).resolve().parent.parent
 source = (root / 'src/system/bluetooth/bluetooth.c').read_text(encoding='utf-8')
-start = source.index('static void recover_bus(bool enabled) {')
+start = source.index('static void recover_bus(bool enabled, bool bluez_lost) {')
 end = source.index('\n}\n', start) + 3
 recovery = source[start:end]
 start = source.index('static void publish_bus_loss(bool enabled) {')
@@ -76,30 +76,33 @@ static void reset(void) {
     bluez_during_open = bluez_during_adapter = false;
 }
 int main(void) {
-    reset(); recover_bus(false);
+    reset(); recover_bus(false, false);
     assert(!strcmp(trace, "CD") && g_state == BT_STATE_OFF && !g_scanning);
     assert(g_pending_volume == -1 && g_rx_serial == 1 && g_serial == 1);
     bt_stream_t empty = {0}; assert(!memcmp(&g_rx_stream, &empty, sizeof(empty)));
-    reset(); can_open = false; recover_bus(true);
+    reset(); can_open = false; recover_bus(true, false);
     assert(!strcmp(trace, "CDO") && g_state == BT_STATE_ON);
-    reset(); adapter = false; recover_bus(true);
+    reset(); adapter = false; recover_bus(true, false);
     assert(!strcmp(trace, "CDOA"));
-    reset(); recover_bus(true);
+    reset(); recover_bus(true, false);
     assert(!strcmp(trace, "CDOARPD"));
 
-    reset(); bluez_lost = false; recover_bus(true);
+    reset(); bluez_lost = false; recover_bus(true, false);
     assert(!strcmp(trace, "COARPD")); // no temporary jack route during codec restart
-    reset(); bluez_lost = false; can_open = false; recover_bus(true);
+    reset(); bluez_lost = false; can_open = false; recover_bus(true, false);
     assert(!strcmp(trace, "COG"));
-    reset(); bluez_lost = false; adapter = false; recover_bus(true);
+    reset(); bluez_lost = false; adapter = false; recover_bus(true, false);
     assert(!strcmp(trace, "COAG"));
-    reset(); bluez_lost = false; recover_bus(false);
+    reset(); bluez_lost = false; recover_bus(false, false);
     assert(!strcmp(trace, "CD"));
 
-    reset(); bluez_lost = false; can_open = false; bluez_during_open = true; recover_bus(true);
+    reset(); bluez_lost = false; can_open = false; bluez_during_open = true; recover_bus(true, false);
     assert(!strcmp(trace, "COD"));
-    reset(); bluez_lost = false; adapter = false; bluez_during_adapter = true; recover_bus(true);
+    reset(); bluez_lost = false; adapter = false; bluez_during_adapter = true; recover_bus(true, false);
     assert(!strcmp(trace, "COAD"));
+
+    reset(); bluez_lost = false; recover_bus(true, true);
+    assert(!strcmp(trace, "CDOARPD")); // preserve the cause across an in-job reopen
 
     g_paired_count = 1;
     snprintf(g_paired[0].mac, sizeof(g_paired[0].mac), "AA:BB:CC:DD:EE:FF");
@@ -117,7 +120,7 @@ int main(void) {
     clock_now = 3100; assert(grace_expired());
     a2dp_missing_since = UINT32_MAX - 1000; clock_now = 1998; assert(!grace_expired());
     clock_now = 1999; assert(grace_expired());
-    puts("Rebind order/reconciliation: PASS 19 cases");
+    puts("Rebind order/reconciliation: PASS 20 cases");
     return 0;
 }
 '''

@@ -7,11 +7,26 @@
 static pthread_mutex_t event_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t event_wake = PTHREAD_COND_INITIALIZER;
 static unsigned event_count;
+static bool wait_for_retirement, saw_retired_invalidation, saw_retired_bluez;
 static void changed(void) {
 	pthread_mutex_lock(&event_lock);
+	bool retiring = wait_for_retirement;
 	event_count++;
 	pthread_cond_signal(&event_wake);
 	pthread_mutex_unlock(&event_lock);
+	if (retiring) {
+		bool retired = false;
+		for (unsigned n = 0; n < 300 && !retired; n++) {
+			pthread_mutex_lock(&lock);
+			retired = conn == NULL;
+			pthread_mutex_unlock(&lock);
+			if (!retired)
+				usleep(10000);
+		}
+		assert(retired);
+		saw_retired_invalidation = btstack_rebind_needed();
+		saw_retired_bluez = btstack_bluez_rebind_needed();
+	}
 }
 static void wait_change(unsigned wanted) {
 	struct timespec deadline;
@@ -73,6 +88,8 @@ int main(int argc, char **argv) {
 	phase();
 	name_call(controller, "RequestName", "org.bluealsa");
 	verify_loss(false, 1);
+	assert(btstack_wait_service("org.bluealsa", 250) && "Owner acquisition must not strand the active worker wait");
+	assert(btstack_alive());
 	btstack_close();
 	phase();
 	name_call(controller, "ReleaseName", "org.bluealsa");
@@ -99,8 +116,17 @@ int main(int argc, char **argv) {
 	assert(!dbus_alive(dying) && btstack_bluez_rebind_needed());
 	btstack_close();
 	assert(!conn && btstack_bluez_rebind_needed());
+	phase();
+	pthread_mutex_lock(&event_lock);
+	wait_for_retirement = true;
+	pthread_mutex_unlock(&event_lock);
+	name_call(controller, "ReleaseName", "org.bluez");
+	wait_change(1);
+	// close/join races the already-entered reader callback, as in a worker wait.
+	btstack_close();
+	assert(saw_retired_invalidation && saw_retired_bluez);
 	dbus_disconnect(controller);
 	alarm(0);
-	puts("Private bus owner lifecycle: PASS acquisition/loss/both-services/sticky-reason/socket-EOF/retirement");
+	puts("Private bus owner lifecycle: PASS acquisition/loss/worker-wait/sticky-reason/socket-EOF/retirement-race");
 	return 0;
 }

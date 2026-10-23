@@ -992,7 +992,7 @@ bool btstack_service_ready(const char *name) {
 
 bool btstack_wait_service(const char *name, int timeout_ms) {
 	for (int waited = 0;; waited += 100) {
-		if (btstack_service_ready(name)) {
+		if (btstack_open() && btstack_service_ready(name)) {
 			return true;
 		}
 		if (waited >= timeout_ms) {
@@ -1077,8 +1077,8 @@ void btstack_close(void) {
 	pthread_mutex_lock(&lock);
 	dbus_conn_t *c = conn;
 	conn = NULL;
-	if (!service_changed || (c && !dbus_alive(c)))
-		bluez_changed = true; // An unclassified socket loss has no valid ACL snapshot.
+	if (c && !dbus_alive(c))
+		bluez_changed = true; // A dead bus has no valid ACL snapshot.
 	service_changed = true;
 	invalidate_caches_locked();
 	pthread_mutex_unlock(&lock);
@@ -1090,7 +1090,7 @@ void btstack_close(void) {
 
 bool btstack_rebind_needed(void) {
 	pthread_mutex_lock(&lock);
-	bool needed = conn && service_changed;
+	bool needed = service_changed; // Includes a reader callback still retiring during close/join.
 	pthread_mutex_unlock(&lock);
 	return needed;
 }
@@ -1182,7 +1182,7 @@ bool btstack_adapter_ready(void) {
 
 bool btstack_wait_adapter(int timeout_ms) {
 	for (int waited = 0;; waited += 200) {
-		if (btstack_adapter_ready()) {
+		if (btstack_open() && btstack_adapter_ready()) {
 			return true;
 		}
 		if (waited >= timeout_ms) {

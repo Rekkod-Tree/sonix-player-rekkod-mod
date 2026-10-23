@@ -7,7 +7,9 @@
 #include <assert.h>
 
 static bool owner_lost;
+static bool bluez_lost;
 bool btstack_rebind_needed(void) { return owner_lost; }
+bool btstack_bluez_rebind_needed(void) { return bluez_lost; }
 
 int main(void) {
 	job_t item = {.type = JOB_MEDIA};
@@ -18,7 +20,7 @@ int main(void) {
 	on_bus_change();
 	assert(queue_count == JOB_QUEUE_LEN && bus_rebind_pending);
 	job_t next;
-	assert(take_job(&next) && next.type == JOB_BUS_REBIND);
+	assert(take_job(&next) && next.type == JOB_BUS_REBIND && next.arg_int == 0);
 	assert(queue_count == JOB_QUEUE_LEN && !bus_rebind_pending);
 	for (int i = 0; i < JOB_QUEUE_LEN; i++)
 		assert(take_job(&next) && next.type == JOB_MEDIA);
@@ -36,6 +38,18 @@ int main(void) {
 	on_bus_change();
 	assert(take_job(&next) && next.type == JOB_BUS_REBIND);
 	assert(!bus_rebind_pending && !take_job(&next));
-	puts("Bluetooth rebind queue: PASS full-ring priority, ordinary coalescing, disabled drain");
+	g_enabled = true;
+	owner_lost = bluez_lost = true;
+	on_bus_change();
+	bluez_lost = false;
+	on_bus_change(); // A following BlueALSA event cannot erase the earlier BlueZ cause.
+	// The active worker wait reopens before the queued rebind can run.
+	owner_lost = bluez_lost = false;
+	assert(take_job(&next) && next.type == JOB_BUS_REBIND && next.arg_int == 1);
+	assert(!bus_bluez_lost_pending && !take_job(&next));
+	owner_lost = true;
+	on_bus_change();
+	assert(take_job(&next) && next.type == JOB_BUS_REBIND && next.arg_int == 0);
+	puts("Bluetooth rebind queue: PASS full-ring priority, ordinary coalescing, disabled drain, retained BlueZ cause");
 	return 0;
 }

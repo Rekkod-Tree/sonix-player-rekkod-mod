@@ -176,6 +176,7 @@ static bool worker_running;
 static job_t queue[JOB_QUEUE_LEN];
 static int queue_head, queue_count;
 static bool bus_rebind_pending; // under lock; cannot be lost to a full ring
+static bool bus_bluez_lost_pending; // survives an in-job reopen while the reader retires
 
 static bool g_enabled;
 static bool g_busy;
@@ -3780,8 +3781,10 @@ static void name_for(const char *mac, char *out, size_t size) {
 // so it only wakes the worker, which re-reads properly.
 static void on_bus_change(void) {
 	if (btstack_rebind_needed()) {
+		bool bluez_lost = btstack_bluez_rebind_needed();
 		pthread_mutex_lock(&lock);
 		bus_rebind_pending = true;
+		bus_bluez_lost_pending |= bluez_lost;
 		pthread_cond_signal(&wake);
 		pthread_mutex_unlock(&lock);
 		return;
@@ -3811,7 +3814,8 @@ static void notification_cb(const char *message) {
 static bool take_job(job_t *out) {
 	if (bus_rebind_pending) {
 		bus_rebind_pending = false;
-		*out = (job_t){.type = JOB_BUS_REBIND};
+		*out = (job_t){.type = JOB_BUS_REBIND, .arg_int = bus_bluez_lost_pending};
+		bus_bluez_lost_pending = false;
 		return true;
 	}
 	if (queue_count == 0) {
@@ -4000,9 +4004,9 @@ static void publish_bus_loss(bool enabled) {
 	pthread_mutex_unlock(&lock);
 }
 
-static void recover_bus(bool enabled) {
+static void recover_bus(bool enabled, bool bluez_lost) {
+	bluez_lost |= btstack_bluez_rebind_needed();
 	btstack_close();
-	bool bluez_lost = btstack_bluez_rebind_needed();
 	rebind_waiting_device = true;
 	pthread_mutex_lock(&lock);
 	g_pending_volume = -1;
@@ -4072,7 +4076,7 @@ static void *bluetooth_worker(void *arg) {
 		pthread_mutex_unlock(&lock);
 
 		if (have_job && job.type == JOB_BUS_REBIND) {
-			recover_bus(enabled);
+			recover_bus(enabled, job.arg_int != 0);
 			continue;
 		}
 
@@ -4167,7 +4171,7 @@ static void *bluetooth_worker(void *arg) {
 
 			case JOB_REFRESH:
 				if (!btstack_alive())
-					recover_bus(enabled);
+					recover_bus(enabled, false);
 				else
 					refresh_devices();
 				break;
@@ -4312,7 +4316,7 @@ static void *bluetooth_worker(void *arg) {
 			last_poll = now_ms();
 			if (!btstack_alive()) {
 				fprintf(stderr, "bluetooth: the bus connection dropped; opening it again\n");
-				recover_bus(enabled);
+				recover_bus(enabled, false);
 			} else {
 				refresh_devices();
 			}

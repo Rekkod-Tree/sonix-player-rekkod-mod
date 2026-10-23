@@ -274,6 +274,22 @@ int main(void) {
 	btstack_close();
 	assert(!conn && !btstack_bluez_rebind_needed());
 	cases++;
+	seed();
+	dbus_w_bool(&response, true);
+	lose_during_parse = true;
+	assert(btstack_wait_service("org.bluez", 200));
+	assert(btstack_alive());
+	cases++;
+	seed();
+	dbus_w_variant_bool(&response, true);
+	lose_during_parse = true;
+	assert(btstack_wait_adapter(300));
+	assert(btstack_alive());
+	cases++;
+	seed();
+	btstack_close();
+	assert(!btstack_bluez_rebind_needed());
+	cases++;
 	printf("Bluetooth owner lifecycle: PASS %u cases\n", cases);
 	return 0;
 }

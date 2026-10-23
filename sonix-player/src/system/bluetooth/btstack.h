@@ -74,8 +74,8 @@ bool btstack_wait_service(const char *name, int timeout_ms);
 // register with. Safe to call again -- an agent already registered stays.
 bool btstack_register_agent(void);
 
-// True while the socket is live. Goes false when dbus-daemon exits, which is
-// the signal to open again.
+// True while the socket and service incarnation remain usable. The worker
+// reopens after either socket death or an owner replacement.
 bool btstack_alive(void);
 // Cached indication only; the existing worker owns blocking rebind work.
 bool btstack_rebind_needed(void);
@@ -83,7 +83,8 @@ bool btstack_rebind_needed(void);
 bool btstack_bluez_rebind_needed(void);
 
 // Called on the D-Bus reader thread whenever bluez or bluealsa announced a
-// change. Record and return: it must not block and must not call back in here.
+// change. Cached invalidation queries are allowed; RPC/open/close must stay
+// on the worker. Record and return without blocking the reader.
 void btstack_set_change_cb(void (*cb)(void));
 
 // ---------------------------------------------------------------------------
