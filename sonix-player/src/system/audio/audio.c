@@ -265,10 +265,12 @@ static volatile bool track_starting;
 static volatile bool pcm_opening;
 static volatile long quiet_since_ms;
 
-// The result of the last open_pcm_device(): 0, or the negative error that
-// made it give up. play_file() reads it to tell a device that cannot do S32
-// from a driver that has run out of memory.
-static int last_open_err;
+// Error and the last attempted PCM kind belong to the caller, not a global slot:
+// an external open can overlap a local request waiting to take its output.
+typedef struct {
+	int code;
+	bool bt_ordinary_endpoint;
+} pcm_open_error_t;
 
 // Set by audio_notify_resume(): a system suspend leaves an open stream in
 // SND_PCM_STATE_SUSPENDED, and a paused track keeps its stream open across
@@ -1389,7 +1391,15 @@ static bool pcm_open_route_refresh(pcm_open_route_t *route, int sample_rate, boo
 	return changed;
 }
 
-static snd_pcm_t *open_pcm_device_now(int channels, int sample_rate, int bits_per_sample, snd_pcm_uframes_t *period_size_out) {
+// Busy transport/configuration is not a refusal of the sample format.
+static bool pcm_setup_fallback_allowed(const pcm_open_error_t *failure) {
+	return failure->code != -ENOMEM &&
+		(!failure->bt_ordinary_endpoint || (failure->code != -EBUSY && failure->code != -EAGAIN));
+}
+
+static snd_pcm_t *open_pcm_device_now(int channels, int sample_rate, int bits_per_sample, snd_pcm_uframes_t *period_size_out, pcm_open_error_t *failure) {
+	failure->code = 0;
+	failure->bt_ordinary_endpoint = false;
 	snd_pcm_t *pcm_handle = NULL;
 	alsa_wait_output_reinit();
 	release_external_output();
@@ -1400,6 +1410,7 @@ static snd_pcm_t *open_pcm_device_now(int channels, int sample_rate, int bits_pe
 	// A caller may already hold DoP frames even if the selected name just became BT.
 	// Only an ordinary PCM open that began on BT gains the new retarget policy.
 	bool retarget = route.bluetooth && !pcm_exact_rate;
+	failure->bt_ordinary_endpoint = retarget;
 	bool follow_track_rate = route.bluetooth && config_get_int("bluetooth", "follow_track_rate", 0);
 	if (retarget) {
 		pcm_open_route_refresh(&route, sample_rate, follow_track_rate);
@@ -1434,12 +1445,16 @@ static snd_pcm_t *open_pcm_device_now(int channels, int sample_rate, int bits_pe
 	snd_pcm_sw_params_t *sw_params;
 	snd_pcm_sw_params_alloca(&sw_params);
 	uint64_t began = paused_clock_ms();
+	// The existing attempt cap remains; configuration retries also share a
+	// monotonic deadline. A blocking ALSA call itself cannot be preempted here.
+	uint64_t deadline = began + (uint64_t)budget * 50u;
 retry_open:
-	for (; attempts < budget;) {
+	for (; attempts < budget && (!retarget || paused_clock_ms() < deadline);) {
 		if (retarget)
 			pcm_open_route_refresh(&route, sample_rate, follow_track_rate);
 		used_default = false;
 		bool attempted_bt = route.bluetooth;
+		failure->bt_ordinary_endpoint = retarget && attempted_bt;
 		snprintf(opened_device, sizeof(opened_device), "%s", route.device);
 		attempts++;
 		err = route.convert_to ? open_bluetooth_at_rate(&pcm_handle, route.device, route.convert_to, route.mode)
@@ -1464,7 +1479,7 @@ retry_open:
 
 	if (err < 0 && retarget && pcm_open_route_refresh(&route, sample_rate, follow_track_rate)) {
 		route_changed = true;
-		if (attempts < budget)
+		if (attempts < budget && paused_clock_ms() < deadline)
 			goto retry_open;
 	}
 	// At most the existing one default fallback. Do not use an obsolete failure
@@ -1476,6 +1491,7 @@ retry_open:
 		fprintf(stderr, "audio: '%s' would not open (%s); falling back to " AUDIO_DEFAULT_PCM "\n", failed_device, snd_strerror(err));
 		fallback_attempted = true;
 		snprintf(opened_device, sizeof(opened_device), "%s", AUDIO_DEFAULT_PCM);
+		failure->bt_ordinary_endpoint = false;
 		attempts++;
 		err = snd_pcm_open(&pcm_handle, AUDIO_DEFAULT_PCM, SND_PCM_STREAM_PLAYBACK, 0);
 		if (retarget && pcm_open_route_refresh(&route, sample_rate, follow_track_rate) && strcmp(route.device, AUDIO_DEFAULT_PCM) != 0) {
@@ -1486,7 +1502,7 @@ retry_open:
 				usleep(150 * 1000);
 			}
 			err = -EAGAIN;
-			if (attempts < budget)
+			if (attempts < budget && paused_clock_ms() < deadline)
 				goto retry_open;
 		} else if (err >= 0) {
 			if (failed_bt && !bluetooth_audio_active()) {
@@ -1500,6 +1516,7 @@ retry_open:
 	}
 	if (err < 0) {
 		fprintf(stderr, "Audio: Cannot open PCM device '%s': %s (after %d attempts)\n", opened_device, snd_strerror(err), attempts);
+		failure->code = err;
 		return NULL;
 	}
 	if (attempts > 1)
@@ -1507,6 +1524,7 @@ retry_open:
 				(unsigned long long)(paused_clock_ms() - began));
 	const char *device = used_default ? AUDIO_DEFAULT_PCM : route.device;
 	bool bluetooth = route.bluetooth && !used_default;
+	failure->bt_ordinary_endpoint = retarget && bluetooth;
 
 	snd_pcm_hw_params_any(pcm_handle, hw_params);
 	snd_pcm_hw_params_set_access(pcm_handle, hw_params, SND_PCM_ACCESS_RW_INTERLEAVED);
@@ -1528,7 +1546,9 @@ retry_open:
 		return NULL;
 	}
 
-	if (snd_pcm_hw_params_set_format(pcm_handle, hw_params, format) < 0) {
+	err = snd_pcm_hw_params_set_format(pcm_handle, hw_params, format);
+	if (err < 0) {
+		failure->code = err;
 		fprintf(stderr, "audio: format %s refused by the device\n", snd_pcm_format_name(format));
 		snd_pcm_close(pcm_handle);
 		return NULL;
@@ -1558,7 +1578,7 @@ retry_open:
 	}
 	if (exact_rate && snd_pcm_hw_params_set_rate(pcm_handle, hw_params, val, 0) < 0) {
 		fprintf(stderr, "audio: '%s' has no %d Hz of its own, and DoP cannot be converted\n", device, sample_rate);
-		last_open_err = -EINVAL;
+		failure->code = -EINVAL;
 		snd_pcm_close(pcm_handle);
 		return NULL;
 	}
@@ -1674,9 +1694,25 @@ retry_open:
 		err = snd_pcm_hw_params(pcm_handle, hw_params);
 	}
 	if (err < 0) {
-		fprintf(stderr, "Audio: Cannot apply HW parameters: %s\n", snd_strerror(err));
-		last_open_err = err;
+		failure->code = err;
 		snd_pcm_close(pcm_handle);
+		pcm_handle = NULL;
+		// BlueALSA can open its client before the previous transport has
+		// finished releasing. Reopening only the client is not enough: retry
+		// its complete configuration with the same depth/rate/channels.
+		if (retarget && bluetooth && (err == -EBUSY || err == -EAGAIN)) {
+			uint64_t now = paused_clock_ms();
+			if (attempts < budget && now < deadline) {
+				unsigned wait_ms = deadline - now < 150u ? (unsigned)(deadline - now) : 150u;
+				fprintf(stderr, "audio: Bluetooth HW setup busy; retrying the same format after close\n");
+				usleep(wait_ms * 1000u);
+				if (paused_clock_ms() < deadline) {
+					pcm_open_route_refresh(&route, sample_rate, follow_track_rate);
+					goto retry_open;
+				}
+			}
+		}
+		fprintf(stderr, "Audio: Cannot apply HW parameters: %s\n", snd_strerror(err));
 		return NULL;
 	}
 
@@ -1761,10 +1797,12 @@ retry_open:
 		usleep(150 * 1000);
 		err = -EAGAIN;
 		route_changed = true;
-		if (attempts < budget)
+		if (attempts < budget && paused_clock_ms() < deadline)
 			goto retry_open;
+		failure->code = err;
 		return NULL;
 	}
+	failure->code = 0;
 	*period_size_out = period_size;
 	pcm_device_open = true;
 	return pcm_handle;
@@ -1772,12 +1810,14 @@ retry_open:
 
 // Every PCM this player opens goes through here, so that audio_quiet_ms() knows
 // when one is being opened and when the last one was.
-static snd_pcm_t *open_pcm_device(int channels, int sample_rate, int bits_per_sample, snd_pcm_uframes_t *period_size_out) {
+static snd_pcm_t *open_pcm_device(int channels, int sample_rate, int bits_per_sample, snd_pcm_uframes_t *period_size_out, pcm_open_error_t *failure) {
+	pcm_open_error_t local_failure;
+	if (!failure)
+		failure = &local_failure;
 	pcm_opening = true;
-	last_open_err = 0;
-	snd_pcm_t *pcm = open_pcm_device_now(channels, sample_rate, bits_per_sample, period_size_out);
-	if (!pcm && last_open_err == 0) {
-		last_open_err = -EIO;
+	snd_pcm_t *pcm = open_pcm_device_now(channels, sample_rate, bits_per_sample, period_size_out, failure);
+	if (!pcm && failure->code == 0) {
+		failure->code = -EIO;
 	}
 	quiet_since_ms = log_ms();
 	pcm_opening = false;
@@ -2834,7 +2874,7 @@ static snd_pcm_sframes_t pcm_write_recover(snd_pcm_t **pcm, const void *buf, snd
 		// only a reboot clears it. Same move as pcm_reroute, for the same
 		// reason.
 		auto_set_output();
-		*pcm = open_pcm_device(channels, rate, bits, period);
+		*pcm = open_pcm_device(channels, rate, bits, period, NULL);
 		if (!*pcm) {
 			return written; // it really is gone
 		}
@@ -2859,7 +2899,7 @@ static bool pcm_reroute(snd_pcm_t **pcm, int channels, int rate, int bits, snd_p
 	playback_follow(NULL);
 	usleep(150 * 1000); // let the switch settle before the codec is poked
 	auto_set_output();
-	*pcm = open_pcm_device(channels, rate, bits, period);
+	*pcm = open_pcm_device(channels, rate, bits, period, NULL);
 	return *pcm != NULL;
 }
 
@@ -3100,7 +3140,7 @@ static void play_wav_file(const char *filepath) {
 	if (pcm_handle) {
 		pcm_device_open = true;
 	} else {
-		pcm_handle = open_pcm_device(info.channels, info.sample_rate, info.out_bits, &period_size);
+		pcm_handle = open_pcm_device(info.channels, info.sample_rate, info.out_bits, &period_size, NULL);
 	}
 	if (!pcm_handle) {
 		fclose(f);
@@ -3294,7 +3334,7 @@ static void play_wav_file(const char *filepath) {
 					// again. The file is already positioned where the sound
 					// stopped, so nothing else has to move.
 					snd_pcm_uframes_t new_period = period_size;
-					pcm_handle = open_pcm_device(info.channels, info.sample_rate, info.out_bits, &new_period);
+					pcm_handle = open_pcm_device(info.channels, info.sample_rate, info.out_bits, &new_period, NULL);
 					if (!pcm_handle) {
 						fprintf(stderr, "Audio: cannot reopen the device after a pause\n");
 						audio_command = AUDIO_CMD_STOP;
@@ -4338,29 +4378,30 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 	// The previous track's PCM, if it stayed open and suits this one too: that
 	// is the whole of gapless. Never for DoP -- see the comment above
 	// gapless_release().
+	pcm_open_error_t open_error = {0};
 	pcm_exact_rate = passthrough;
 	snd_pcm_t *pcm_handle = passthrough ? NULL : gapless_take(channels, dev_rate, dev_bits, &period_size);
 	playback_follow(pcm_handle);
 	if (pcm_handle) {
 		pcm_device_open = true;
 	} else {
-		pcm_handle = open_pcm_device(channels, dev_rate, dev_bits, &period_size);
+		pcm_handle = open_pcm_device(channels, dev_rate, dev_bits, &period_size, &open_error);
 	}
-	if (!pcm_handle && resampler.on && last_open_err != -ENOMEM) {
+	if (!pcm_handle && resampler.on && pcm_setup_fallback_allowed(&open_error)) {
 		// The link refused 48 kHz S32: the stream goes as it did before, and
 		// the plug converts it.
 		fprintf(stderr, "audio: the resampled stream would not open; alsa converts the %d Hz one instead\n", out_rate);
 		bt_resample_close(&resampler);
 		dev_rate = out_rate;
 		dev_bits = out_bits;
-		pcm_handle = open_pcm_device(channels, dev_rate, dev_bits, &period_size);
+		pcm_handle = open_pcm_device(channels, dev_rate, dev_bits, &period_size, &open_error);
 	}
-	if (!pcm_handle && dev_bits == 32 && !passthrough && last_open_err == -ENOMEM) {
+	if (!pcm_handle && dev_bits == 32 && !passthrough && open_error.code == -ENOMEM) {
 		// Not the device refusing S32: the driver found no memory even for the
 		// smallest buffer. Another open straight away, in any format, asks the
 		// same exhausted kernel for more.
 		fprintf(stderr, "audio: not retried at 16 bit -- the driver is out of memory, not the format refused\n");
-	} else if (!pcm_handle && dev_bits == 32 && !passthrough) {
+	} else if (!pcm_handle && dev_bits == 32 && !passthrough && pcm_setup_fallback_allowed(&open_error)) {
 		// If this output cannot do S32 for some reason, 16-bit playback still
 		// beats silence. Not for DoP: sixteen bits cannot carry a marker byte
 		// and a twenty-four bit payload, so half a DoP stream is not quieter
@@ -4375,7 +4416,7 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 		bt_resample_close(&resampler);
 		dev_rate = out_rate;
 		dev_bits = out_bits;
-		pcm_handle = open_pcm_device(channels, sample_rate, out_bits, &period_size);
+		pcm_handle = open_pcm_device(channels, sample_rate, out_bits, &period_size, &open_error);
 	}
 	pcm_exact_rate = false;
 #ifdef HOST_BUILD
@@ -4385,10 +4426,10 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 		snd_pcm_close(pcm_handle);
 		pcm_handle = NULL;
 		pcm_device_open = false;
-		last_open_err = -EINVAL;
+		open_error.code = -EINVAL;
 	}
 #endif
-	if (!pcm_handle && passthrough && last_open_err != -ENOMEM) {
+	if (!pcm_handle && passthrough && open_error.code != -ENOMEM) {
 		// DSD256 asks for 705.6 kHz, which an output that is not this device's
 		// own DAC may simply refuse. Rather than a track that does not play,
 		// it is opened again and converted to PCM -- the route Bluetooth takes
@@ -4655,7 +4696,7 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 				{
 					snd_pcm_uframes_t new_period = period_size;
 					pcm_exact_rate = passthrough;
-					pcm_handle = open_pcm_device(channels, dev_rate, dev_bits, &new_period);
+					pcm_handle = open_pcm_device(channels, dev_rate, dev_bits, &new_period, NULL);
 					pcm_exact_rate = false;
 					if (!pcm_handle) {
 						fprintf(stderr, "Audio: cannot reopen the device after a pause\n");
@@ -5895,8 +5936,9 @@ static bool external_open_locked(void) {
 
 	pcm_forced_buffer_ms = external_buffer_ms;
 	snd_pcm_uframes_t period = 0;
-	external_pcm = open_pcm_device(external_channels, external_dev_rate, external_dev_bits, &period);
-	if (!external_pcm && external_conv.on && last_open_err != -ENOMEM) {
+	pcm_open_error_t open_error = {0};
+	external_pcm = open_pcm_device(external_channels, external_dev_rate, external_dev_bits, &period, &open_error);
+	if (!external_pcm && external_conv.on && pcm_setup_fallback_allowed(&open_error)) {
 		// The output refused its own rate in S32: the stream goes as it did
 		// before, and the plug converts it.
 		fprintf(stderr, "audio: the resampled external stream would not open; alsa converts the %d Hz one instead\n",
@@ -5905,7 +5947,7 @@ static bool external_open_locked(void) {
 		external_dither = false;
 		external_dev_rate = external_rate;
 		external_dev_bits = external_bits;
-		external_pcm = open_pcm_device(external_channels, external_dev_rate, external_dev_bits, &period);
+		external_pcm = open_pcm_device(external_channels, external_dev_rate, external_dev_bits, &period, &open_error);
 	}
 	pcm_forced_buffer_ms = 0;
 
