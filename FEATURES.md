@@ -1,6 +1,6 @@
 ﻿# Features
 
-## Release polish and responsiveness (unreleased)
+## Release polish and responsiveness (1.4.0 prepared)
 
 - The training-only profile capture shares GCC 9's serialized flush entry with
   fork/exec, preventing concurrent access to GCOV's shared output state.
@@ -19,7 +19,8 @@
   during a finite retry budget. A stale fallback cannot clear a newer route;
   diagnostics identify the actual fallback output and elapsed retry time.
   Codec handoff grace is preserved. USB/DoP, command cancellation and PCM
-  resume ownership are unchanged; native acceptance is pending.
+  resume ownership are unchanged. Ordinary OFF route tests passed; fresh final
+  Bluetooth acceptance remains untested because the headset was unavailable.
 
 - Global search keeps its last selected source when going Back and reopening.
   Switching between input pages preserves the original opener and each source's
