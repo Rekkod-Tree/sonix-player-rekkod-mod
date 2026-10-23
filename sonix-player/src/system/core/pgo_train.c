@@ -7,7 +7,7 @@
 #include <stdio.h>
 #include <unistd.h>
 
-extern void __gcov_dump(void);
+extern void __gcov_flush(void);
 static sigset_t requests;
 
 static void *capture_profile(void *unused) {
@@ -18,7 +18,9 @@ static void *capture_profile(void *unused) {
 		if (sigwait(&requests, &signal_number) != 0)
 			continue;
 		if (!captured) {
-			__gcov_dump();
+			// GCC 9's fork/exec wrappers share the flush lock. The dump entry
+			// point does not, so it can corrupt the driver's shared IO buffer.
+			__gcov_flush();
 			captured = true;
 			// USB temporarily holds ordinary log output; completion must remain
 			// observable without enabling writes to the card.

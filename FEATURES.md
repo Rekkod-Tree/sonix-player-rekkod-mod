@@ -2,6 +2,10 @@
 
 ## Release polish and responsiveness (unreleased)
 
+- The training-only profile capture shares GCC 9's serialized flush entry with
+  fork/exec, preventing concurrent access to GCOV's shared output state.
+  Normal player builds contain no capture thread or profiling counters.
+
 - Appearance offers Normal (default) and Compact mini-player modes. Compact
   uses a 56 px card in a 72 px reserved footer with a 64 px pause target;
   track and artist share one ellipsized line. Existing gestures and numerical
