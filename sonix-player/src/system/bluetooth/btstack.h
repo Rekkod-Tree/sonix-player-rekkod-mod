@@ -77,6 +77,10 @@ bool btstack_register_agent(void);
 // True while the socket is live. Goes false when dbus-daemon exits, which is
 // the signal to open again.
 bool btstack_alive(void);
+// Cached indication only; the existing worker owns blocking rebind work.
+bool btstack_rebind_needed(void);
+// Read by the worker after retirement, before a new open resets provenance.
+bool btstack_bluez_rebind_needed(void);
 
 // Called on the D-Bus reader thread whenever bluez or bluealsa announced a
 // change. Record and return: it must not block and must not call back in here.

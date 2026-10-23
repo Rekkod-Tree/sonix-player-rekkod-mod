@@ -148,12 +148,13 @@ typedef enum {
 	JOB_SET_NAME,
 	// Wakes the worker for the renames waiting in g_renames.
 	JOB_SET_ALIAS,
-	JOB_SET_CODEC, // text: the codec to switch to
-	JOB_VOLUME,	   // arg_int: percent, for AVRCP absolute volume
-	JOB_RX_INFO,   // re-read what a device streaming to this one is sending
-	JOB_RX_CODEC,  // text: the codec to move the incoming stream onto
-	JOB_MEDIA,	   // text: an AVRCP member to send to that device
-	JOB_LINK_RATE, // arg_int: the rate to move the link to, or BT_LINK_RATE_DEFAULT
+	JOB_SET_CODEC,	// text: the codec to switch to
+	JOB_VOLUME,		// arg_int: percent, for AVRCP absolute volume
+	JOB_RX_INFO,	// re-read what a device streaming to this one is sending
+	JOB_RX_CODEC,	// text: the codec to move the incoming stream onto
+	JOB_MEDIA,		// text: an AVRCP member to send to that device
+	JOB_LINK_RATE,	// arg_int: the rate to move the link to, or BT_LINK_RATE_DEFAULT
+	JOB_BUS_REBIND, // internal priority work, never admitted through the ring
 } job_type_t;
 
 // `text` is a codec name for JOB_SET_CODEC and an AVRCP member for JOB_MEDIA.
@@ -174,6 +175,7 @@ static bool worker_running;
 
 static job_t queue[JOB_QUEUE_LEN];
 static int queue_head, queue_count;
+static bool bus_rebind_pending; // under lock; cannot be lost to a full ring
 
 static bool g_enabled;
 static bool g_busy;
@@ -1808,7 +1810,10 @@ static void rewrite_alsa_conf(const char *mac) {
 // So the sink going is believed only when bluez agrees that the device is no
 // longer connected, or when it has stayed gone this long.
 #define A2DP_GRACE_MS 3000
+static bool rebind_waiting_device;	// worker only: reconcile the new BlueZ ACL before routing
 static uint32_t a2dp_missing_since; // worker only
+
+static bool grace_expired(void) { return a2dp_missing_since != 0 && (uint32_t)(now_ms() - a2dp_missing_since) >= A2DP_GRACE_MS; }
 
 // Whether bluez still reports an ACL link to this address.
 static bool device_still_connected(const char *mac) {
@@ -1831,6 +1836,14 @@ static void refresh_audio_state(void) {
 	// again next time rather than missed.
 	unsigned sink_serial = btstack_sink_serial();
 	bool sink = btstack_audio_sink(mac, sizeof(mac));
+	if (sink && rebind_waiting_device) {
+		// BlueALSA may still export an old PCM after BlueZ has been replaced.
+		// This extra reconciliation is only for service rebinding, not codec grace.
+		if (!device_still_connected(mac))
+			sink = false;
+		else
+			rebind_waiting_device = false;
+	}
 	bool rebuilt = sink && sink_serial != g_sink_serial_seen;
 	if (sink) {
 		g_sink_serial_seen = sink_serial;
@@ -1874,7 +1887,7 @@ static void refresh_audio_state(void) {
 				a2dp_missing_since = now_ms();
 				fprintf(stderr, "bluetooth: the PCM on %s went away but the link is still up; waiting\n", last);
 			}
-			if ((uint32_t)(now_ms() - a2dp_missing_since) < A2DP_GRACE_MS) {
+			if (!grace_expired()) {
 				return; // nothing has changed yet as far as anything else is concerned
 			}
 			fprintf(stderr, "bluetooth: the PCM on %s has been gone for %d ms; back to the jack\n", last, A2DP_GRACE_MS);
@@ -3766,6 +3779,13 @@ static void name_for(const char *mac, char *out, size_t size) {
 // reply would have to be read by the thread that is still inside the handler --
 // so it only wakes the worker, which re-reads properly.
 static void on_bus_change(void) {
+	if (btstack_rebind_needed()) {
+		pthread_mutex_lock(&lock);
+		bus_rebind_pending = true;
+		pthread_cond_signal(&wake);
+		pthread_mutex_unlock(&lock);
+		return;
+	}
 	job_t job = {.type = JOB_REFRESH};
 	post_job(&job);
 }
@@ -3789,6 +3809,11 @@ static void notification_cb(const char *message) {
 // ---------------------------------------------------------------------------
 
 static bool take_job(job_t *out) {
+	if (bus_rebind_pending) {
+		bus_rebind_pending = false;
+		*out = (job_t){.type = JOB_BUS_REBIND};
+		return true;
+	}
 	if (queue_count == 0) {
 		// A full ring may defer the one coalesced volume intent, not lose it.
 		if (g_pending_volume >= 0 && g_enabled && g_a2dp_connected) {
@@ -3965,6 +3990,49 @@ static void invite_sources(void) {
 	}
 }
 
+// Worker only, with neither lock held.
+static void publish_bus_loss(bool enabled) {
+	refresh_devices();
+	pthread_mutex_lock(&lock);
+	g_scanning = false;
+	g_state = enabled ? BT_STATE_ON : BT_STATE_OFF;
+	g_serial++;
+	pthread_mutex_unlock(&lock);
+}
+
+static void recover_bus(bool enabled) {
+	btstack_close();
+	bool bluez_lost = btstack_bluez_rebind_needed();
+	rebind_waiting_device = true;
+	pthread_mutex_lock(&lock);
+	g_pending_volume = -1;
+	memset(&g_rx_stream, 0, sizeof(g_rx_stream));
+	g_rx_serial++;
+	pthread_mutex_unlock(&lock);
+	// BlueALSA restarts also implement ordinary codec changes. Preserve the
+	// existing ACL/grace until fresh BlueZ says otherwise in that case.
+	if (bluez_lost)
+		publish_bus_loss(enabled);
+	if (!enabled) {
+		if (!bluez_lost)
+			publish_bus_loss(false);
+		return;
+	}
+	if (!btstack_open() || !btstack_adapter_ready()) {
+		// The cause can change while AddMatch or the adapter query is in flight.
+		if (!bluez_lost) {
+			if (btstack_bluez_rebind_needed())
+				publish_bus_loss(true);
+			else
+				refresh_audio_state(); // Existing bounded codec grace, not an endless exemption.
+		}
+		return;
+	}
+	btstack_register_agent();
+	btstack_refresh_audio();
+	refresh_devices();
+}
+
 static void *bluetooth_worker(void *arg) {
 	(void)arg;
 	thread_be_background("bluetooth");
@@ -4002,6 +4070,14 @@ static void *bluetooth_worker(void *arg) {
 		char active_mac[BT_MAC_MAX];
 		snprintf(active_mac, sizeof(active_mac), "%s", g_a2dp_mac);
 		pthread_mutex_unlock(&lock);
+
+		if (have_job && job.type == JOB_BUS_REBIND) {
+			recover_bus(enabled);
+			continue;
+		}
+
+		if (enabled && grace_expired())
+			refresh_audio_state(); // A busy command ring cannot defer the loss deadline.
 
 		// The stream btvolume bridges, and the device airpods talks to. Connect,
 		// disconnect and reconnect all reach them as this address changing, so
@@ -4090,7 +4166,10 @@ static void *bluetooth_worker(void *arg) {
 				break;
 
 			case JOB_REFRESH:
-				refresh_devices();
+				if (!btstack_alive())
+					recover_bus(enabled);
+				else
+					refresh_devices();
 				break;
 
 			case JOB_PAIR:
@@ -4228,18 +4307,15 @@ static void *bluetooth_worker(void *arg) {
 		// The backstop. bluez says what changed the moment it happens, so this
 		// only catches what a lost signal or a dropped connection would have
 		// hidden -- including the connection itself having gone.
-		uint32_t poll_period = power_screen_is_on() ? BT_POLL_MS : BT_POLL_STANDBY_MS;
+		uint32_t poll_period = a2dp_missing_since ? 500 : (power_screen_is_on() ? BT_POLL_MS : BT_POLL_STANDBY_MS);
 		if (enabled && (uint32_t)(now_ms() - last_poll) >= poll_period) {
 			last_poll = now_ms();
 			if (!btstack_alive()) {
 				fprintf(stderr, "bluetooth: the bus connection dropped; opening it again\n");
-				if (btstack_open()) {
-					btstack_set_change_cb(on_bus_change);
-					btstack_register_agent();
-					btstack_refresh_audio();
-				}
+				recover_bus(enabled);
+			} else {
+				refresh_devices();
 			}
-			refresh_devices();
 		}
 	}
 

@@ -46,6 +46,8 @@
 
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static dbus_conn_t *conn;
+static bool service_changed; // sticky until the worker installs a new connection
+static bool bluez_changed;	 // retain ACL provenance across retirement
 static void (*change_cb)(void);
 
 // The addresses bluealsa currently has an A2DP source PCM for. More than one
@@ -103,6 +105,56 @@ static char media_status[32];
 static btstack_track_t media_track;
 static unsigned media_track_serial;
 
+// Paths belong to the worker, unlike the caches the reader updates below.
+static char media_player_path[OBJECT_PATH_MAX];
+static char media_player_address[BT_ADDR_MAX];
+
+// The caller holds lock. No callback, RPC or disconnect is allowed here.
+static void invalidate_caches_locked(void) {
+	pcm_count = rx_count = transport_count = headset_battery_count = 0;
+	sink_serial++;
+	transport_serial++;
+	headset_battery_serial++;
+	media_status[0] = '\0';
+	memset(&media_track, 0, sizeof(media_track));
+	media_track_serial++;
+}
+
+static dbus_conn_t *current_connection(void) {
+	pthread_mutex_lock(&lock);
+	dbus_conn_t *c = service_changed ? NULL : conn;
+	pthread_mutex_unlock(&lock);
+	return c;
+}
+
+static bool connection_current(dbus_conn_t *c) {
+	pthread_mutex_lock(&lock);
+	bool current = c && c == conn && !service_changed;
+	pthread_mutex_unlock(&lock);
+	return current;
+}
+
+// Always send/finish the existing call so dbuslite releases its write lock.
+// A reply from the retired service cannot become a successful new operation.
+static bool stack_call_send(dbus_conn_t *c, int timeout, char *error, size_t error_size) {
+	bool ok = dbus_call_send(c, timeout, error, error_size);
+	if (!connection_current(c)) {
+		if (error && error_size)
+			snprintf(error, error_size, "org.freedesktop.DBus.Error.Disconnected");
+		return false;
+	}
+	return ok;
+}
+
+// Returns with lock held only for the current incarnation.
+static bool lock_current(dbus_conn_t *c) {
+	pthread_mutex_lock(&lock);
+	if (c && c == conn && !service_changed)
+		return true;
+	pthread_mutex_unlock(&lock);
+	return false;
+}
+
 // One a{sv} of AVRCP track metadata into `out`. Every key the player does not
 // use is stepped over by signature, the way the device properties are read.
 static void read_track_props(dbus_reader_t *r, btstack_track_t *out) {
@@ -137,6 +189,16 @@ static void read_track_props(dbus_reader_t *r, btstack_track_t *out) {
 // moved every time would have the page redrawing for nothing.
 static void store_track(const btstack_track_t *fresh) {
 	pthread_mutex_lock(&lock);
+	if (memcmp(&media_track, fresh, sizeof(media_track)) != 0) {
+		media_track = *fresh;
+		media_track_serial++;
+	}
+	pthread_mutex_unlock(&lock);
+}
+
+static void store_track_current(dbus_conn_t *c, const btstack_track_t *fresh) {
+	if (!lock_current(c))
+		return;
 	if (memcmp(&media_track, fresh, sizeof(media_track)) != 0) {
 		media_track = *fresh;
 		media_track_serial++;
@@ -613,8 +675,30 @@ static void note_change(void) {
 }
 
 static void on_signal(dbus_conn_t *c, const dbus_msg_t *m, void *user) {
-	(void)c;
 	(void)user;
+
+	if (strcmp(m->member, "NameOwnerChanged") == 0) {
+		if (m->type != DBUS_TYPE_SIGNAL || strcmp(m->sender, "org.freedesktop.DBus") != 0 || strcmp(m->path, "/org/freedesktop/DBus") != 0 || strcmp(m->interface, "org.freedesktop.DBus") != 0 || strcmp(m->signature, "sss") != 0)
+			return;
+		dbus_reader_t r;
+		dbus_reader_init(&r, m);
+		char service[DBUS_NAME_MAX], old_owner[DBUS_NAME_MAX], new_owner[DBUS_NAME_MAX];
+		if (!dbus_r_string(&r, service, sizeof(service)) || !dbus_r_string(&r, old_owner, sizeof(old_owner)) || !dbus_r_string(&r, new_owner, sizeof(new_owner)) || strcmp(old_owner, new_owner) == 0 || (strcmp(service, BLUEZ_SERVICE) != 0 && strcmp(service, BALSA_SERVICE) != 0))
+			return;
+		pthread_mutex_lock(&lock);
+		if (!c || c != conn) {
+			pthread_mutex_unlock(&lock);
+			return;
+		}
+		service_changed = true;
+		bluez_changed |= strcmp(service, BLUEZ_SERVICE) == 0;
+		invalidate_caches_locked();
+		pthread_mutex_unlock(&lock);
+		note_change(); // The reader never waits for its own RPC or joins itself.
+		return;
+	}
+	if (!connection_current(c))
+		return;
 
 	if (strcmp(m->interface, OBJMAN_IFACE) == 0 && strcmp(m->member, "InterfacesAdded") == 0) {
 		dbus_reader_t r;
@@ -626,7 +710,8 @@ static void on_signal(dbus_conn_t *c, const dbus_msg_t *m, void *user) {
 		if (path_is_transport(path)) {
 			char state[32];
 			if (read_transport_state(&r, state, sizeof(state))) {
-				pthread_mutex_lock(&lock);
+				if (!lock_current(c))
+					return;
 				transport_note(path, state);
 				pthread_mutex_unlock(&lock);
 				const char *leaf = strrchr(path, '/');
@@ -639,19 +724,22 @@ static void on_signal(dbus_conn_t *c, const dbus_msg_t *m, void *user) {
 		if (path_is_rfcomm(path) && address_from_path(path, address, sizeof(address))) {
 			int percent = -1;
 			if (read_rfcomm_added(&r, &percent)) {
-				pthread_mutex_lock(&lock);
+				if (!lock_current(c))
+					return;
 				headset_battery_note(address, percent);
 				pthread_mutex_unlock(&lock);
 			}
 			fprintf(stderr, "btstack: hands-free link to %s is up (battery %d%%)\n", address, percent);
 		} else if (path_is_a2dp_sink(path) && address_from_path(path, address, sizeof(address))) {
-			pthread_mutex_lock(&lock);
+			if (!lock_current(c))
+				return;
 			pcm_add(pcm_addr, &pcm_count, address);
 			sink_serial++;
 			pthread_mutex_unlock(&lock);
 			fprintf(stderr, "btstack: the A2DP sink on %s is ready\n", address);
 		} else if (path_is_a2dp_source(path) && address_from_path(path, address, sizeof(address))) {
-			pthread_mutex_lock(&lock);
+			if (!lock_current(c))
+				return;
 			pcm_add(rx_addr, &rx_count, address);
 			pthread_mutex_unlock(&lock);
 			fprintf(stderr, "btstack: %s is streaming to this device\n", address);
@@ -668,7 +756,8 @@ static void on_signal(dbus_conn_t *c, const dbus_msg_t *m, void *user) {
 			return;
 		}
 		if (path_is_transport(path)) {
-			pthread_mutex_lock(&lock);
+			if (!lock_current(c))
+				return;
 			transport_forget(path);
 			pthread_mutex_unlock(&lock);
 			note_change();
@@ -676,16 +765,19 @@ static void on_signal(dbus_conn_t *c, const dbus_msg_t *m, void *user) {
 		}
 		char address[BT_ADDR_MAX];
 		if (path_is_rfcomm(path) && address_from_path(path, address, sizeof(address))) {
-			pthread_mutex_lock(&lock);
+			if (!lock_current(c))
+				return;
 			headset_battery_note(address, -1);
 			pthread_mutex_unlock(&lock);
 		} else if (path_is_a2dp_sink(path) && address_from_path(path, address, sizeof(address))) {
-			pthread_mutex_lock(&lock);
+			if (!lock_current(c))
+				return;
 			pcm_remove(pcm_addr, &pcm_count, address);
 			pthread_mutex_unlock(&lock);
 			fprintf(stderr, "btstack: the A2DP sink on %s is gone\n", address);
 		} else if (path_is_a2dp_source(path) && address_from_path(path, address, sizeof(address))) {
-			pthread_mutex_lock(&lock);
+			if (!lock_current(c))
+				return;
 			pcm_remove(rx_addr, &rx_count, address);
 			pthread_mutex_unlock(&lock);
 			fprintf(stderr, "btstack: %s has stopped streaming to this device\n", address);
@@ -721,7 +813,8 @@ static void on_signal(dbus_conn_t *c, const dbus_msg_t *m, void *user) {
 					if (strcmp(key, "State") == 0 && strcmp(sig, "s") == 0) {
 						char state[32];
 						if (dbus_r_string(&r, state, sizeof(state))) {
-							pthread_mutex_lock(&lock);
+							if (!lock_current(c))
+								return;
 							transport_note(m->path, state);
 							pthread_mutex_unlock(&lock);
 							const char *leaf = strrchr(m->path, '/');
@@ -741,7 +834,8 @@ static void on_signal(dbus_conn_t *c, const dbus_msg_t *m, void *user) {
 		if (strcmp(iface, BALSA_RFCOMM_IFACE) == 0 && path_is_rfcomm(m->path) && address_from_path(m->path, address, sizeof(address))) {
 			int percent = -1;
 			if (read_rfcomm_props(&r, &percent)) {
-				pthread_mutex_lock(&lock);
+				if (!lock_current(c))
+					return;
 				headset_battery_note(address, percent);
 				pthread_mutex_unlock(&lock);
 				fprintf(stderr, "btstack: %s battery %d%%\n", address, percent);
@@ -764,7 +858,8 @@ static void on_signal(dbus_conn_t *c, const dbus_msg_t *m, void *user) {
 					if (strcmp(key, "Status") == 0 && strcmp(sig, "s") == 0) {
 						char status[32];
 						if (dbus_r_string(&r, status, sizeof(status))) {
-							pthread_mutex_lock(&lock);
+							if (!lock_current(c))
+								return;
 							snprintf(media_status, sizeof(media_status), "%s", status);
 							pthread_mutex_unlock(&lock);
 							fprintf(stderr, "btstack: the remote player is %s\n", status);
@@ -776,7 +871,7 @@ static void on_signal(dbus_conn_t *c, const dbus_msg_t *m, void *user) {
 						btstack_track_t fresh;
 						memset(&fresh, 0, sizeof(fresh));
 						read_track_props(&r, &fresh);
-						store_track(&fresh);
+						store_track_current(c, &fresh);
 					} else if (!dbus_r_skip(&r, sig)) {
 						break;
 					}
@@ -861,15 +956,13 @@ static bool call_ok_why(const char *destination, const char *path, const char *i
 	if (err_out && err_size) {
 		err_out[0] = '\0';
 	}
-	pthread_mutex_lock(&lock);
-	dbus_conn_t *c = conn;
-	pthread_mutex_unlock(&lock);
+	dbus_conn_t *c = current_connection();
 	if (!c) {
 		return false;
 	}
 	dbus_call_begin(c, destination, path, interface, member, "");
 	char err[DBUS_NAME_MAX];
-	bool ok = dbus_call_send(c, timeout_ms, err, sizeof(err));
+	bool ok = stack_call_send(c, timeout_ms, err, sizeof(err));
 	if (!ok) {
 		fprintf(stderr, "btstack: %s.%s -> %s\n", interface, member, err[0] ? err : "no reply");
 		if (err_out && err_size) {
@@ -882,21 +975,19 @@ static bool call_ok_why(const char *destination, const char *path, const char *i
 static bool call_ok(const char *destination, const char *path, const char *interface, const char *member, int timeout_ms) { return call_ok_why(destination, path, interface, member, timeout_ms, NULL, 0); }
 
 bool btstack_service_ready(const char *name) {
-	pthread_mutex_lock(&lock);
-	dbus_conn_t *c = conn;
-	pthread_mutex_unlock(&lock);
+	dbus_conn_t *c = current_connection();
 	if (!c || !name) {
 		return false;
 	}
 	dbus_writer_t *w = dbus_call_begin(c, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "NameHasOwner", "s");
 	dbus_w_string(w, name);
-	if (!dbus_call_send(c, CALL_MS, NULL, 0)) {
+	if (!stack_call_send(c, CALL_MS, NULL, 0)) {
 		return false;
 	}
 	dbus_reader_t r;
 	dbus_reply_reader(c, &r);
 	bool owned = false;
-	return dbus_r_bool(&r, &owned) && owned;
+	return dbus_r_bool(&r, &owned) && owned && connection_current(c);
 }
 
 bool btstack_wait_service(const char *name, int timeout_ms) {
@@ -916,7 +1007,7 @@ static bool register_agent(dbus_conn_t *c) {
 	dbus_w_path(w, AGENT_PATH);
 	dbus_w_string(w, AGENT_CAPABILITY);
 	char err[DBUS_NAME_MAX];
-	if (!dbus_call_send(c, CALL_MS, err, sizeof(err))) {
+	if (!stack_call_send(c, CALL_MS, err, sizeof(err))) {
 		// AlreadyExists is not a failure: a previous run of this player left the
 		// registration behind and it is still ours.
 		if (strstr(err, "AlreadyExists") == NULL) {
@@ -925,34 +1016,31 @@ static bool register_agent(dbus_conn_t *c) {
 		}
 	}
 
+	if (!connection_current(c))
+		return false;
 	w = dbus_call_begin(c, BLUEZ_SERVICE, BLUEZ_ROOT, BLUEZ_AGENT_MANAGER_IFACE, "RequestDefaultAgent", "o");
 	dbus_w_path(w, AGENT_PATH);
-	if (!dbus_call_send(c, CALL_MS, err, sizeof(err))) {
+	if (!stack_call_send(c, CALL_MS, err, sizeof(err))) {
 		fprintf(stderr, "btstack: RequestDefaultAgent refused: %s\n", err[0] ? err : "no reply");
 		return false;
 	}
 
 	fprintf(stderr, "btstack: agent registered at %s\n", AGENT_PATH);
-	return true;
+	return connection_current(c);
 }
 
 bool btstack_register_agent(void) {
-	pthread_mutex_lock(&lock);
-	dbus_conn_t *c = conn;
-	pthread_mutex_unlock(&lock);
+	dbus_conn_t *c = current_connection();
 	return c && register_agent(c);
 }
 
 static const char *const MATCHES[] = {
-	"type='signal',sender='org.bluez',interface='org.freedesktop.DBus.ObjectManager'",
-	"type='signal',sender='org.bluez',interface='org.freedesktop.DBus.Properties',member='PropertiesChanged'",
-	"type='signal',sender='org.bluealsa',interface='org.freedesktop.DBus.ObjectManager'",
-	"type='signal',sender='org.bluealsa',interface='org.freedesktop.DBus.Properties',member='PropertiesChanged'",
+	"type='signal',sender='org.freedesktop.DBus',interface='org.freedesktop.DBus',member='NameOwnerChanged',arg0='org.bluez'", "type='signal',sender='org.freedesktop.DBus',interface='org.freedesktop.DBus',member='NameOwnerChanged',arg0='org.bluealsa'", "type='signal',sender='org.bluez',interface='org.freedesktop.DBus.ObjectManager'", "type='signal',sender='org.bluez',interface='org.freedesktop.DBus.Properties',member='PropertiesChanged'", "type='signal',sender='org.bluealsa',interface='org.freedesktop.DBus.ObjectManager'", "type='signal',sender='org.bluealsa',interface='org.freedesktop.DBus.Properties',member='PropertiesChanged'",
 };
 
 bool btstack_open(void) {
 	pthread_mutex_lock(&lock);
-	bool already = conn && dbus_alive(conn);
+	bool already = conn && !service_changed && dbus_alive(conn);
 	pthread_mutex_unlock(&lock);
 	if (already) {
 		return true;
@@ -963,16 +1051,25 @@ bool btstack_open(void) {
 	if (!c) {
 		return false;
 	}
-	dbus_set_signal_handler(c, on_signal, NULL);
-	for (size_t i = 0; i < sizeof(MATCHES) / sizeof(MATCHES[0]); i++) {
-		// A rule naming a service that is not on the bus yet is still accepted:
-		// dbus-daemon matches on the name, not on who owns it today.
-		dbus_add_match(c, MATCHES[i]);
-	}
-
+	// Publish before subscriptions: a loss during AddMatch must remain sticky.
 	pthread_mutex_lock(&lock);
 	conn = c;
+	service_changed = false;
+	bluez_changed = false;
 	pthread_mutex_unlock(&lock);
+	dbus_set_signal_handler(c, on_signal, NULL);
+	for (size_t i = 0; i < sizeof(MATCHES) / sizeof(MATCHES[0]); i++) {
+		if (!dbus_add_match(c, MATCHES[i]) || !connection_current(c)) {
+			pthread_mutex_lock(&lock);
+			if (conn == c) {
+				service_changed = true;
+				invalidate_caches_locked();
+			}
+			pthread_mutex_unlock(&lock);
+			return false;
+		}
+	}
+
 	return true;
 }
 
@@ -980,20 +1077,34 @@ void btstack_close(void) {
 	pthread_mutex_lock(&lock);
 	dbus_conn_t *c = conn;
 	conn = NULL;
-	pcm_count = 0;
-	if (headset_battery_count) {
-		headset_battery_count = 0;
-		headset_battery_serial++;
-	}
+	if (!service_changed || (c && !dbus_alive(c)))
+		bluez_changed = true; // An unclassified socket loss has no valid ACL snapshot.
+	service_changed = true;
+	invalidate_caches_locked();
 	pthread_mutex_unlock(&lock);
-	if (c) {
-		dbus_disconnect(c);
-	}
+	if (c)
+		dbus_disconnect(c); // Worker only; joins the old reader before reuse.
+	media_player_path[0] = '\0';
+	media_player_address[0] = '\0';
+}
+
+bool btstack_rebind_needed(void) {
+	pthread_mutex_lock(&lock);
+	bool needed = conn && service_changed;
+	pthread_mutex_unlock(&lock);
+	return needed;
+}
+
+bool btstack_bluez_rebind_needed(void) {
+	pthread_mutex_lock(&lock);
+	bool changed = bluez_changed || (conn && !dbus_alive(conn));
+	pthread_mutex_unlock(&lock);
+	return changed;
 }
 
 bool btstack_alive(void) {
 	pthread_mutex_lock(&lock);
-	bool live = conn && dbus_alive(conn);
+	bool live = conn && !service_changed && dbus_alive(conn);
 	pthread_mutex_unlock(&lock);
 	return live;
 }
@@ -1009,9 +1120,7 @@ void btstack_set_change_cb(void (*cb)(void)) {
 // ---------------------------------------------------------------------------
 
 static bool set_bool_property(const char *path, const char *interface, const char *name, bool value) {
-	pthread_mutex_lock(&lock);
-	dbus_conn_t *c = conn;
-	pthread_mutex_unlock(&lock);
+	dbus_conn_t *c = current_connection();
 	if (!c) {
 		return false;
 	}
@@ -1020,7 +1129,7 @@ static bool set_bool_property(const char *path, const char *interface, const cha
 	dbus_w_string(w, name);
 	dbus_w_variant_bool(w, value);
 	char err[DBUS_NAME_MAX];
-	bool ok = dbus_call_send(c, CALL_MS, err, sizeof(err));
+	bool ok = stack_call_send(c, CALL_MS, err, sizeof(err));
 	if (!ok) {
 		fprintf(stderr, "btstack: %s = %s refused: %s\n", name, value ? "true" : "false", err[0] ? err : "no reply");
 	}
@@ -1028,9 +1137,7 @@ static bool set_bool_property(const char *path, const char *interface, const cha
 }
 
 static bool set_u32_property(const char *path, const char *interface, const char *name, uint32_t value) {
-	pthread_mutex_lock(&lock);
-	dbus_conn_t *c = conn;
-	pthread_mutex_unlock(&lock);
+	dbus_conn_t *c = current_connection();
 	if (!c) {
 		return false;
 	}
@@ -1039,7 +1146,7 @@ static bool set_u32_property(const char *path, const char *interface, const char
 	dbus_w_string(w, name);
 	dbus_w_variant_u32(w, value);
 	char err[DBUS_NAME_MAX];
-	bool ok = dbus_call_send(c, CALL_MS, err, sizeof(err));
+	bool ok = stack_call_send(c, CALL_MS, err, sizeof(err));
 	if (!ok) {
 		fprintf(stderr, "btstack: %s = %u refused: %s\n", name, value, err[0] ? err : "no reply");
 	}
@@ -1047,16 +1154,14 @@ static bool set_u32_property(const char *path, const char *interface, const char
 }
 
 static bool get_bool_property(const char *path, const char *interface, const char *name, bool *out) {
-	pthread_mutex_lock(&lock);
-	dbus_conn_t *c = conn;
-	pthread_mutex_unlock(&lock);
+	dbus_conn_t *c = current_connection();
 	if (!c) {
 		return false;
 	}
 	dbus_writer_t *w = dbus_call_begin(c, BLUEZ_SERVICE, path, PROPS_IFACE, "Get", "ss");
 	dbus_w_string(w, interface);
 	dbus_w_string(w, name);
-	if (!dbus_call_send(c, CALL_MS, NULL, 0)) {
+	if (!stack_call_send(c, CALL_MS, NULL, 0)) {
 		return false;
 	}
 	dbus_reader_t r;
@@ -1065,7 +1170,7 @@ static bool get_bool_property(const char *path, const char *interface, const cha
 	if (!dbus_r_signature(&r, sig, sizeof(sig)) || strcmp(sig, "b") != 0) {
 		return false;
 	}
-	return dbus_r_bool(&r, out);
+	return dbus_r_bool(&r, out) && connection_current(c);
 }
 
 bool btstack_adapter_ready(void) {
@@ -1101,9 +1206,7 @@ bool btstack_set_discoverable_timeout(unsigned seconds) { return set_u32_propert
 bool btstack_set_pairable(bool on) { return set_bool_property(BLUEZ_ADAPTER_PATH, BLUEZ_ADAPTER_IFACE, "Pairable", on); }
 
 bool btstack_set_alias(const char *alias) {
-	pthread_mutex_lock(&lock);
-	dbus_conn_t *c = conn;
-	pthread_mutex_unlock(&lock);
+	dbus_conn_t *c = current_connection();
 	if (!c || !alias || !alias[0]) {
 		return false;
 	}
@@ -1111,19 +1214,17 @@ bool btstack_set_alias(const char *alias) {
 	dbus_w_string(w, BLUEZ_ADAPTER_IFACE);
 	dbus_w_string(w, "Alias");
 	dbus_w_variant_string(w, alias);
-	return dbus_call_send(c, CALL_MS, NULL, 0);
+	return stack_call_send(c, CALL_MS, NULL, 0);
 }
 
 bool btstack_discovery(bool on) {
-	pthread_mutex_lock(&lock);
-	dbus_conn_t *c = conn;
-	pthread_mutex_unlock(&lock);
+	dbus_conn_t *c = current_connection();
 	if (!c) {
 		return false;
 	}
 	dbus_call_begin(c, BLUEZ_SERVICE, BLUEZ_ADAPTER_PATH, BLUEZ_ADAPTER_IFACE, on ? "StartDiscovery" : "StopDiscovery", "");
 	char err[DBUS_NAME_MAX];
-	if (dbus_call_send(c, CALL_MS, err, sizeof(err))) {
+	if (stack_call_send(c, CALL_MS, err, sizeof(err))) {
 		return true;
 	}
 	// Already discovering, or already stopped. Both mean the caller has what it
@@ -1142,16 +1243,14 @@ bool btstack_discovery(bool on) {
 // ---------------------------------------------------------------------------
 
 int btstack_devices(btstack_device_t *out, int max) {
-	pthread_mutex_lock(&lock);
-	dbus_conn_t *c = conn;
-	pthread_mutex_unlock(&lock);
+	dbus_conn_t *c = current_connection();
 	if (!c || !out || max <= 0) {
 		return 0;
 	}
 
 	dbus_call_begin(c, BLUEZ_SERVICE, "/", OBJMAN_IFACE, "GetManagedObjects", "");
 	char err[DBUS_NAME_MAX];
-	if (!dbus_call_send(c, CALL_MS, err, sizeof(err))) {
+	if (!stack_call_send(c, CALL_MS, err, sizeof(err))) {
 		fprintf(stderr, "btstack: GetManagedObjects -> %s\n", err[0] ? err : "no reply");
 		return 0;
 	}
@@ -1211,7 +1310,7 @@ int btstack_devices(btstack_device_t *out, int max) {
 	if (r.bad) {
 		fprintf(stderr, "btstack: the GetManagedObjects reply stopped parsing after %d devices\n", count);
 	}
-	return count;
+	return connection_current(c) ? count : 0;
 }
 
 static bool device_call_why(const char *address, const char *member, int timeout_ms, char *err_out, size_t err_size) {
@@ -1239,16 +1338,14 @@ bool btstack_connect_a2dp(const char *address, int timeout_ms) {
 	if (!device_path(address, path, sizeof(path))) {
 		return false;
 	}
-	pthread_mutex_lock(&lock);
-	dbus_conn_t *c = conn;
-	pthread_mutex_unlock(&lock);
+	dbus_conn_t *c = current_connection();
 	if (!c) {
 		return false;
 	}
 	dbus_writer_t *w = dbus_call_begin(c, BLUEZ_SERVICE, path, BLUEZ_DEVICE_IFACE, "ConnectProfile", "s");
 	dbus_w_string(w, UUID_A2DP_SINK);
 	char err[DBUS_NAME_MAX];
-	bool ok = dbus_call_send(c, timeout_ms, err, sizeof(err));
+	bool ok = stack_call_send(c, timeout_ms, err, sizeof(err));
 	if (!ok) {
 		fprintf(stderr, "btstack: ConnectProfile(A2DP sink) on %s -> %s\n", address, err[0] ? err : "no reply");
 	}
@@ -1260,16 +1357,14 @@ bool btstack_connect_a2dp_source(const char *address, int timeout_ms) {
 	if (!device_path(address, path, sizeof(path))) {
 		return false;
 	}
-	pthread_mutex_lock(&lock);
-	dbus_conn_t *c = conn;
-	pthread_mutex_unlock(&lock);
+	dbus_conn_t *c = current_connection();
 	if (!c) {
 		return false;
 	}
 	dbus_writer_t *w = dbus_call_begin(c, BLUEZ_SERVICE, path, BLUEZ_DEVICE_IFACE, "ConnectProfile", "s");
 	dbus_w_string(w, UUID_A2DP_SOURCE);
 	char err[DBUS_NAME_MAX];
-	bool ok = dbus_call_send(c, timeout_ms, err, sizeof(err));
+	bool ok = stack_call_send(c, timeout_ms, err, sizeof(err));
 	if (!ok) {
 		fprintf(stderr, "btstack: ConnectProfile(A2DP source) on %s -> %s\n", address, err[0] ? err : "no reply");
 	}
@@ -1285,9 +1380,7 @@ bool btstack_trust(const char *address, bool on) {
 }
 
 bool btstack_set_device_alias(const char *address, const char *alias) {
-	pthread_mutex_lock(&lock);
-	dbus_conn_t *c = conn;
-	pthread_mutex_unlock(&lock);
+	dbus_conn_t *c = current_connection();
 	char path[OBJECT_PATH_MAX];
 	if (!c || !alias || !device_path(address, path, sizeof(path))) {
 		return false;
@@ -1297,7 +1390,7 @@ bool btstack_set_device_alias(const char *address, const char *alias) {
 	dbus_w_string(w, "Alias");
 	dbus_w_variant_string(w, alias);
 	char err[DBUS_NAME_MAX];
-	if (dbus_call_send(c, CALL_MS, err, sizeof(err))) {
+	if (stack_call_send(c, CALL_MS, err, sizeof(err))) {
 		return true;
 	}
 	fprintf(stderr, "btstack: alias of %s -> %s\n", address, err[0] ? err : "no reply");
@@ -1305,9 +1398,7 @@ bool btstack_set_device_alias(const char *address, const char *alias) {
 }
 
 bool btstack_remove(const char *address) {
-	pthread_mutex_lock(&lock);
-	dbus_conn_t *c = conn;
-	pthread_mutex_unlock(&lock);
+	dbus_conn_t *c = current_connection();
 	char path[OBJECT_PATH_MAX];
 	if (!c || !device_path(address, path, sizeof(path))) {
 		return false;
@@ -1315,7 +1406,7 @@ bool btstack_remove(const char *address) {
 	dbus_writer_t *w = dbus_call_begin(c, BLUEZ_SERVICE, BLUEZ_ADAPTER_PATH, BLUEZ_ADAPTER_IFACE, "RemoveDevice", "o");
 	dbus_w_path(w, path);
 	char err[DBUS_NAME_MAX];
-	bool ok = dbus_call_send(c, CALL_MS, err, sizeof(err));
+	bool ok = stack_call_send(c, CALL_MS, err, sizeof(err));
 	if (!ok) {
 		// A device bluez does not have is a device that has been forgotten,
 		// which is what the caller wanted.
@@ -1332,18 +1423,17 @@ bool btstack_remove(const char *address) {
 // ---------------------------------------------------------------------------
 
 void btstack_refresh_audio(void) {
-	pthread_mutex_lock(&lock);
-	dbus_conn_t *c = conn;
-	pthread_mutex_unlock(&lock);
+	dbus_conn_t *c = current_connection();
 	if (!c) {
 		return;
 	}
 
 	dbus_call_begin(c, BALSA_SERVICE, BALSA_MANAGER_PATH, OBJMAN_IFACE, "GetManagedObjects", "");
-	if (!dbus_call_send(c, CALL_MS, NULL, 0)) {
+	if (!stack_call_send(c, CALL_MS, NULL, 0)) {
 		// bluealsa not on the bus yet: no PCM can exist, which is exactly what
 		// an empty list says.
-		pthread_mutex_lock(&lock);
+		if (!lock_current(c))
+			return;
 		pcm_count = 0;
 		rx_count = 0;
 		pthread_mutex_unlock(&lock);
@@ -1374,7 +1464,8 @@ void btstack_refresh_audio(void) {
 		}
 	}
 
-	pthread_mutex_lock(&lock);
+	if (!lock_current(c))
+		return;
 	// %.*s: the compiler cannot see that each row of found[] is terminated,
 	// and warns that an address could run on into the next one.
 	pcm_count = count;
@@ -1392,9 +1483,7 @@ int btstack_codecs_dir(const char *address, bool receiving, char out[][BT_CODEC_
 	if (selected && selected_size) {
 		selected[0] = '\0';
 	}
-	pthread_mutex_lock(&lock);
-	dbus_conn_t *c = conn;
-	pthread_mutex_unlock(&lock);
+	dbus_conn_t *c = current_connection();
 
 	char path[OBJECT_PATH_MAX];
 	if (!c || !pcm_path_dir(address, receiving, path, sizeof(path))) {
@@ -1408,7 +1497,7 @@ int btstack_codecs_dir(const char *address, bool receiving, char out[][BT_CODEC_
 		dbus_writer_t *w = dbus_call_begin(c, BALSA_SERVICE, path, PROPS_IFACE, "Get", "ss");
 		dbus_w_string(w, BALSA_PCM_IFACE);
 		dbus_w_string(w, "Codec");
-		if (dbus_call_send(c, CALL_MS, NULL, 0)) {
+		if (stack_call_send(c, CALL_MS, NULL, 0)) {
 			dbus_reader_t r;
 			dbus_reply_reader(c, &r);
 			char sig[16];
@@ -1424,7 +1513,9 @@ int btstack_codecs_dir(const char *address, bool receiving, char out[][BT_CODEC_
 
 	dbus_call_begin(c, BALSA_SERVICE, path, BALSA_PCM_IFACE, "GetCodecs", "");
 	char err[DBUS_NAME_MAX];
-	if (!dbus_call_send(c, CALL_MS, err, sizeof(err))) {
+	if (!stack_call_send(c, CALL_MS, err, sizeof(err))) {
+		if (!connection_current(c) && selected && selected_size)
+			selected[0] = 0;
 		fprintf(stderr, "btstack: GetCodecs on %s -> %s\n", address, err[0] ? err : "no reply");
 		return 0;
 	}
@@ -1446,6 +1537,11 @@ int btstack_codecs_dir(const char *address, bool receiving, char out[][BT_CODEC_
 				snprintf(out[count++], BT_CODEC_NAME_MAX, "%s", name);
 			}
 		}
+	}
+	if (!connection_current(c)) {
+		if (selected && selected_size)
+			selected[0] = 0;
+		return 0;
 	}
 	return count;
 }
@@ -1474,9 +1570,7 @@ bool btstack_audio_info(const char *address, char *out, size_t size) {
 	if (out && size) {
 		out[0] = '\0';
 	}
-	pthread_mutex_lock(&lock);
-	dbus_conn_t *c = conn;
-	pthread_mutex_unlock(&lock);
+	dbus_conn_t *c = current_connection();
 
 	char path[OBJECT_PATH_MAX];
 	if (!c || !out || !size || !pcm_path(address, path, sizeof(path))) {
@@ -1485,7 +1579,7 @@ bool btstack_audio_info(const char *address, char *out, size_t size) {
 
 	dbus_writer_t *w = dbus_call_begin(c, BALSA_SERVICE, path, PROPS_IFACE, "GetAll", "s");
 	dbus_w_string(w, BALSA_PCM_IFACE);
-	if (!dbus_call_send(c, CALL_MS, NULL, 0)) {
+	if (!stack_call_send(c, CALL_MS, NULL, 0)) {
 		return false;
 	}
 
@@ -1520,7 +1614,7 @@ bool btstack_audio_info(const char *address, char *out, size_t size) {
 	}
 
 	snprintf(out, size, "%s, %u Hz, %u ch, %s", codec, (unsigned)rate, (unsigned)channels, format_name(format));
-	return !r.bad;
+	return !r.bad && connection_current(c);
 }
 
 // The low byte of the format word is the width; the two the daemon spells with
@@ -1536,9 +1630,7 @@ bool btstack_stream_info(const char *address, bool receiving, btstack_stream_t *
 	}
 	memset(out, 0, sizeof(*out));
 
-	pthread_mutex_lock(&lock);
-	dbus_conn_t *c = conn;
-	pthread_mutex_unlock(&lock);
+	dbus_conn_t *c = current_connection();
 
 	char path[OBJECT_PATH_MAX];
 	if (!c || !pcm_path_dir(address, receiving, path, sizeof(path))) {
@@ -1547,7 +1639,7 @@ bool btstack_stream_info(const char *address, bool receiving, btstack_stream_t *
 
 	dbus_writer_t *w = dbus_call_begin(c, BALSA_SERVICE, path, PROPS_IFACE, "GetAll", "s");
 	dbus_w_string(w, BALSA_PCM_IFACE);
-	if (!dbus_call_send(c, CALL_MS, NULL, 0)) {
+	if (!stack_call_send(c, CALL_MS, NULL, 0)) {
 		return false;
 	}
 
@@ -1583,7 +1675,7 @@ bool btstack_stream_info(const char *address, bool receiving, btstack_stream_t *
 	out->rate = (unsigned)rate;
 	out->channels = (unsigned)channels;
 	out->bits = format_bits(format);
-	return !r.bad;
+	return !r.bad && connection_current(c);
 }
 
 // ---------------------------------------------------------------------------
@@ -1601,7 +1693,7 @@ static bool remote_player_path(dbus_conn_t *c, const char *address, char *out, s
 	size_t prefix_len = strlen(prefix);
 
 	dbus_call_begin(c, BLUEZ_SERVICE, "/", OBJMAN_IFACE, "GetManagedObjects", "");
-	if (!dbus_call_send(c, CALL_MS, NULL, 0)) {
+	if (!stack_call_send(c, CALL_MS, NULL, 0)) {
 		return false;
 	}
 
@@ -1636,7 +1728,7 @@ static bool remote_player_path(dbus_conn_t *c, const char *address, char *out, s
 
 		if (is_player && strncmp(path, prefix, prefix_len) == 0 && path[prefix_len] == '/') {
 			snprintf(out, size, "%s", path);
-			return true;
+			return connection_current(c);
 		}
 	}
 	return false;
@@ -1674,26 +1766,24 @@ bool btstack_media_status(char *out, size_t size) {
 // property of each -- and this is asked once a second while a device is
 // streaming. The path is only worth what the Get on it answers, so a Get that
 // fails throws it away and the next poll looks it up again.
-static char media_player_path[OBJECT_PATH_MAX];
-static char media_player_address[BT_ADDR_MAX];
 
 static bool player_property(dbus_conn_t *c, const char *path, const char *name, const char *expect, dbus_reader_t *out) {
+	if (!connection_current(c))
+		return false;
 	dbus_writer_t *w = dbus_call_begin(c, BLUEZ_SERVICE, path, PROPS_IFACE, "Get", "ss");
 	dbus_w_string(w, BLUEZ_MEDIA_PLAYER_IFACE);
 	dbus_w_string(w, name);
-	if (!dbus_call_send(c, CALL_MS, NULL, 0)) {
+	if (!stack_call_send(c, CALL_MS, NULL, 0)) {
 		return false;
 	}
 
 	dbus_reply_reader(c, out);
 	char sig[16];
-	return dbus_r_signature(out, sig, sizeof(sig)) && strcmp(sig, expect) == 0;
+	return dbus_r_signature(out, sig, sizeof(sig)) && strcmp(sig, expect) == 0 && connection_current(c);
 }
 
 void btstack_refresh_media_status(const char *address) {
-	pthread_mutex_lock(&lock);
-	dbus_conn_t *c = conn;
-	pthread_mutex_unlock(&lock);
+	dbus_conn_t *c = current_connection();
 	if (!c || !address || !address[0]) {
 		return;
 	}
@@ -1739,11 +1829,12 @@ void btstack_refresh_media_status(const char *address) {
 	// a moment earlier. What empties the caches is the sender going away, which
 	// btstack_forget_media() is for.
 	if (answered_track) {
-		store_track(&track);
+		store_track_current(c, &track);
 	}
 
 	if (answered_status) {
-		pthread_mutex_lock(&lock);
+		if (!lock_current(c))
+			return;
 		snprintf(media_status, sizeof(media_status), "%s", status);
 		pthread_mutex_unlock(&lock);
 	}
@@ -1769,9 +1860,7 @@ void btstack_note_media_status(const char *status) {
 }
 
 bool btstack_media_command(const char *address, const char *member) {
-	pthread_mutex_lock(&lock);
-	dbus_conn_t *c = conn;
-	pthread_mutex_unlock(&lock);
+	dbus_conn_t *c = current_connection();
 	if (!c || !member) {
 		return false;
 	}
@@ -1807,9 +1896,7 @@ bool btstack_a2dp_streams(const char *address, char *out, size_t size) {
 	if (out && size) {
 		out[0] = '\0';
 	}
-	pthread_mutex_lock(&lock);
-	dbus_conn_t *c = conn;
-	pthread_mutex_unlock(&lock);
+	dbus_conn_t *c = current_connection();
 
 	char dev[OBJECT_PATH_MAX];
 	if (!c || !out || !size || !device_path(address, dev, sizeof(dev))) {
@@ -1818,7 +1905,7 @@ bool btstack_a2dp_streams(const char *address, char *out, size_t size) {
 	size_t dev_len = strlen(dev);
 
 	dbus_call_begin(c, BLUEZ_SERVICE, "/", OBJMAN_IFACE, "GetManagedObjects", "");
-	if (!dbus_call_send(c, CALL_MS, NULL, 0)) {
+	if (!stack_call_send(c, CALL_MS, NULL, 0)) {
 		return false;
 	}
 
@@ -1895,9 +1982,7 @@ bool btstack_bluealsa_version(char *out, size_t size) {
 	if (out && size) {
 		out[0] = '\0';
 	}
-	pthread_mutex_lock(&lock);
-	dbus_conn_t *c = conn;
-	pthread_mutex_unlock(&lock);
+	dbus_conn_t *c = current_connection();
 	if (!c || !out || !size) {
 		return false;
 	}
@@ -1905,7 +1990,7 @@ bool btstack_bluealsa_version(char *out, size_t size) {
 	dbus_writer_t *w = dbus_call_begin(c, BALSA_SERVICE, BALSA_MANAGER_PATH, PROPS_IFACE, "Get", "ss");
 	dbus_w_string(w, BALSA_MANAGER_IFACE);
 	dbus_w_string(w, "Version");
-	if (!dbus_call_send(c, CALL_MS, NULL, 0)) {
+	if (!stack_call_send(c, CALL_MS, NULL, 0)) {
 		return false;
 	}
 
@@ -1922,13 +2007,11 @@ bool btstack_bluealsa_version(char *out, size_t size) {
 	// bluealsa spells it "v4.3.1"; hand back the number so the caller decides
 	// how to print it.
 	snprintf(out, size, "%s", raw[0] == 'v' ? raw + 1 : raw);
-	return out[0] != '\0';
+	return out[0] != '\0' && connection_current(c);
 }
 
 void btstack_read_headset_battery(const char *address) {
-	pthread_mutex_lock(&lock);
-	dbus_conn_t *c = conn;
-	pthread_mutex_unlock(&lock);
+	dbus_conn_t *c = current_connection();
 	char path[OBJECT_PATH_MAX];
 	if (!c || !address || !pcm_path_dir(address, false, path, sizeof(path))) {
 		return;
@@ -1945,7 +2028,7 @@ void btstack_read_headset_battery(const char *address) {
 	dbus_w_string(w, BALSA_RFCOMM_IFACE);
 	dbus_w_string(w, "Battery");
 	char err[DBUS_NAME_MAX];
-	if (!dbus_call_send(c, CALL_MS, err, sizeof(err))) {
+	if (!stack_call_send(c, CALL_MS, err, sizeof(err))) {
 		// No hands-free link to this headset (yet, or at all: a speaker
 		// without HFP). The signals fill the level in if one comes up.
 		return;
@@ -1955,7 +2038,8 @@ void btstack_read_headset_battery(const char *address) {
 	char sig[16];
 	int percent = -1;
 	if (dbus_r_signature(&r, sig, sizeof(sig)) && read_battery_value(&r, sig, &percent)) {
-		pthread_mutex_lock(&lock);
+		if (!lock_current(c))
+			return;
 		headset_battery_note(address, percent);
 		pthread_mutex_unlock(&lock);
 		fprintf(stderr, "btstack: %s battery %d%% (read)\n", address, percent);
@@ -1963,9 +2047,7 @@ void btstack_read_headset_battery(const char *address) {
 }
 
 bool btstack_select_codec_dir(const char *address, bool receiving, const char *codec) {
-	pthread_mutex_lock(&lock);
-	dbus_conn_t *c = conn;
-	pthread_mutex_unlock(&lock);
+	dbus_conn_t *c = current_connection();
 
 	char path[OBJECT_PATH_MAX];
 	if (!c || !codec || !codec[0] || !pcm_path_dir(address, receiving, path, sizeof(path))) {
@@ -1981,15 +2063,13 @@ bool btstack_select_codec_dir(const char *address, bool receiving, const char *c
 	char err[DBUS_NAME_MAX];
 	// Renegotiating the codec tears the stream down and builds it again, which
 	// the headphones take a moment to follow.
-	bool ok = dbus_call_send(c, 15000, err, sizeof(err));
+	bool ok = stack_call_send(c, 15000, err, sizeof(err));
 	fprintf(stderr, "btstack: codec %s on %s (%s) -> %s\n", codec, address, receiving ? "sink" : "source", ok ? "ok" : (err[0] ? err : "no reply"));
 	return ok;
 }
 
 int btstack_codec_rates(const char *address, const char *codec, unsigned *out, int max) {
-	pthread_mutex_lock(&lock);
-	dbus_conn_t *c = conn;
-	pthread_mutex_unlock(&lock);
+	dbus_conn_t *c = current_connection();
 
 	char path[OBJECT_PATH_MAX];
 	if (!c || !codec || !codec[0] || !out || max <= 0 || !pcm_path(address, path, sizeof(path))) {
@@ -1998,7 +2078,7 @@ int btstack_codec_rates(const char *address, const char *codec, unsigned *out, i
 
 	dbus_call_begin(c, BALSA_SERVICE, path, BALSA_PCM_IFACE, "GetCodecs", "");
 	char err[DBUS_NAME_MAX];
-	if (!dbus_call_send(c, CALL_MS, err, sizeof(err))) {
+	if (!stack_call_send(c, CALL_MS, err, sizeof(err))) {
 		fprintf(stderr, "btstack: GetCodecs on %s -> %s\n", address, err[0] ? err : "no reply");
 		return 0;
 	}
@@ -2032,35 +2112,33 @@ int btstack_codec_rates(const char *address, const char *codec, unsigned *out, i
 		while (dbus_r_array_more(&r, &props)) {
 			char key[64], sig[16];
 			if (!dbus_r_string(&r, key, sizeof(key)) || !dbus_r_signature(&r, sig, sizeof(sig))) {
-				return count;
+				return connection_current(c) ? count : 0;
 			}
 			if ((strcmp(key, "SupportedSampling") == 0 || strcmp(key, "Rates") == 0) && strcmp(sig, "au") == 0) {
 				dbus_array_iter_t rates;
 				if (!dbus_r_array_begin(&r, "u", &rates)) {
-					return count;
+					return connection_current(c) ? count : 0;
 				}
 				while (dbus_r_array_more(&r, &rates)) {
 					uint32_t rate = 0;
 					if (!dbus_r_u32(&r, &rate)) {
-						return count;
+						return connection_current(c) ? count : 0;
 					}
 					if (rate && count < max) {
 						out[count++] = (unsigned)rate;
 					}
 				}
 			} else if (!dbus_r_skip(&r, sig)) {
-				return count;
+				return connection_current(c) ? count : 0;
 			}
 		}
-		return count;
+		return connection_current(c) ? count : 0;
 	}
 	return 0;
 }
 
 bool btstack_select_codec_rate(const char *address, const char *codec, unsigned rate) {
-	pthread_mutex_lock(&lock);
-	dbus_conn_t *c = conn;
-	pthread_mutex_unlock(&lock);
+	dbus_conn_t *c = current_connection();
 
 	char path[OBJECT_PATH_MAX];
 	if (!c || !codec || !codec[0] || !rate || !pcm_path(address, path, sizeof(path))) {
@@ -2102,7 +2180,7 @@ bool btstack_select_codec_rate(const char *address, const char *codec, unsigned 
 	char err[DBUS_NAME_MAX];
 	// The same teardown and rebuild as any codec change; a little less time
 	// is given than there, because a track is waiting on the answer.
-	bool ok = dbus_call_send(c, 10000, err, sizeof(err));
+	bool ok = stack_call_send(c, 10000, err, sizeof(err));
 	fprintf(stderr, "btstack: codec %s at %u Hz on %s%s -> %s\n", codec, rate, address, blob_size ? " (with an LDAC configuration)" : "", ok ? "ok" : (err[0] ? err : "no reply"));
 	return ok;
 }
@@ -2119,26 +2197,22 @@ static bool pcm_volume_read(dbus_conn_t *c, const char *path, bapcm_volume_t *ou
 	dbus_w_string(w, BALSA_PCM_IFACE);
 	dbus_w_string(w, "Volume");
 	char err[DBUS_NAME_MAX];
-	if (!dbus_call_send(c, CALL_MS, err, sizeof(err)))
+	if (!stack_call_send(c, CALL_MS, err, sizeof(err)))
 		return false;
 	dbus_reader_t r;
 	dbus_reply_reader(c, &r);
 	char sig[16];
-	return dbus_r_signature(&r, sig, sizeof(sig)) && bapcm_volume_read(&r, sig, out);
+	return dbus_r_signature(&r, sig, sizeof(sig)) && bapcm_volume_read(&r, sig, out) && connection_current(c);
 }
 
 bool btstack_pcm_volume_get(const char *address, bool receiving, bapcm_volume_t *out) {
-	pthread_mutex_lock(&lock);
-	dbus_conn_t *c = conn;
-	pthread_mutex_unlock(&lock);
+	dbus_conn_t *c = current_connection();
 	char path[OBJECT_PATH_MAX];
 	return c && out && pcm_path_dir(address, receiving, path, sizeof(path)) && pcm_volume_read(c, path, out);
 }
 
 bool btstack_pcm_volume_set(const char *address, bool receiving, const bapcm_volume_t *volume) {
-	pthread_mutex_lock(&lock);
-	dbus_conn_t *c = conn;
-	pthread_mutex_unlock(&lock);
+	dbus_conn_t *c = current_connection();
 	char path[OBJECT_PATH_MAX];
 	bapcm_volume_t current;
 	if (!c || !volume || !pcm_path_dir(address, receiving, path, sizeof(path)) || !pcm_volume_read(c, path, &current))
@@ -2154,7 +2228,7 @@ bool btstack_pcm_volume_set(const char *address, bool receiving, const bapcm_vol
 	dbus_w_string(w, "Volume");
 	bapcm_volume_write(w, &restored);
 	char err[DBUS_NAME_MAX];
-	bool ok = dbus_call_send(c, CALL_MS, err, sizeof(err));
+	bool ok = stack_call_send(c, CALL_MS, err, sizeof(err));
 	if (!ok)
 		fprintf(stderr, "btstack: volume not restored on %s: %s\n", path, err[0] ? err : "no reply");
 	return ok;

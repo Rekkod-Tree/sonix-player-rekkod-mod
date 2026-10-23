@@ -238,7 +238,10 @@ static void discover_failures_and_reconnect(void) {
 	btstack_device_t devices[1];
 	before = bluez_manager_calls;
 	assert(btstack_devices(devices, 1) == 0 && bluez_manager_calls == before + 1);
-	assert(!strcmp(MATCHES[2], "type='signal',sender='org.bluealsa',interface='org.freedesktop.DBus.ObjectManager'"));
+	bool have_bluealsa_match = false;
+	for (size_t i = 0; i < sizeof(MATCHES) / sizeof(MATCHES[0]); i++)
+		have_bluealsa_match |= !strcmp(MATCHES[i], "type='signal',sender='org.bluealsa',interface='org.freedesktop.DBus.ObjectManager'");
+	assert(have_bluealsa_match);
 	puts("PASS unavailable/empty/malformed and later discovery; BlueZ root and signal match unchanged");
 }
 
