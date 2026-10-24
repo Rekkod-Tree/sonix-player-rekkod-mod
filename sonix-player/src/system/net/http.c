@@ -125,6 +125,9 @@ void http_forget_outcome(void) {
 
 // The ceiling on this thread's API timeouts; see http_set_thread_timeout_cap().
 static __thread int timeout_cap;
+static __thread size_t body_cap;
+
+void http_set_thread_body_cap(size_t bytes) { body_cap = bytes; }
 
 void http_set_thread_timeout_cap(int secs) {
 	timeout_cap = secs > 0 ? secs : 0;
@@ -555,9 +558,13 @@ static bool body_append(body_t *b, const char *data, size_t len) {
 // connection (HTTP/1.0, or Connection: close with no length).
 static void read_until_close(conn_t *c, body_t *b) {
 	char buf[8192];
-	for (;;) {
+	while (b->used < b->limit) {
 		int got = conn_read(c, buf, sizeof(buf));
 		if (got <= 0) {
+			if (got < 0) {
+				b->failed = true;
+				outcome_fail(errno == EAGAIN || errno == EWOULDBLOCK ? HTTP_FAIL_TIMEOUT : HTTP_FAIL_BROKEN);
+			}
 			return;
 		}
 		if (!body_append(b, buf, (size_t)got)) {
@@ -930,6 +937,8 @@ bool http_request(const char *url, const http_req_t *req, char **out, size_t *ou
 	if (timeout_cap > 0 && timeout_secs > timeout_cap) {
 		timeout_secs = timeout_cap;
 	}
+	if (body_cap && limit > body_cap)
+		limit = body_cap;
 
 	clear_last_error();
 	http_forget_outcome();

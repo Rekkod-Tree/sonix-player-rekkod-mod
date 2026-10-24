@@ -25,15 +25,24 @@ int tls_write(tls_conn_t *c, const void *p, int n) {
 void tls_free(tls_conn_t *c) { (void)c; }
 static const char *reply;
 static int listener;
+static bool close_framed, reset_peer, stall_peer;
 static void *serve(void *unused) {
 	(void)unused;
 	int fd = accept(listener, NULL, NULL);
 	assert(fd >= 0);
 	char request[4096];
 	assert(recv(fd, request, sizeof(request), 0) > 0);
-	const char *headers = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n";
+	const char *headers = close_framed ? "HTTP/1.0 200 OK\r\n\r\n" : "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n";
 	assert(send(fd, headers, strlen(headers), MSG_NOSIGNAL) == (ssize_t)strlen(headers));
 	send(fd, reply, strlen(reply), MSG_NOSIGNAL);
+	if (stall_peer)
+		usleep(2500000);
+	if (reset_peer) {
+		// Let the client consume the prefix before simulating a broken peer.
+		usleep(20000);
+		struct linger reset = {.l_onoff = 1, .l_linger = 0};
+		assert(!setsockopt(fd, SOL_SOCKET, SO_LINGER, &reset, sizeof(reset)));
+	}
 	close(fd);
 	return NULL;
 }
@@ -52,7 +61,10 @@ static void check(const char *chunks, size_t limit, bool expected, const char *t
 	snprintf(url, sizeof(url), "http://127.0.0.1:%u/test", ntohs(addr.sin_port));
 	char *body = NULL;
 	size_t size = 0;
-	assert(http_get(url, &body, &size, limit, 2) == expected);
+	bool actual = http_get(url, &body, &size, limit, 2);
+	if (actual != expected)
+		fprintf(stderr, "close=%d reset=%d limit=%zu expected=%d actual=%d\n", close_framed, reset_peer, limit, expected, actual);
+	assert(actual == expected);
 	if (expected)
 		assert(body && size == strlen(text) && !strcmp(body, text));
 	else
@@ -68,5 +80,21 @@ int main(void) {
 	for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++)
 		check(bad[i], 4096, false, NULL);
 	check("10\r\nGOODprefix", 4, true, "GOOD");
-	puts("PASS HTTP chunk framing, extensions, trailers, truncation and bounded prefix");
+	http_set_thread_body_cap(4);
+	check("10\r\nGOODprefix", 4096, true, "GOOD");
+	http_set_thread_body_cap(0);
+	check("8\r\nGOODtext\r\n0\r\n\r\n", 4096, true, "GOODtext");
+	close_framed = true;
+	check("GOODtext", 4096, true, "GOODtext");
+	reset_peer = true;
+	check("GOODtext", 4, true, "GOOD");
+	check("partial-response", 4096, false, NULL);
+	assert(outcome.fail == HTTP_FAIL_BROKEN);
+	reset_peer = false;
+	stall_peer = true;
+	check("partial-response", 4096, false, NULL);
+	assert(outcome.fail == HTTP_FAIL_TIMEOUT);
+	stall_peer = false;
+	check("GOODtext", 4096, true, "GOODtext");
+	puts("PASS HTTP chunk/close framing, clean EOF, peer reset, timeout and bounded prefix");
 }

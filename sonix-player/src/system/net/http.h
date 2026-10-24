@@ -267,6 +267,10 @@ void http_forget_outcome(void);
 // are not affected.
 void http_set_thread_timeout_cap(int secs);
 
+// Optional response-body ceiling for this thread's API requests (0 disables).
+// Useful for concurrent small previews. Does not affect streaming downloads.
+void http_set_thread_body_cap(size_t bytes);
+
 // Changes the receive timeout of an open stream. A download opens with a
 // generous timeout -- a CDN can take a while to start sending a big file --
 // and then reads with a shorter one, so that a connection that has died
