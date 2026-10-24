@@ -102,6 +102,7 @@ static const char *const SCHEMA[] = {
 	// the entry with it. `played_at` is 0 when the clock was not set.
 	"CREATE TABLE IF NOT EXISTS PLAY_HISTORY(id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT NOT NULL, name TEXT,"
 	" artist TEXT, played_at INT)",
+	"CREATE TABLE IF NOT EXISTS PLAY_HISTORY_IMPORT(id INTEGER PRIMARY KEY CHECK(id=1))",
 
 	// Also local: where playback was left (the "Ricorda traccia" option). One
 	// row only; id is always 0.
@@ -1517,6 +1518,56 @@ static void album_keys_fill(void) {
 // up by library_history_add(). -1 until it has been read.
 static long long history_newest = -1;
 
+// Alpha10's Recent page read the latest completed play per indexed path.
+// Preserve that bounded old view when there is no full history yet. The marker
+// and import commit together, so retrying a failed open cannot duplicate rows
+// or repopulate history that was deliberately cleared after this upgrade.
+static bool history_import_legacy(void) {
+	if (!db) {
+		return false;
+	}
+	sqlite3_stmt *stmt = NULL;
+	if (sqlite3_prepare_v2(db, "SELECT id FROM PLAY_HISTORY_IMPORT WHERE id=1", -1, &stmt, NULL) != SQLITE_OK) {
+		return false;
+	}
+	int rc = sqlite3_step(stmt);
+	int finalized = sqlite3_finalize(stmt);
+	if (finalized != SQLITE_OK || (rc != SQLITE_ROW && rc != SQLITE_DONE)) {
+		return false;
+	}
+	if (rc == SQLITE_ROW) {
+		return true; // Do not revisit old counters after a successful upgrade.
+	}
+	stmt = NULL;
+	if (sqlite3_prepare_v2(db, "SELECT EXISTS(SELECT 1 FROM PLAY_HISTORY), EXISTS(SELECT 1 FROM PLAY_COUNTS WHERE " PLAYS_IN_INDEX ")", -1, &stmt, NULL) != SQLITE_OK) {
+		return false;
+	}
+	rc = sqlite3_step(stmt);
+	bool populated = rc == SQLITE_ROW && sqlite3_column_int(stmt, 0);
+	bool eligible = rc == SQLITE_ROW && sqlite3_column_int(stmt, 1);
+	finalized = sqlite3_finalize(stmt);
+	if (rc != SQLITE_ROW || finalized != SQLITE_OK) {
+		return false;
+	}
+	if (!populated && !eligible) {
+		return true;
+	}
+	if (!sqlite3_get_autocommit(db) || !exec_quiet("SAVEPOINT history_legacy_import")) {
+		return false;
+	}
+	bool ok = populated || exec_quiet("INSERT INTO PLAY_HISTORY(path,name,artist,played_at)"
+									  " SELECT path,COALESCE(" PLAYS_NAME ",''),COALESCE(" PLAYS_ARTIST ",''),COALESCE(last_played,0)"
+									  " FROM PLAY_COUNTS WHERE " PLAYS_RECENT " ORDER BY last_played ASC,rowid ASC");
+	ok = ok && exec_quiet("INSERT INTO PLAY_HISTORY_IMPORT(id) VALUES(1)");
+	if (ok && exec_quiet("RELEASE history_legacy_import")) {
+		history_newest = -1;
+		return true;
+	}
+	exec_quiet("ROLLBACK TO history_legacy_import");
+	exec_quiet("RELEASE history_legacy_import");
+	return false;
+}
+
 // Opens the file and brings its schema up to date: everything library_open()
 // does before the index is shared with other threads.
 static bool db_open_file(const char *db_path) {
@@ -1598,6 +1649,9 @@ static bool db_open_file(const char *db_path) {
 	}
 	index_steps(SCHEMA_INDEXES, sizeof(SCHEMA_INDEXES) / sizeof(SCHEMA_INDEXES[0]), "index");
 
+	if (!history_import_legacy()) {
+		fprintf(stderr, "library: legacy listening history import deferred\n");
+	}
 	album_groups_fill();
 	album_keys_fill();
 	return true;
@@ -2057,7 +2111,7 @@ static bool playlist_table(const char *name, char *out, size_t out_size);
 // left where it was, which no scan can rebuild. The playlists, one table each,
 // are found by name.
 static const char *const KEPT_TABLES[] = {
-	"FAVOURITES", "PLAYBACK_STATE", "PLAYBACK_QUEUE", "PLAYBACK_QUEUE_STATE", "PLAYBACK_QUEUE_QUERY", "PLAYBACK_QUEUE_ALBUM", "PLAYLIST_MIGRATION", "PLAY_COUNTS", "PLAY_HISTORY",
+	"FAVOURITES", "PLAYBACK_STATE", "PLAYBACK_QUEUE", "PLAYBACK_QUEUE_STATE", "PLAYBACK_QUEUE_QUERY", "PLAYBACK_QUEUE_ALBUM", "PLAYLIST_MIGRATION", "PLAY_COUNTS", "PLAY_HISTORY", "PLAY_HISTORY_IMPORT",
 };
 
 // Copies one table from the attached damaged file. A table the damage reaches
@@ -2913,6 +2967,11 @@ int library_history_items(library_history_item_t **out) {
 	}
 	*out = NULL;
 	pthread_mutex_lock(&db_lock);
+	// A recovered index can become available after the initial open. Retry only
+	// when a real local history snapshot is requested, never from an idle timer.
+	if (db && library_database_epoch()) {
+		history_import_legacy();
+	}
 	int count = 0;
 	sqlite3_stmt *stmt = NULL;
 	if (db && sqlite3_prepare_v2(db, "SELECT id, played_at FROM PLAY_HISTORY ORDER BY id DESC LIMIT 1000", -1, &stmt, NULL) == SQLITE_OK) {

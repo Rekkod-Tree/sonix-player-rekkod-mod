@@ -15,6 +15,10 @@
   History and queue captions identify the source before the artist.
   Untagged files fall back to their filename; old empty history titles display
   the fallback without rewriting stored records.
+  When upgrading from the old Recently Played view, an empty history imports its
+  last 100 indexed entries once. Existing full history and play counts are kept;
+  interrupted imports retry atomically without duplicating or repopulating a
+  cleared history.
 - Card and service playback origins are remembered independently of browsing.
   Section tiles reopen the last catalog page and scroll position in the current
   session; a player-menu action opens the confirmed playback source. A first
