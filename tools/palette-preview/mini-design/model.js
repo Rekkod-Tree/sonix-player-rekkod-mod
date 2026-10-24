@@ -117,7 +117,7 @@ function comparison(options={}){
  return svgDocument(W,H,s,'Пять вариантов мини-плеера, '+theme+' тема');
 }
 function device(id,mode,options={}){
- const t=tokens(options),g=geometry[mode],empty=options.state==='empty',reserve=empty?0:g.slot;
+ const t=options.tokenOverride||tokens(options),g=geometry[mode],empty=options.state==='empty',reserve=empty?0:g.slot;
  const context='context-'+(++serial),clip='screen-'+(++serial),bottom=800-reserve;
  let s=`<defs><clipPath id="${clip}">${rect(0,0,480,800,24,'white')}</clipPath><clipPath id="${context}">${rect(0,132,480,bottom-132,0,'white')}</clipPath></defs><g clip-path="url(#${clip})">`;
  s+=rect(0,0,480,800,0,t.page)+text('40',18,31,20,t.muted)+text('18:46',240,31,20,t.muted,400,'text-anchor="middle"')+text('78%',456,31,20,t.muted,400,'text-anchor="end"');
@@ -128,10 +128,12 @@ function device(id,mode,options={}){
   const y=140+i*88;
   s+=rect(28,y+10,56,56,12,i%2?mix(t.surface,t.accent,.34):t.placeholder);
   s+=text('♪',56,y+48,28,inkFor(i%2?mix(t.surface,t.accent,.34):t.placeholder),400,'text-anchor="middle"');
-  s+=text(fit(title,283,25),98,y+34,25,t.ink,500)+text(fit(artist,283,21),98,y+62,21,t.muted)+text(duration,452,y+47,19,t.muted,400,'text-anchor="end"');
+  const titleFont=options.rowTitleFont||25,subFont=options.rowSubFont||21;
+  s+=text(fit(title,283,titleFont),98,y+34,titleFont,t.ink,500)+text(fit(artist,283,subFont),98,y+62,subFont,t.muted)+text(duration,452,y+47,19,t.muted,400,'text-anchor="end"');
  });
  s+='</g>';
- if(!empty)s+=`<g transform="translate(0 ${800-g.slot})">${footer(id,mode,options).svg}</g>`;
+ if(!empty)s+=`<g transform="translate(0 ${800-g.slot})">${options.miniSvg||footer(id,mode,options).svg}</g>`;
+ if(options.overlaySvg)s+=options.overlaySvg;
  s+='</g>';
  return svgDocument(480,800,s,concepts.find(c=>c.id===id).name+', '+mode+', схематичный контекст R1');
 }
@@ -154,6 +156,6 @@ function statesBoard(){
  });
  return svgDocument(1088,870,s,'Состояния предложенного мини-плеера');
 }
-const api={concepts,geometry,footer,device,comparison,contextBoard,statesBoard,svgDocument,tokens,contrast,cover,rect,text,fit};
+const api={concepts,geometry,footer,device,comparison,contextBoard,statesBoard,svgDocument,tokens,contrast,cover,rect,text,fit,glyph,now,mix};
 if(typeof module!=='undefined')module.exports=api;else root.MiniDesign=api;
 })(typeof window==='undefined'?globalThis:window);
