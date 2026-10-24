@@ -439,6 +439,14 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json({"result": {"albums": [{"id": 11, "title": "Mock Album", "year": 2024, "trackCount": 2, "artists": [{"name": "Mock Artist"}]},
                                                          {"id": 12, "title": "Second Album", "year": 2025, "trackCount": 3, "artists": [{"name": "Mock Artist"}]}]}})
         if p == "/search":
+            control = os.environ.get("YANDEX_MOCK_SEARCH_DELAY_FILE")
+            if control:
+                with open(control) as f:
+                    state = f.read(32).strip()
+                if state == "offline":
+                    self.close_connection = True
+                    return
+                time.sleep(min(15, max(0, float(state or "0"))))
             text = q.get("text", "").lower()
             hits = [t for t in TRACKS.values() if text in t["title"].lower() or text in t["artists"][0]["name"].lower()]
             return self.send_json({"result": {

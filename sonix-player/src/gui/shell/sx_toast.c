@@ -7,6 +7,7 @@
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/spinner.h"
 #include "src/gui/shell/sx_frame.h"
+#include "src/gui/shell/sx_palette.h"
 #include "src/gui/shell/sx_styles.h"
 #include "src/gui/shell/sx_tokens.h"
 #include "src/system/core/lang.h"
@@ -221,6 +222,7 @@ void sx_toast_init(void) {
 	lv_obj_set_height(toast, LV_SIZE_CONTENT);
 	lv_obj_set_style_min_height(toast, SX_TOAST_H, 0);
 	lv_obj_set_style_radius(toast, SX_TOAST_R, 0);
+	sx_chrome_edge(toast, SX_CHROME_TOAST);
 	lv_obj_set_style_bg_color(toast, lv_color_hex(SX_TOAST_BG), 0);
 	lv_obj_set_style_bg_opa(toast, LV_OPA_COVER, 0);
 	lv_obj_set_style_text_color(toast, lv_color_hex(SX_TOAST_TEXT), 0);
@@ -409,7 +411,6 @@ void sx_toast_busy_end(void) {
 		sx_toast_dismiss();
 	}
 }
-
 
 uint64_t sx_toast_busy_owned(const char *text, bool dismissable) {
 	sx_toast_busy(text, dismissable);

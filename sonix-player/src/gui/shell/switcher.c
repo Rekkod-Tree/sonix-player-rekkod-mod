@@ -1,6 +1,7 @@
 #include "switcher.h"
 
 #include <stdio.h>
+#include <string.h>
 
 #include "lvgl/lvgl.h"
 // The page slide moves both pages at once and keeps the one leaving drawn
@@ -10,19 +11,16 @@
 #include "lvgl/src/display/lv_display_private.h"
 #include "lvgl/src/indev/lv_indev_private.h"
 
+#include "src/gui/library/audiobooks.h"
 #include "src/gui/library/browser.h"
+#include "src/gui/library/libraryscan.h"
+#include "src/gui/library/music.h"
 #include "src/gui/nowplaying/coverflow.h"
+#include "src/gui/nowplaying/player.h"
+#include "src/gui/nowplaying/trackmenu.h"
 #include "src/gui/shell/gui.h"
 #include "src/gui/shell/icons.h"
-#include "src/gui/library/audiobooks.h"
-#include "src/gui/library/libraryscan.h"
 #include "src/gui/shell/main_menu.h"
-#include "src/gui/library/music.h"
-#include "src/gui/nowplaying/player.h"
-#include "src/gui/shell/theme.h"
-#include "src/gui/shell/topbar.h"
-#include "src/gui/shell/touch.h"
-#include "src/gui/nowplaying/trackmenu.h"
 #include "src/gui/shell/quickpanel.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/sx_frame.h"
@@ -30,6 +28,10 @@
 #include "src/gui/shell/sx_sheet.h"
 #include "src/gui/shell/sx_styles.h"
 #include "src/gui/shell/sx_tokens.h"
+#include "src/gui/shell/theme.h"
+#include "src/gui/shell/topbar.h"
+#include "src/gui/shell/touch.h"
+#include "src/system/library/library.h"
 
 // The round back target of the 2.0 header (SX_HEADER_BTN): flush with the
 // left edge, centred in the 76 px header under the status bar, the title
@@ -97,6 +99,115 @@ static void place_back_btn(bool below_top_bar) {
 static lv_obj_t *screen_history[SCREEN_HISTORY_DEPTH];
 static int screen_history_len;
 
+// At most eight parent pages per section. Existing pages own scroll, filters
+// and their list data; this remembers only navigation and card ownership.
+static const char *const browse_sources[] = {"music", "yandex", "zvuk", "qobuz", "tidal", "subsonic"};
+typedef struct {
+	lv_obj_t *screen, *root, *parents[SCREEN_HISTORY_DEPTH];
+	unsigned epoch;
+	int depth;
+} browse_context_t;
+static browse_context_t browse_contexts[6];
+static struct {
+	lv_obj_t *screen;
+	int source;
+} browse_pages[32];
+static int browse_page_count;
+
+static int browse_source(const char *source) {
+	for (int i = 0; source && i < 6; i++)
+		if (!strcmp(source, browse_sources[i]))
+			return i;
+	return -1;
+}
+
+static int browse_owner(lv_obj_t *screen) {
+	for (int i = 0; i < browse_page_count; i++)
+		if (browse_pages[i].screen == screen)
+			return browse_pages[i].source;
+	return -1;
+}
+
+static void browse_event(lv_event_t *e) {
+	int source = (int)(intptr_t)lv_event_get_user_data(e);
+	lv_obj_t *screen = lv_event_get_target(e);
+	if (lv_event_get_code(e) == LV_EVENT_DELETE) {
+		for (int i = 0; i < 6; i++) {
+			browse_context_t *c = &browse_contexts[i];
+			bool referenced = c->screen == screen || c->root == screen;
+			for (int j = 0; j < c->depth; j++)
+				referenced |= c->parents[j] == screen;
+			if (referenced) {
+				c->screen = NULL;
+				c->depth = 0;
+			}
+			if (c->root == screen)
+				c->root = NULL;
+		}
+		for (int i = 0; i < browse_page_count; i++)
+			if (browse_pages[i].screen == screen) {
+				browse_pages[i] = browse_pages[--browse_page_count];
+				break;
+			}
+		return;
+	}
+	if (lv_event_get_code(e) != LV_EVENT_SCREEN_LOADED)
+		return;
+	browse_context_t *c = &browse_contexts[source];
+	c->screen = screen;
+	c->epoch = library_database_epoch();
+	c->depth = 0;
+	if (screen == c->root)
+		return;
+	if (c->root)
+		c->parents[c->depth++] = c->root;
+	for (int i = 0; i < screen_history_len && c->depth < SCREEN_HISTORY_DEPTH; i++) {
+		lv_obj_t *parent = screen_history[i];
+		if (parent != screen && parent != c->root && browse_owner(parent) == source)
+			c->parents[c->depth++] = parent;
+	}
+}
+
+void switcher_browse_bind(const char *source, lv_obj_t *screen, lv_obj_t *root) {
+	int index = browse_source(source);
+	if (index < 0 || !screen)
+		return;
+	if (root)
+		browse_contexts[index].root = root;
+	if (browse_owner(screen) >= 0)
+		return;
+	if (browse_page_count >= 32) {
+		fprintf(stderr, "browse: page registry full\n");
+		return;
+	}
+	browse_pages[browse_page_count].screen = screen;
+	browse_pages[browse_page_count++].source = index;
+	lv_obj_add_event_cb(screen, browse_event, LV_EVENT_ALL, (void *)(intptr_t)index);
+}
+
+void switcher_browse_forget(const char *source) {
+	int index = browse_source(source);
+	if (index >= 0) {
+		browse_contexts[index].screen = NULL;
+		browse_contexts[index].depth = 0;
+	}
+}
+
+bool switcher_browse_description(const char *source, char *out, size_t size) {
+	int index = browse_source(source);
+	if (index < 0)
+		return false;
+	browse_context_t *c = &browse_contexts[index];
+	if (!c->screen || c->epoch != library_database_epoch() || !lv_obj_is_valid(c->screen))
+		return false;
+	if (c->screen != c->root && out && size) {
+		lv_obj_t *title = settingsrow_page_title(c->screen);
+		if (title)
+			snprintf(out, size, "%s", lv_label_get_text(title));
+	}
+	return true;
+}
+
 static void history_push(lv_obj_t *screen) {
 	if (!screen) {
 		return;
@@ -127,6 +238,32 @@ typedef enum { NAV_NONE, NAV_FORWARD, NAV_BACK } nav_dir_t;
 
 static void load_screen_dir(lv_obj_t *target_screen, nav_dir_t dir);
 static void load_screen(lv_obj_t *target_screen) { load_screen_dir(target_screen, NAV_NONE); }
+
+bool switcher_browse_open(const char *source) {
+	int index = browse_source(source);
+	if (index < 0)
+		return false;
+	browse_context_t saved = browse_contexts[index];
+	if (!saved.screen || saved.epoch != library_database_epoch() || !lv_obj_is_valid(saved.screen)) {
+		switcher_browse_forget(source);
+		return false;
+	}
+	for (int i = 0; i < saved.depth; i++)
+		if (!lv_obj_is_valid(saved.parents[i])) {
+			switcher_browse_forget(source);
+			return false;
+		}
+	lv_obj_t *current = lv_screen_active();
+	if (current == saved.screen)
+		return true;
+	if (current)
+		history_push(current);
+	for (int i = 0; i < saved.depth; i++)
+		if (saved.parents[i] != current)
+			history_push(saved.parents[i]);
+	load_screen_dir(saved.screen, NAV_FORWARD);
+	return true;
+}
 static void chevron_apply_color(void);
 
 // Forgets the whole back-stack: the next chevron press lands on the main
@@ -161,9 +298,7 @@ static lv_obj_t *player_return_screen;
 
 void switcher_set_player_return(lv_obj_t *screen) { player_return_screen = screen; }
 
-static bool back_goes_to_player(void) {
-	return player_return_screen && lv_screen_active() == player_return_screen;
-}
+static bool back_goes_to_player(void) { return player_return_screen && lv_screen_active() == player_return_screen; }
 
 // ---------------------------------------------------------------------------
 // The swipe back, from the left edge only
@@ -188,10 +323,10 @@ static bool back_goes_to_player(void) {
 
 #define BACK_ANIM_MS SX_ANIM_ROW_SNAP_MS
 
-static bool back_drag_click_guard;	// suppresses the tap the drag ends with
+static bool back_drag_click_guard; // suppresses the tap the drag ends with
 static bool back_anim_running;
-static lv_obj_t *back_underlay;			// full-screen container on the bottom layer
-static lv_draw_buf_t *back_snapshot;	// the previous page, rendered once
+static lv_obj_t *back_underlay;		 // full-screen container on the bottom layer
+static lv_draw_buf_t *back_snapshot; // the previous page, rendered once
 
 bool switcher_back_drag_active(void) { return back_drag_click_guard; }
 
@@ -700,10 +835,7 @@ static lv_obj_t *chevron_hidden_on;
 // The pages the chevron is never drawn on: the main menu has nowhere to go
 // back to, the scan pages exit through their own buttons, and a page showing
 // a dialog with a close button already has its way out.
-static bool page_has_no_chevron(lv_obj_t *screen) {
-	return screen == main_menu_screen || screen == libraryscan_screen || screen == audiobookscan_screen ||
-		   (screen && (screen == chevron_hidden_on || screen == chevron_own_on));
-}
+static bool page_has_no_chevron(lv_obj_t *screen) { return screen == main_menu_screen || screen == libraryscan_screen || screen == audiobookscan_screen || (screen && (screen == chevron_hidden_on || screen == chevron_own_on)); }
 
 static void load_screen_dir(lv_obj_t *target_screen, nav_dir_t dir) {
 	// A slide still running is finished first: its old page gets its

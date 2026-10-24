@@ -5,9 +5,18 @@
 #include "src/gui/shell/gui.h"
 
 void switch_screen(lv_obj_t *target_screen);
-void screen_history_reset(void); // forget the back-stack (back goes to the menu)
+void screen_history_reset(void);						// forget the back-stack (back goes to the menu)
 void switch_screen_no_history(lv_obj_t *target_screen); // load without recording
-void switch_screen_return_to(lv_obj_t *target_screen); // discard newer history and load
+void switch_screen_return_to(lv_obj_t *target_screen);	// discard newer history and load
+
+// Session-only browsing context, separate from the confirmed playback source.
+// Bind long-lived catalog pages; restores their existing state and Back path.
+// No worker, timer, retained media response or persistent write.
+void switcher_browse_bind(const char *source, lv_obj_t *screen, lv_obj_t *root);
+bool switcher_browse_open(const char *source);
+void switcher_browse_forget(const char *source);
+// True for a remembered page, optionally replacing the default subtitle.
+bool switcher_browse_description(const char *source, char *out, size_t size);
 
 // The swipe back (2.0): a rightward drag that starts in the SX_EDGE_BACK_W
 // strip along the left edge of any page follows the finger over a snapshot of

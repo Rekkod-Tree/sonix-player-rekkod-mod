@@ -15,14 +15,14 @@
 #define ICON_SLOT 36
 #define TOP_MARGIN 40 // the least of the page left showing above a full sheet
 
-static lv_obj_t *hit;	   // the screen under the status bar: a tap on it closes
-static lv_obj_t *panel;	   // the sheet itself
+static lv_obj_t *hit;	// the screen under the status bar: a tap on it closes
+static lv_obj_t *panel; // the sheet itself
 static lv_obj_t *handle;
-static lv_obj_t *head;	   // title and subtitle
+static lv_obj_t *head; // title and subtitle
 static lv_obj_t *title_label;
 static lv_obj_t *sub_label;
-static lv_obj_t *list;	   // the items, scrolling past what fits
-static lv_obj_t *buttons;  // the pair
+static lv_obj_t *list;	  // the items, scrolling past what fits
+static lv_obj_t *buttons; // the pair
 static lv_obj_t *cancel_btn;
 static lv_obj_t *cancel_label;
 static lv_obj_t *action_btn;
@@ -295,13 +295,7 @@ void sx_sheet_init(void) {
 	lv_obj_add_event_cb(panel, panel_drag_cb, LV_EVENT_RELEASED, NULL);
 	lv_obj_add_event_cb(panel, panel_drag_cb, LV_EVENT_PRESS_LOST, NULL);
 
-	// The hairline along the top, inset by the radius so it does not stick
-	// out past the rounded corners.
-	lv_obj_t *hairline = sx_box(panel);
-	lv_obj_set_ignore_layout(hairline, true);
-	lv_obj_set_size(hairline, w - 2 * SX_SHEET_R, 1);
-	lv_obj_set_pos(hairline, SX_SHEET_R, -10);
-	lv_obj_add_style(hairline, &sx_style_hairline, 0);
+	sx_chrome_edge(panel, SX_CHROME_SHEET);
 
 	handle = sx_box(panel);
 	lv_obj_set_size(handle, SX_SHEET_HANDLE_W, SX_SHEET_HANDLE_H);
@@ -415,8 +409,7 @@ static lv_obj_t *add_item(int index) {
 	// A label longer than the line (a DAC filter's name, most things in
 	// German) wraps: the row grows to hold its lines with air above and below,
 	// instead of the lines filling the 64 px edge to edge.
-	int32_t text_w = lv_display_get_horizontal_resolution(lv_obj_get_display(row)) - 2 * SX_SHEET_PAD_H - ICON_SLOT -
-					 20 - (it->icon && it->checked ? ICON_SLOT + 20 : 0);
+	int32_t text_w = lv_display_get_horizontal_resolution(lv_obj_get_display(row)) - 2 * SX_SHEET_PAD_H - ICON_SLOT - 20 - (it->icon && it->checked ? ICON_SLOT + 20 : 0);
 	lv_point_t size;
 	lv_text_get_size(&size, it->label ? it->label : "", &font_ui_24, 0, 0, text_w, LV_TEXT_FLAG_NONE);
 	int32_t wanted = size.y + 2 * 12;

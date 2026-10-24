@@ -37,6 +37,10 @@ for filename, title, album, year in [
     ], check=True)
 
 audio_books = root / "card" / "Audiobooks" / ("\u041a\u043d\u0438\u0433\u0438 - " + "Long library folder " * 6)
+if os.environ.get("SONIX_UI_TEST_UX_CONTEXT"):
+    subprocess.run(["flac", "--silent", "--force", "--tag=TITLE=Dogs",
+                    "--tag=ARTIST=Pink Floyd", "--tag=ALBUM=Animals",
+                    f"--output-name={root / 'Dogs.flac'}", str(wave_path)], check=True)
 audio_books.mkdir(parents=True, exist_ok=True)
 book_wave = root / "book.wav"
 with wave.open(str(book_wave), "wb") as audio:

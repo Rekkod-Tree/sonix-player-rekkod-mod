@@ -42,7 +42,7 @@ int sx_mini_mode(void);
 // Clamps invalid values to normal; persists only an actual user change.
 bool sx_mini_set_mode(int mode);
 int sx_mini_slot_height(void);
-bool sx_mini_wants_cover(void);
+bool sx_mini_wants_cover(void); // Visible normal layout; hidden/compact needs no private artwork.
 
 // What is loaded. `title` is shown as given (a tag, not a translation key);
 // `track_path` is the file (NULL for a stream), `live` a stream without a

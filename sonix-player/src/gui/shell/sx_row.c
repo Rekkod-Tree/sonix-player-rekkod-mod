@@ -698,6 +698,7 @@ static void lead_reset(row_t *r) {
 	lv_obj_set_style_radius(r->lead, SX_ROW_THUMB_R, 0);
 	lv_obj_set_style_clip_corner(r->lead, false, 0);
 	if (r->lead_image) {
+		lv_obj_remove_style(r->lead_image, &sx_style_icon2, 0);
 		lv_obj_set_hidden(r->lead_image, true);
 	}
 	lv_obj_remove_style(r->lead_label, &sx_style_text2, 0);
@@ -752,6 +753,19 @@ void sx_row_set_thumb(lv_obj_t *row, const lv_image_dsc_t *image, lv_color_t ton
 	}
 	apply_sizes(r, row);
 	eq_place(r);
+}
+
+void sx_row_set_icon(lv_obj_t *row, const lv_image_dsc_t *glyph) {
+	sx_row_set_glyph(row, glyph, lv_color_black());
+	row_t *r = row_of(row);
+	if (!r)
+		return;
+	lv_obj_set_style_bg_opa(r->lead, LV_OPA_TRANSP, 0);
+	if (r->lead_image) {
+		lv_obj_remove_local_style_prop(r->lead_image, LV_STYLE_IMAGE_RECOLOR, 0);
+		lv_obj_remove_local_style_prop(r->lead_image, LV_STYLE_IMAGE_RECOLOR_OPA, 0);
+		lv_obj_add_style(r->lead_image, &sx_style_icon2, 0);
+	}
 }
 
 void sx_row_set_glyph(lv_obj_t *row, const lv_image_dsc_t *glyph, lv_color_t tone) {

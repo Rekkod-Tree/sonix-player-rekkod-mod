@@ -7,8 +7,8 @@
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/nowplaying/player.h"
 #include "src/gui/shell/corners.h"
-#include "src/gui/shell/main_menu.h"
 #include "src/gui/shell/icons.h"
+#include "src/gui/shell/main_menu.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/sx_card.h"
@@ -43,6 +43,7 @@ static lv_obj_t *statusbar_always_toggle;
 static lv_obj_t *rounded_corners_toggle;
 static lv_obj_t *large_rows_toggle;
 static lv_obj_t *mini_mode_pill[2];
+static lv_obj_t *mini_mode_note;
 static lv_obj_t *text_size_pill[2]; // normal / large
 // The status bar draws the battery either way; this setting is only about the
 // number beside it, and is on by default.
@@ -82,6 +83,10 @@ static void dynamic_tint_cb(lv_event_t *e) {
 static void refresh_mini_mode(void) {
 	for (int i = 0; i < 2; i++)
 		settingsrow_pill_active(mini_mode_pill[i], sx_mini_mode() == i);
+	if (mini_mode_note) {
+		sx_set_text(mini_mode_note, tr("appearance_mini_home_note"));
+		lv_obj_set_hidden(mini_mode_note, sx_mini_mode() != SX_MINI_COMPACT);
+	}
 }
 
 static void mini_mode_cb(lv_event_t *e) {
@@ -183,9 +188,7 @@ static void refresh_accent_buttons(void) {
 			continue;
 		}
 		int accent = slot_accent(i);
-		lv_obj_set_style_bg_color(btn_accent[i], accent == THEME_ACCENT_COVER ? sx_palette_cover_accent()
-																			  : theme_accent_preset(accent),
-								  0);
+		lv_obj_set_style_bg_color(btn_accent[i], accent == THEME_ACCENT_COVER ? sx_palette_cover_accent() : theme_accent_preset(accent), 0);
 		sx_swatch_set_active(btn_accent[i], accent == active_accent);
 	}
 	if (cover_mark)
@@ -245,7 +248,10 @@ static void pick_cb(lv_event_t *e) {
 // The 2.0 page (the handoff's "Appearance"): one card per setting, choices on
 // pills, the accent as a row of swatches, and every switch with what it does
 // written inside its card instead of in a note under it.
-static void home_settings_cb(lv_event_t *e) { (void)e; main_menu_open_settings(); }
+static void home_settings_cb(lv_event_t *e) {
+	(void)e;
+	main_menu_open_settings();
+}
 
 void appearance_init(gui_config_t *cfg) {
 	lv_obj_t *container = settingsrow_page(appearance_screen, cfg, "appearance");
@@ -280,16 +286,14 @@ void appearance_init(gui_config_t *cfg) {
 
 	// Straight under the accent, because it is what the tint is made from: the
 	// same hue carried across the backgrounds, the cards and the status bar.
-	settingsrow_switch_card(container, "appearance_dynamic_tint", "appearance_dynamic_tint_note", &tint_toggle,
-							dynamic_tint_cb);
+	settingsrow_switch_card(container, "appearance_dynamic_tint", "appearance_dynamic_tint_note", &tint_toggle, dynamic_tint_cb);
 	if (theme_dynamic_tint()) {
 		lv_obj_add_state(tint_toggle, LV_STATE_CHECKED);
 	}
 
 	// Taller rows in the library and the folder browser (touch.h): "make it
 	// easier to hit", with the text size under it as "easier to read".
-	settingsrow_switch_card(container, "appearance_large_rows", "appearance_large_rows_sub", &large_rows_toggle,
-							large_rows_cb);
+	settingsrow_switch_card(container, "appearance_large_rows", "appearance_large_rows_sub", &large_rows_toggle, large_rows_cb);
 	if (touch_large_rows()) {
 		lv_obj_add_state(large_rows_toggle, LV_STATE_CHECKED);
 	}
@@ -297,36 +301,37 @@ void appearance_init(gui_config_t *cfg) {
 	// How big the small text on every page is: the secondary lines, notes,
 	// clocks and counters. See fonts.c for which sizes grow and by how much.
 	settingsrow_pills(container, "appearance_text_size", &pills);
-	text_size_pill[FONTS_TEXT_NORMAL] =
-		settingsrow_pill(pills, "appearance_text_normal", FONTS_TEXT_NORMAL, text_size_cb);
+	text_size_pill[FONTS_TEXT_NORMAL] = settingsrow_pill(pills, "appearance_text_normal", FONTS_TEXT_NORMAL, text_size_cb);
 	text_size_pill[FONTS_TEXT_LARGE] = settingsrow_pill(pills, "appearance_text_large", FONTS_TEXT_LARGE, text_size_cb);
 
 	// Whether the status bar prints the charge as a number as well as drawing
 	// it.
-	settingsrow_switch_card(container, "appearance_battery_percentage", NULL, &battery_percent_toggle,
-							battery_percent_cb);
+	settingsrow_switch_card(container, "appearance_battery_percentage", NULL, &battery_percent_toggle, battery_percent_cb);
 	if (config_get_int("screen", "battery_percent", 1) != 0) {
 		lv_obj_add_state(battery_percent_toggle, LV_STATE_CHECKED);
 	}
 
 	// The bar up in the player too, where it otherwise steps aside for the
 	// artwork.
-	settingsrow_switch_card(container, "appearance_statusbar_always", "appearance_statusbar_always_sub",
-							&statusbar_always_toggle, statusbar_always_cb);
+	settingsrow_switch_card(container, "appearance_statusbar_always", "appearance_statusbar_always_sub", &statusbar_always_toggle, statusbar_always_cb);
 	if (player_statusbar_always()) {
 		lv_obj_add_state(statusbar_always_toggle, LV_STATE_CHECKED);
 	}
 
 	// Rounds off the four corners of the screen, over every page and overlay.
-	settingsrow_switch_card(container, "appearance_rounded_corners", NULL, &rounded_corners_toggle,
-							rounded_corners_cb);
+	settingsrow_switch_card(container, "appearance_rounded_corners", NULL, &rounded_corners_toggle, rounded_corners_cb);
 	if (corners_enabled()) {
 		lv_obj_add_state(rounded_corners_toggle, LV_STATE_CHECKED);
 	}
 
-	settingsrow_pills(container, "appearance_mini_player", &pills);
+	lv_obj_t *mini_card = settingsrow_pills(container, "appearance_mini_player", &pills);
 	mini_mode_pill[SX_MINI_NORMAL] = settingsrow_pill(pills, "appearance_mini_normal", SX_MINI_NORMAL, mini_mode_cb);
 	mini_mode_pill[SX_MINI_COMPACT] = settingsrow_pill(pills, "appearance_mini_compact", SX_MINI_COMPACT, mini_mode_cb);
+	mini_mode_note = sx_label(mini_card, &font_ui_18, &sx_style_text2);
+	lv_label_set_text(mini_mode_note, tr("appearance_mini_home_note"));
+	lv_obj_set_width(mini_mode_note, lv_pct(100));
+	lv_label_set_long_mode(mini_mode_note, LV_LABEL_LONG_WRAP);
+	lv_obj_set_height(mini_mode_note, LV_SIZE_CONTENT);
 	refresh_mini_mode();
 	theme_register_refresh(refresh_mini_mode);
 

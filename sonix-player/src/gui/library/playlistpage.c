@@ -1,41 +1,42 @@
 #include "playlistpage.h"
+#include "src/gui/library/music.h"
 
-#include <pthread.h>
 #include <errno.h>
+#include <pthread.h>
 #include <stdatomic.h>
-#include <time.h>
 #include <stdio.h>
-#include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <time.h>
+#include <unistd.h>
 
-#include "src/gui/shell/sx_mini.h"
-#include "src/gui/shell/gui.h"
 #include "src/gui/fonts/fonts.h"
-#include "src/gui/shell/icons.h"
-#include "src/gui/shell/keyboard.h"
 #include "src/gui/library/listacts.h"
 #include "src/gui/library/medialist.h"
 #include "src/gui/nowplaying/player.h"
 #include "src/gui/shell/confirm.h"
+#include "src/gui/shell/gui.h"
+#include "src/gui/shell/icons.h"
+#include "src/gui/shell/keyboard.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/sx_frame.h"
+#include "src/gui/shell/sx_mini.h"
 #include "src/gui/shell/sx_palette.h"
 #include "src/gui/shell/sx_row.h"
 #include "src/gui/shell/sx_sheet.h"
+#include "src/gui/shell/sx_styles.h"
+#include "src/gui/shell/sx_toast.h"
 #include "src/gui/shell/sx_tokens.h"
 #include "src/gui/shell/theme.h"
-#include "src/gui/shell/sx_styles.h"
 #include "src/gui/shell/toast.h"
-#include "src/gui/shell/sx_toast.h"
 #include "src/system/core/lang.h"
+#include "src/system/core/utils.h"
 #include "src/system/library/library.h"
 #include "src/system/library/playlists.h"
-#include "src/system/core/utils.h"
-#include "src/system/streaming/provider.h"
 #include "src/system/streaming/podcastcache.h"
+#include "src/system/streaming/provider.h"
 
 lv_obj_t *playlistpage_screen;
 
@@ -274,9 +275,7 @@ static void *queue_export_worker(void *arg) {
 static bool queue_export_start(const char *name, library_playlist_publish_t mode) {
 	playlist_export_item_t check[LIBRARY_PLAYLIST_STAGE_BATCH];
 	int unused;
-	if (!pending_queue || !playlists_name_valid(name) || atomic_load(&queue_export_running) || atomic_load(&queue_export_callbacks) ||
-		!gui_card_available() || pending_queue_epoch != library_database_epoch() ||
-		!playlist_export_batch(&pending_queue_source, pending_queue_source.count, check, LIBRARY_PLAYLIST_STAGE_BATCH, &unused)) {
+	if (!pending_queue || !playlists_name_valid(name) || atomic_load(&queue_export_running) || atomic_load(&queue_export_callbacks) || !gui_card_available() || pending_queue_epoch != library_database_epoch() || !playlist_export_batch(&pending_queue_source, pending_queue_source.count, check, LIBRARY_PLAYLIST_STAGE_BATCH, &unused)) {
 		pending_queue = false;
 		gui_notify_popup("playlist_queue_save_failed");
 		return false;
@@ -475,8 +474,8 @@ static void *fav_worker(void *arg) {
 	thread_be_low_priority("favouritesadd");
 
 	library_fav_row_t *rows = malloc(FAV_CHUNK * sizeof(*rows));
-	char(*titles)[512] = malloc(FAV_CHUNK * sizeof(*titles));
-	char(*artists)[256] = malloc(FAV_CHUNK * sizeof(*artists));
+	char (*titles)[512] = malloc(FAV_CHUNK * sizeof(*titles));
+	char (*artists)[256] = malloc(FAV_CHUNK * sizeof(*artists));
 
 	pthread_mutex_lock(&batch_lock);
 	for (int first = 0; rows && titles && artists && first < b->count; first += FAV_CHUNK) {
@@ -653,8 +652,7 @@ static void menu_backup_action(void *user) {
 
 // A playlist's tracks as a handle, in its own order (NULL when it is empty).
 static library_index_t *playlist_tracks(const char *name) {
-	library_index_t *ix = library_index_open(LIBRARY_LIST_PLAYLIST, LIBRARY_FILTER_NONE, name, LIBRARY_ORDER_DEFAULT,
-											 false);
+	library_index_t *ix = library_index_open(LIBRARY_LIST_PLAYLIST, LIBRARY_FILTER_NONE, name, LIBRARY_ORDER_DEFAULT, false);
 	if (ix && library_index_count(ix) > 0) {
 		return ix;
 	}
@@ -706,15 +704,7 @@ static void row_hold_cb(lv_obj_t *row, void *user) {
 	}
 	snprintf(menu_name, sizeof(menu_name), "%s", name);
 	sx_sheet_item_t items[] = {
-		{tr("medialist_play"), &icon_play_status, false, false, menu_play_action, NULL},
-		{tr("lists_shuffle"), &icon_shuffle, false, false, menu_play_action, (void *)(intptr_t)1},
-		{tr("queue_play_next"), &icon_list_start, false, false, menu_queue_action,
-		 (void *)(intptr_t)PLAYLIST_QUEUE_NEXT},
-		{tr("queue_add_to_end"), &icon_list_plus_small, false, false, menu_queue_action,
-		 (void *)(intptr_t)PLAYLIST_QUEUE_END},
-		{tr("rename"), &icon_file, false, false, menu_rename_action, NULL},
-		{tr("playlist_backup"), &icon_save_state, false, false, menu_backup_action, NULL},
-		{tr("delete"), &icon_trash, false, true, menu_delete_action, NULL},
+		{tr("medialist_play"), &icon_play_status, false, false, menu_play_action, NULL}, {tr("lists_shuffle"), &icon_shuffle, false, false, menu_play_action, (void *)(intptr_t)1}, {tr("queue_play_next"), &icon_list_start, false, false, menu_queue_action, (void *)(intptr_t)PLAYLIST_QUEUE_NEXT}, {tr("queue_add_to_end"), &icon_list_plus_small, false, false, menu_queue_action, (void *)(intptr_t)PLAYLIST_QUEUE_END}, {tr("rename"), &icon_file, false, false, menu_rename_action, NULL}, {tr("playlist_backup"), &icon_save_state, false, false, menu_backup_action, NULL}, {tr("delete"), &icon_trash, false, true, menu_delete_action, NULL},
 	};
 	char subtitle[48];
 	int tracks = playlists_count_tracks(menu_name);
@@ -803,8 +793,7 @@ static void sync_done_cb(bool ok, const char *error, void *user) {
 	// The fallback message names the service actually being written to: this
 	// callback serves both, and saying "Qobuz" while adding a track to a Tidal
 	// playlist sends the user looking in the wrong place.
-	snprintf(sync_error, sizeof(sync_error), "%s",
-			 ok ? "" : (error && error[0] ? error : tr(pending_service ? pending_service->change_refused_key : "")));
+	snprintf(sync_error, sizeof(sync_error), "%s", ok ? "" : (error && error[0] ? error : tr(pending_service ? pending_service->change_refused_key : "")));
 	gui_post(sync_done_async, NULL);
 }
 
@@ -890,7 +879,7 @@ typedef struct {
 // One playlist's outcome. The worker only counts; the words are put together
 // on the interface thread, where the report is drawn.
 typedef struct {
-	bool imported; // false: nothing in the file could be used
+	bool imported;				   // false: nothing in the file could be used
 	playlists_import_result_t got; // got.name is the file's name when !imported
 } import_entry_t;
 
@@ -1211,7 +1200,7 @@ static void import_close_cb(lv_event_t *e) {
 	import_layer_hide();
 }
 
-char* get_playlist_location_tr(playlists_candidate_t candidate) {
+char *get_playlist_location_tr(playlists_candidate_t candidate) {
 	switch (candidate.playlist_location) {
 	case PLAYLIST_LOCATION_SD_ROOT:
 		return "playlist_in_the_root_of_the_card";
@@ -1265,7 +1254,7 @@ static void import_add_candidate_row(int index) {
 	lv_obj_set_style_text_font(name, &font_ui_24, 0);
 
 	lv_obj_t *where = lv_label_create(texts);
-	lv_label_set_text(where,tr(get_playlist_location_tr(import_candidates[index])));
+	lv_label_set_text(where, tr(get_playlist_location_tr(import_candidates[index])));
 	lv_obj_add_style(where, &theme_style_text_dim, 0);
 	lv_obj_set_style_text_font(where, &font_ui_16, 0);
 
@@ -1482,16 +1471,14 @@ static void rebuild_rows(void) {
 		int total = got && pending_service->playlists ? pending_service->playlists(got, SERVICE_PLAYLISTS_MAX) : 0;
 		for (int i = 0; i < total; i++) {
 			char subtitle[48];
-			snprintf(subtitle, sizeof(subtitle), tr(got[i].track_count == 1 ? "playlist_track_2" : "playlist_tracks"),
-					 got[i].track_count);
+			snprintf(subtitle, sizeof(subtitle), tr(got[i].track_count == 1 ? "playlist_track_2" : "playlist_tracks"), got[i].track_count);
 			add_row(got[i].name, subtitle, got[i].id);
 			count++;
 		}
 		free(got);
 		// Nothing has arrived yet: ask for it, and the callback calls this
 		// function again once it does.
-		if (pending_service->playlists_known && !pending_service->playlists_known() &&
-			pending_service->playlists_refresh) {
+		if (pending_service->playlists_known && !pending_service->playlists_known() && pending_service->playlists_refresh) {
 			pending_service->playlists_refresh(service_playlists_changed);
 		}
 	} else {
@@ -1540,8 +1527,7 @@ void playlistpage_add_track(const char *track_path) {
 	// The title states where the track is about to be written: an account or
 	// the card. The caches live in different directories, so a path belongs to
 	// one service at most.
-	lv_label_set_text(title_label, pending_service ? tr(pending_service->playlist_title_key)
-												   : tr("playlist_add_to_playlist_2"));
+	lv_label_set_text(title_label, pending_service ? tr(pending_service->playlist_title_key) : tr("playlist_add_to_playlist_2"));
 	name_layer_hide();
 	import_layer_hide();
 	// While the page is choosing where a track goes it is not somewhere to
@@ -1638,6 +1624,7 @@ void playlistpage_init(gui_config_t *cfg) {
 	config = cfg;
 
 	playlistpage_screen = lv_obj_create(NULL);
+	switcher_browse_bind("music", playlistpage_screen, music_screen);
 	lv_obj_add_style(playlistpage_screen, &theme_style_screen, 0);
 	title_label = settingsrow_title(playlistpage_screen, cfg, "playlists");
 

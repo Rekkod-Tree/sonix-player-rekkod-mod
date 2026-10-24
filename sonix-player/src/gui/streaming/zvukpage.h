@@ -41,5 +41,9 @@ bool zvukpage_open_link(const char *url);
 void zvukpage_check_connection_cb(lv_event_t *e);
 
 void zvukpage_search_open(void);
+void zvukpage_search_results(const char *query);
+void zvukpage_search_results_kind(const char *query, int kind);
+void zvukpage_open_artist(const char *id, const char *name);
+void zvukpage_note_search_play(const char *query, const char *path);
 
 #endif /* ZVUKPAGE_H */

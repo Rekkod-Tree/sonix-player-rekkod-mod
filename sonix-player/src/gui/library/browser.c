@@ -1,6 +1,8 @@
 #include "browser.h"
+#include "src/gui/library/music.h"
 #include "src/gui/library/rowart.h"
 #include "src/gui/shell/artview.h"
+#include "src/gui/shell/playbackplace.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -559,6 +561,17 @@ static void browser_open_dir(const char *path);
 static int scroll_stack[SCROLL_STACK_DEPTH];
 static int scroll_stack_len;
 static int pending_scroll = -1; // applied by adopt_listing() when >= 0
+static char playback_reveal[512];
+
+static void note_folder_playback(const char *path) {
+	playbackplace_t place = {.kind = -1};
+	if (strlen(current_path) >= sizeof(place.a))
+		return;
+	snprintf(place.a, sizeof(place.a), "%s", current_path);
+	const char *name = strrchr(current_path, '/');
+	snprintf(place.title, sizeof(place.title), "%s", name && name[1] ? name + 1 : tr("music_browse"));
+	playbackplace_arm("music", &place, path);
+}
 
 // ---------------------------------------------------------------------------
 // selection
@@ -934,6 +947,7 @@ static void row_tap_cb(lv_obj_t *obj, void *user) {
 		browser_open_dir(full_path);
 	} else {
 		player_play_file(full_path);
+		note_folder_playback(full_path);
 	}
 }
 
@@ -1110,9 +1124,23 @@ static void shuffle_button_cb(lv_event_t *e) {
 	char full_path[1024];
 	snprintf(full_path, sizeof(full_path), "%s/%s", current_path, name);
 	player_play_file(full_path); // the page stays: the mini player comes up
+	note_folder_playback(full_path);
 }
 
 void browser_open_dir_public(const char *path) { browser_open_dir(path); }
+
+bool browser_open_playback_place(void) {
+	playbackplace_t place;
+	if (!playbackplace_get("music", &place) || place.kind != -1 || access(place.a, R_OK))
+		return false;
+	device_state_t state;
+	device_state_get(&state);
+	const char *file = state.current_file[0] && !strncmp(state.current_file, place.a, strlen(place.a)) && state.current_file[strlen(place.a)] == '/' ? state.current_file : place.path;
+	snprintf(playback_reveal, sizeof(playback_reveal), "%s", file);
+	browser_open_dir(place.a);
+	switch_screen(browser_screen);
+	return true;
+}
 
 void browser_refresh(void) {
 	if (current_path[0]) {
@@ -1581,6 +1609,16 @@ static void adopt_listing(void) {
 	// Fresh folders start at the top; a walk back up resumes where the level
 	// was left (clamped: the folder may have shrunk meanwhile).
 	int target_scroll = pending_scroll >= 0 ? pending_scroll : 0;
+	if (playback_reveal[0]) {
+		const char *file = strrchr(playback_reveal, '/');
+		for (size_t i = 0; file && i < shown.count; i++) {
+			if (!strcmp(entry_file(i), file + 1)) {
+				target_scroll = (int)i * ROW_PITCH;
+				break;
+			}
+		}
+		playback_reveal[0] = '\0';
+	}
 	pending_scroll = -1;
 	int max_scroll = (int)(shown.count * ROW_PITCH) - lv_obj_get_height(file_list);
 	if (target_scroll > max_scroll) {
@@ -1660,6 +1698,7 @@ static lv_obj_t *corner_button(gui_config_t *cfg, int slot, const lv_image_dsc_t
 }
 
 void browser_init(gui_config_t *cfg) {
+	switcher_browse_bind("music", browser_screen, music_screen);
 	init_list_styles();
 
 	// Once, and kept: a folder with a sheet in it is read on the reader thread,

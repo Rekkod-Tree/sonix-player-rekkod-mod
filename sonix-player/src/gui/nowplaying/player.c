@@ -2,7 +2,9 @@
 #include "src/gui/settings/screensaver.h"
 #include "src/gui/shell/artview.h"
 #include "src/gui/shell/bookresume.h"
+#include "src/gui/shell/playbackplace.h"
 
+#include <math.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -14,11 +16,13 @@
 #include "src/gui/library/audiobookextras.h"
 #include "src/gui/library/browser.h"
 #include "src/gui/library/medialist.h"
+#include "src/gui/library/searchall.h"
 #include "src/gui/nowplaying/btline.h"
 #include "src/gui/nowplaying/chapters.h"
 #include "src/gui/nowplaying/cover.h"
 #include "src/gui/nowplaying/coverflow.h"
 #include "src/gui/nowplaying/coverloader.h"
+#include "src/gui/nowplaying/historypage.h"
 #include "src/gui/nowplaying/lyricsearch.h"
 #include "src/gui/nowplaying/npicons.h"
 #include "src/gui/nowplaying/queueundo.h"
@@ -65,6 +69,7 @@
 #include "src/system/net/wifi.h"
 #include "src/system/playback/audiobook.h"
 #include "src/system/playback/device_state.h"
+#include "src/system/playback/playhistory.h"
 #include "src/system/playback/playlist.h"
 #include "src/system/playback/sleeptimer.h"
 #include "src/system/remote/airplay.h"
@@ -762,7 +767,7 @@ static void apply_playback_status(audio_status_t status) {
 	// This runs from every poll, twice a second: written only when it changes.
 	sx_set_src(play_btn_icon, live_mode ? (playing ? &icon_stop : &icon_play) : (playing ? &icon_pause : &icon_play));
 	// 2.0: the glyph on the white disc is the album's dark ink (np_ink).
-	sx_set_recolor(play_btn_icon, (layout_studio_now) ? sx_pal()->np_ink : sx_pal()->mini_ink);
+	sx_set_recolor(play_btn_icon, (layout_studio_now) ? sx_pal()->np_ink : sx_pal()->mini_on_action);
 	np_pause_badge_update(playing);
 
 	// Keep polling either way, just less often when nothing is playing. The
@@ -944,6 +949,43 @@ static int view_value(double position) {
 // The other way round: the second of the file that slider value `value` is.
 static double view_seconds(int value) { return view_start + view_length * value / 1000.0; }
 
+bool player_mini_seek_valid(const player_mini_seek_t *preview) { return preview && power_screen_is_on() && preview->revision == device_state_metadata_revision(); }
+
+bool player_mini_seek_begin(player_mini_seek_t *preview) {
+	if (!preview || !power_screen_is_on())
+		return false;
+	device_state_t state;
+	device_state_get(&state);
+	if (state.live || !state.current_file[0] || state.status == AUDIO_STATUS_STOPPED)
+		return false;
+	double total = state.progress_total_secs;
+	if (!isfinite(total) || !isfinite(state.progress_current_secs) || total <= 1 || total > UINT32_MAX)
+		return false;
+	view_update(state.progress_current_secs, total);
+	if (!isfinite(view_start) || !isfinite(view_length) || view_length <= 1)
+		return false;
+	*preview = (player_mini_seek_t){.position = state.progress_current_secs, .start = view_start, .length = view_length, .total = total, .revision = device_state_metadata_revision()};
+	return true;
+}
+
+bool player_mini_seek_commit(const player_mini_seek_t *preview, double position) {
+	if (!player_mini_seek_valid(preview) || !isfinite(position))
+		return false;
+	device_state_t state;
+	device_state_get(&state);
+	if (state.live || state.status == AUDIO_STATUS_STOPPED || !state.current_file[0] || !player_mini_seek_valid(preview))
+		return false;
+	double end = preview->start + preview->length - 0.001;
+	if (position < preview->start)
+		position = preview->start;
+	if (position > end)
+		position = end;
+	device_state_seek(position);
+	if (audiobook_is_playing())
+		audiobook_note_position(position, state.progress_total_secs, true);
+	return true;
+}
+
 // Writes the two clocks that sit under the ends of the progress bar: elapsed
 // on the left, total length on the right -- both of the file, or both of the
 // chapter (see view_start).
@@ -1121,11 +1163,11 @@ static void set_over_cover(bool on) {
 	// light theme with no cover -- a white disc on a near-white panel is
 	// invisible.
 	if (play_btn) {
-		lv_obj_set_style_bg_color(play_btn, on ? lv_color_white() : sx_pal()->mini_bg, 0);
+		lv_obj_set_style_bg_color(play_btn, on ? lv_color_white() : sx_pal()->mini_action, 0);
 		lv_obj_set_style_bg_opa(play_btn, LV_OPA_COVER, 0);
 	}
 	if (play_btn_icon) {
-		lv_obj_set_style_image_recolor(play_btn_icon, on ? sx_pal()->np_ink : sx_pal()->mini_ink, 0);
+		lv_obj_set_style_image_recolor(play_btn_icon, on ? sx_pal()->np_ink : sx_pal()->mini_on_action, 0);
 		lv_obj_set_style_image_recolor_opa(play_btn_icon, LV_OPA_COVER, 0);
 	}
 
@@ -1247,7 +1289,7 @@ static void lyrics_repaint_lit(void);
 static void paint_transport_tint(void) {
 	bool on = layout_studio_now;
 	if (play_btn_icon) {
-		lv_obj_set_style_image_recolor(play_btn_icon, on ? sx_pal()->np_ink : sx_pal()->mini_ink, 0);
+		lv_obj_set_style_image_recolor(play_btn_icon, on ? sx_pal()->np_ink : sx_pal()->mini_on_action, 0);
 		lv_obj_set_style_image_recolor_opa(play_btn_icon, LV_OPA_COVER, 0);
 	}
 	if (repeat_btn_icon) {
@@ -3521,6 +3563,7 @@ static void apply_cover_id_result(void) {
 	if (cover_id_state == COVER_ID_MEASURE) {
 		cover_id_state = COVER_ID_IDLE;
 		cover_shown_id = id;
+		np_mini_from_cover();
 		return;
 	}
 
@@ -3529,6 +3572,7 @@ static void apply_cover_id_result(void) {
 	// The same picture: the cover, the backdrop, the sleeve colour and the
 	// chrome all stay exactly as they are. This is the whole point.
 	if (id != 0 && id == cover_shown_id) {
+		np_mini_from_cover();
 		return;
 	}
 
@@ -3983,12 +4027,10 @@ static void update_fav_button(void) {
 	// foreground roles: fixed yellow disappears on the bright 2077 page.
 	if (starred) {
 		lv_image_set_src(fav_btn_icon, &icon_star_filled);
-		lv_obj_set_style_image_recolor(fav_btn_icon,
-			theme_get_palette() != 0 && !layout_alt_now && !layout_studio_now ? sx_pal()->star_on : lv_color_make(246, 211, 45), 0);
+		lv_obj_set_style_image_recolor(fav_btn_icon, theme_get_palette() != 0 && !layout_alt_now && !layout_studio_now ? sx_pal()->star_on : lv_color_make(246, 211, 45), 0);
 	} else {
 		lv_image_set_src(fav_btn_icon, &icon_star);
-		lv_obj_set_style_image_recolor(fav_btn_icon,
-			layout_alt_now ? alt_ink() : theme_get_palette() != 0 && !layout_studio_now ? sx_pal()->np_text2 : lv_color_make(150, 150, 150), 0);
+		lv_obj_set_style_image_recolor(fav_btn_icon, layout_alt_now ? alt_ink() : theme_get_palette() != 0 && !layout_studio_now ? sx_pal()->np_text2 : lv_color_make(150, 150, 150), 0);
 	}
 	lv_obj_set_style_image_recolor_opa(fav_btn_icon, LV_OPA_COVER, 0);
 }
@@ -4339,6 +4381,11 @@ static void update_progress(void) {
 	double heard_position, heard_length;
 	unsigned heard_serial;
 	bool heard_ready = audio_get_listening_progress(&heard_position, &heard_length, &heard_serial);
+	if (heard_ready && !state.live && state.status == AUDIO_STATUS_PLAYING) {
+		playhistory_heard(state.current_file);
+		playbackplace_heard(state.current_file);
+	} else
+		playhistory_poll();
 	audiobook_listen_progress(heard_position, heard_length, heard_ready && !state.live && state.status == AUDIO_STATUS_PLAYING, heard_serial);
 
 	// The live source moves under the player: the station's own name comes
@@ -5578,6 +5625,12 @@ static void np_paint_backgrounds(void) {
 // The playing track's album, as covertone knows it; 0 when it is not in the
 // library (a stream, a station, a file from outside the music).
 static int64_t np_album_id;
+static uint32_t thumb240_ticket;
+static lv_image_dsc_t thumb240_dsc;
+static bool thumb240_held;
+static int64_t thumb240_album;
+static int64_t mini_large_attempted;
+static void np_thumb240_request(void);
 
 static uint8_t mini_thumb_buf[COVERTONE_THUMB_BYTES(COVERTONE_THUMB_SMALL)];
 static lv_image_dsc_t mini_thumb_dsc;
@@ -5585,6 +5638,23 @@ static uint32_t mini_thumb_generation;
 static int64_t mini_thumb_album; // what mini_thumb_buf holds, 0 nothing
 // Outside the library: the decoded cover, scaled down, stands in.
 static cover_image_t mini_cover_copy;
+
+static bool np_mini_take_thumb240(const lv_image_dsc_t *dsc) {
+	if (!dsc || !sx_mini_wants_cover())
+		return false;
+	if (mini_thumb_album == np_album_id && mini_cover_copy.pixels)
+		return true;
+	cover_image_t cached = {.dsc = *dsc, .pixels = (uint8_t *)dsc->data}, next = {0};
+	if (!cover_scaled_copy(&cached, SX_MINI_COVER, &next))
+		return false;
+	sx_mini_set_cover(NULL, 0);
+	sx_artview_release_cover(&mini_cover_copy);
+	mini_cover_copy = next;
+	mini_cover_copy.dsc.data = mini_cover_copy.pixels;
+	mini_thumb_album = np_album_id;
+	sx_mini_set_cover(&mini_cover_copy.dsc, mini_cover_copy.display_generation);
+	return true;
+}
 
 static void np_mini_thumb_refresh(void) {
 	if (!sx_mini_wants_cover()) {
@@ -5602,13 +5672,26 @@ static void np_mini_thumb_refresh(void) {
 		}
 		return;
 	}
-	if (mini_thumb_album == np_album_id) {
+	if (mini_thumb_album == np_album_id && mini_cover_copy.pixels) {
 		return;
 	}
-	// Let go of the buffer before it is written to.
-	sx_mini_set_cover(NULL, 0);
-	sx_artview_release_cover(&mini_cover_copy);
-	mini_thumb_album = 0;
+	if (mini_thumb_album != np_album_id) {
+		// Detach before replacing an image still referenced by LVGL.
+		sx_mini_set_cover(NULL, 0);
+		sx_artview_release_cover(&mini_cover_copy);
+		mini_thumb_album = 0;
+	}
+	// Reuse the full player's async request and ready pixels. Never read the
+	// 115KB cache on the GUI thread or create a separate thumbnail worker.
+	if (thumb240_held && thumb240_album == np_album_id && np_mini_take_thumb240(&thumb240_dsc))
+		return;
+	if (mini_large_attempted != np_album_id) {
+		np_thumb240_request();
+		if (thumb240_ticket || thumb240_held)
+			mini_large_attempted = np_album_id;
+	}
+	if (mini_thumb_album == np_album_id)
+		return;
 	if (covertone_thumb(np_album_id, COVERTONE_THUMB_SMALL, &mini_thumb_dsc, mini_thumb_buf, sizeof(mini_thumb_buf))) {
 		mini_thumb_album = np_album_id;
 		mini_thumb_generation = cover_new_display_generation();
@@ -5619,15 +5702,24 @@ static void np_mini_thumb_refresh(void) {
 }
 
 // A track outside the library: the mini player gets the picture the player
-// decoded, at its size. Once per picture, 6 KB.
+// decoded, at its size. Once per picture; compact mode requests no private copy.
 static void np_mini_from_cover(void) {
-	if (!sx_mini_wants_cover() || np_album_id != 0 || mini_thumb_album != 0) {
+	if (!sx_mini_wants_cover() || (np_album_id && mini_thumb_album == np_album_id && mini_cover_copy.pixels)) {
 		return;
+	}
+	if (np_album_id) {
+		// A full cover can arrive before the shared thumbnail. Its identity must
+		// already belong to this track; never reuse the previous track's pixels.
+		device_state_t state;
+		device_state_get(&state);
+		if (cover_request_outstanding || cover_id_state != COVER_ID_IDLE || strcmp(cover_shown_path, state.current_file))
+			return;
 	}
 	sx_mini_set_cover(NULL, 0);
 	sx_artview_release_cover(&mini_cover_copy);
 	if (current_cover.pixels && cover_scaled_copy(&current_cover, SX_MINI_COVER, &mini_cover_copy)) {
 		mini_cover_copy.dsc.data = mini_cover_copy.pixels;
+		mini_thumb_album = np_album_id;
 		sx_mini_set_cover(&mini_cover_copy.dsc, mini_cover_copy.display_generation);
 	}
 }
@@ -5637,17 +5729,15 @@ static void np_mini_from_cover(void) {
 void player_mini_mode_changed(void) {
 	sx_mini_set_cover(NULL, 0);
 	mini_thumb_album = 0;
+	mini_large_attempted = 0;
 	sx_artview_release_cover(&mini_cover_copy);
+	if (!sx_mini_wants_cover() && !cover_request_outstanding)
+		np_thumb240_drop();
 	if (sx_mini_wants_cover()) {
-		np_mini_thumb_refresh();
 		np_mini_from_cover();
+		np_mini_thumb_refresh();
 	}
 }
-
-static uint32_t thumb240_ticket;
-static lv_image_dsc_t thumb240_dsc;
-static bool thumb240_held;
-static int64_t thumb240_album;
 
 static void np_thumb240_drop(void) {
 	if (thumb240_ticket) {
@@ -5674,6 +5764,8 @@ static void thumb240_arrived(int64_t album_id, int size, const lv_image_dsc_t *d
 		return;
 	}
 	lv_image_dsc_t copy = *dsc;
+	if (album_id == np_album_id)
+		np_mini_take_thumb240(&copy);
 	// Only while the picture it stands in for is still on its way, and for the
 	// album that is playing.
 	if (album_id != np_album_id || !cover_request_outstanding || layout_studio_now || !cover_thumb_img) {
@@ -5698,7 +5790,7 @@ static void thumb240_arrived(int64_t album_id, int size, const lv_image_dsc_t *d
 
 // Asked when the artwork is about to change (reload_cover).
 static void np_thumb240_request(void) {
-	if (np_album_id == 0 || layout_studio_now || !cover_thumb_img) {
+	if (np_album_id == 0 || (!sx_mini_wants_cover() && (layout_studio_now || !cover_thumb_img))) {
 		np_thumb240_drop();
 		return;
 	}
@@ -5729,15 +5821,12 @@ static void np_album_changed(const char *path, bool live) {
 	}
 	if (id != np_album_id) {
 		np_thumb240_drop();
-	}
-	np_album_id = id;
-	if (id == 0 && mini_thumb_album) {
 		sx_mini_set_cover(NULL, 0);
 		mini_thumb_album = 0;
-	}
-	if (id != 0) {
+		mini_large_attempted = 0;
 		sx_artview_release_cover(&mini_cover_copy);
 	}
+	np_album_id = id;
 	np_album_tone_known = np_album_tone_now();
 	np_mini_thumb_refresh();
 }
@@ -6466,6 +6555,8 @@ static void np_outside_watch(const device_state_t *state) {
 			sx_mini_set_track(title, NULL, air.playing ? air.artist : NULL, true);
 			sx_mini_set_cover(NULL, 0);
 			mini_thumb_album = 0;
+			mini_large_attempted = 0;
+			sx_artview_release_cover(&mini_cover_copy);
 			upnext_update();
 		}
 		return;
@@ -6510,6 +6601,8 @@ static void np_poll(const device_state_t *state) {
 	}
 	np_outside_watch(state);
 	trackmenu_queue_poll(); // the queue page, when it is up and its queue moved
+	historypage_poll();
+	searchall_poll();
 	// The chain can change under a track -- a codec renegotiated, headphones
 	// switched, the output reopened at another rate -- so it is read again,
 	// but only for a line somebody can see.
@@ -7130,7 +7223,7 @@ void player_init(gui_config_t *cfg) {
 	play_btn = lv_btn_create(player_controls_buttons);
 	lv_obj_set_size(play_btn, SX_NP_PLAY, SX_NP_PLAY);
 	lv_obj_set_style_radius(play_btn, LV_RADIUS_CIRCLE, 0);
-	lv_obj_set_style_bg_color(play_btn, sx_pal()->mini_bg, 0); // repainted by set_over_cover
+	lv_obj_set_style_bg_color(play_btn, sx_pal()->mini_action, 0); // repainted by set_over_cover
 	lv_obj_set_style_bg_opa(play_btn, LV_OPA_COVER, 0);
 	lv_obj_set_style_shadow_width(play_btn, 0, 0);
 	lv_obj_add_event_cb(play_btn, play_btn_event_cb, LV_EVENT_CLICKED, NULL);

@@ -54,6 +54,8 @@ static yandexlist_t *queue_get(void) {
 }
 
 // Replaces the queue (GUI thread). Takes over `list`'s reference.
+yandexlist_t *yandexplay_queue_view(void) { return queue_get(); }
+
 static void queue_set(yandexlist_t *list, bool wave) {
 	pthread_mutex_lock(&queue_lock);
 	yandexlist_t *old = queue;

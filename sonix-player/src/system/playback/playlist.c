@@ -8,8 +8,8 @@
 #include "src/system/core/utils.h"
 
 #include <dirent.h>
-#include <stdint.h>
 #include <errno.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -128,8 +128,8 @@ static const char *entry_path(size_t entry) {
 	return path_cache[oldest].path;
 }
 
-static size_t *order;	// permutation of [0, entry_count)
-static size_t pos = 0;	// where playback is, as an index into `order`
+static size_t *order;  // permutation of [0, entry_count)
+static size_t pos = 0; // where playback is, as an index into `order`
 
 static bool custom_queue = false;
 static playback_mode_t mode = PLAYBACK_MODE_NORMAL;
@@ -148,20 +148,19 @@ static bool ordered_queue = false;
 // Shuffle only applies to a queue that does not carry an order of its own. Both
 // shuffled modes are shuffling here: they are dealt the same, and differ only
 // in what happens when the deal runs out.
-static bool shuffling(void) {
-	return (mode == PLAYBACK_MODE_SHUFFLE || mode == PLAYBACK_MODE_SHUFFLE_REPEAT) && !ordered_queue;
-}
+static bool shuffling(void) { return (mode == PLAYBACK_MODE_SHUFFLE || mode == PLAYBACK_MODE_SHUFFLE_REPEAT) && !ordered_queue; }
 
 // Bumped by everything that changes the entries or the order. The on-disk
 // mirror of the queue only rewrites its list when this moves.
 static unsigned revision = 0;
+static unsigned source_revision;
 
 // Where the last "add to queue" landed, so the next one goes after it rather
 // than in front of it. Only valid while playback still sits on the track the
 // chain started from: `chain_from` is that position, and anything that moves
 // `pos` breaks the chain by no longer matching.
-static size_t chain_from;  // the pos the chain was anchored at
-static size_t chain_slot;  // order-index of the last track added
+static size_t chain_from; // the pos the chain was anchored at
+static size_t chain_slot; // order-index of the last track added
 static bool chain_valid;
 
 // The album this queue is, when it is one. See playlist.h.
@@ -191,9 +190,7 @@ void playlist_set_album(const char *album) {
 
 // After a restore: the label came off the card, so putting it back is not a
 // change to write down again.
-void playlist_note_album_restored(void) {
-	snprintf(persisted_album, sizeof(persisted_album), "%s", queue_album);
-}
+void playlist_note_album_restored(void) { snprintf(persisted_album, sizeof(persisted_album), "%s", queue_album); }
 
 const char *playlist_album(void) { return queue_album; }
 
@@ -213,17 +210,13 @@ bool playlist_is_junk_name(const char *name) {
 
 	// FAT recovery directories are not music. The file manager can explicitly
 	// reveal service entries without deleting or changing their contents.
-	if (!strcasecmp(name, "LOST.DIR") ||
-		(strlen(name) == 9 && !strncasecmp(name, "FOUND.", 6) &&
-		 name[6] >= '0' && name[6] <= '9' && name[7] >= '0' && name[7] <= '9' &&
-		 name[8] >= '0' && name[8] <= '9')) {
+	if (!strcasecmp(name, "LOST.DIR") || (strlen(name) == 9 && !strncasecmp(name, "FOUND.", 6) && name[6] >= '0' && name[6] <= '9' && name[7] >= '0' && name[7] <= '9' && name[8] >= '0' && name[8] <= '9')) {
 		return true;
 	}
 
 	// And the rest of what a desktop scatters over a card. Nothing here is a
 	// track, and a folder of them is not a folder of music.
-	static const char *const JUNK[] = {".DS_Store", "__MACOSX", ".Spotlight-V100", ".Trashes",
-									   ".fseventsd", "$RECYCLE.BIN", "System Volume Information"};
+	static const char *const JUNK[] = {".DS_Store", "__MACOSX", ".Spotlight-V100", ".Trashes", ".fseventsd", "$RECYCLE.BIN", "System Volume Information"};
 	for (size_t i = 0; i < sizeof(JUNK) / sizeof(JUNK[0]); i++) {
 		if (strcasecmp(name, JUNK[i]) == 0) {
 			return true;
@@ -235,9 +228,7 @@ bool playlist_is_junk_name(const char *name) {
 bool playlist_is_playable_file(const char *name) {
 	// .m4b and .m4a joined the list when AAC did: an audiobook is a file like
 	// any other in the browser, and a folder of them has to queue.
-	static const char *const playable_exts[] = {".wav",  ".mp3",  ".flac", ".ogg", ".m4b", ".m4a",
-												 ".alac", ".aac",  ".dsf",  ".dff", ".aif", ".aiff",
-												 ".aifc", ".caf",  ".opus", ".wv",   ".ape"};
+	static const char *const playable_exts[] = {".wav", ".mp3", ".flac", ".ogg", ".m4b", ".m4a", ".alac", ".aac", ".dsf", ".dff", ".aif", ".aiff", ".aifc", ".caf", ".opus", ".wv", ".ape"};
 
 	if (!name || playlist_is_junk_name(name)) {
 		return false;
@@ -315,6 +306,7 @@ static void sort_folder(const char *folder) {
 }
 
 void playlist_clear(void) {
+	source_revision++;
 	for (size_t i = 0; i < appended_count(); i++) {
 		free(paths ? paths[i] : NULL);
 	}
@@ -523,9 +515,7 @@ static void order_shuffle_upcoming(void) {
 // anybody looks.
 // ---------------------------------------------------------------------------
 
-static bool entry_queued_next(size_t entry) {
-	return next_flags && entry >= ix_count && entry - ix_count < appended_count() && next_flags[entry - ix_count];
-}
+static bool entry_queued_next(size_t entry) { return next_flags && entry >= ix_count && entry - ix_count < appended_count() && next_flags[entry - ix_count]; }
 
 static void entry_mark_queued_next(size_t entry, bool on) {
 	if (next_flags && entry >= ix_count && entry - ix_count < appended_count()) {
@@ -710,8 +700,7 @@ void playlist_load_folder(const char *folder, const char *selected_filename) {
 	// A readdir() that stops early leaves a queue missing most of the album,
 	// which shows up as playback ending after the first track.
 	if (errno != 0) {
-		fprintf(stderr, "playlist: readdir stopped after %zu entries in '%s': %s\n", entry_count, folder,
-				strerror(errno));
+		fprintf(stderr, "playlist: readdir stopped after %zu entries in '%s': %s\n", entry_count, folder, strerror(errno));
 	}
 
 	closedir(dir);
@@ -930,8 +919,7 @@ static int queue_insert(const char *const *list, int count, playlist_queue_where
 	if (where == PLAYLIST_QUEUE_END) {
 		slot = old_count;
 	} else {
-		slot = (chain_valid && chain_from == pos && chain_slot > pos && chain_slot < old_count) ? chain_slot + 1
-																								 : pos + 1;
+		slot = (chain_valid && chain_from == pos && chain_slot > pos && chain_slot < old_count) ? chain_slot + 1 : pos + 1;
 	}
 	if (slot > old_count) {
 		slot = old_count; // append
@@ -1314,9 +1302,9 @@ struct playlist_snapshot {
 	library_index_t *ix; // a clone of the list's handle, or NULL for a queue of paths
 	size_t ix_count;
 	size_t appended;
-	char **paths;	 // the appended entries' paths, `appended` of them
-	uint8_t *flags;	 // their "play next" marks
-	size_t *order;	 // entry_count of them
+	char **paths;	// the appended entries' paths, `appended` of them
+	uint8_t *flags; // their "play next" marks
+	size_t *order;	// entry_count of them
 	size_t entry_count;
 	size_t pos;
 	bool custom;
@@ -1482,6 +1470,7 @@ bool playlist_is_custom(void) { return custom_queue; }
 void playlist_set_custom(bool custom) { custom_queue = custom; }
 
 unsigned playlist_revision(void) { return revision; }
+unsigned playlist_source_revision(void) { return source_revision; }
 
 // How far either side of where playback is a library-backed queue will look
 // for a track. A queue of paths is walked whole -- the strings are right there
@@ -1793,11 +1782,7 @@ bool playlist_export_batch(const playlist_export_t *state, int offset, playlist_
 }
 
 bool playlist_export_ack(const playlist_export_t *state, const library_export_receipt_t *receipt) {
-	if (!receipt || !receipt->valid || !export_current(state) || !state->library_backed ||
-		state->source.generation != receipt->source.generation || state->source.database_epoch != receipt->source.database_epoch ||
-		state->source.spec.valid != receipt->source.spec.valid || state->source.spec.kind != receipt->source.spec.kind ||
-		state->source.spec.filter != receipt->source.spec.filter || state->source.spec.order != receipt->source.spec.order ||
-		state->source.spec.desc != receipt->source.spec.desc || strcmp(state->source.spec.value, receipt->source.spec.value) != 0)
+	if (!receipt || !receipt->valid || !export_current(state) || !state->library_backed || state->source.generation != receipt->source.generation || state->source.database_epoch != receipt->source.database_epoch || state->source.spec.valid != receipt->source.spec.valid || state->source.spec.kind != receipt->source.spec.kind || state->source.spec.filter != receipt->source.spec.filter || state->source.spec.order != receipt->source.spec.order || state->source.spec.desc != receipt->source.spec.desc || strcmp(state->source.spec.value, receipt->source.spec.value) != 0)
 		return false;
 	return library_index_export_ack(source_ix, receipt);
 }
@@ -2315,8 +2300,7 @@ bool playlist_next_folder(const char *root, const char *folder, char *out, size_
 // Undoing an addition (UI 2.0's toast with "Undo")
 // ---------------------------------------------------------------------------
 
-int playlist_queue_paths_undoable(const char *const *list, int count, playlist_queue_where_t where,
-								  playlist_queue_undo_t *undo) {
+int playlist_queue_paths_undoable(const char *const *list, int count, playlist_queue_where_t where, playlist_queue_undo_t *undo) {
 	if (undo) {
 		memset(undo, 0, sizeof(*undo));
 		undo->was_empty = entry_count == 0 || !order;
@@ -2339,8 +2323,7 @@ bool playlist_queue_undo(const playlist_queue_undo_t *undo) {
 	// Only the very change it was made for: anything since -- another addition,
 	// a removal, a new deal, a new queue -- has moved the revision, and the
 	// entries it would take out may no longer be the ones it added.
-	if (!undo || !undo->valid || undo->added == 0 || undo->revision != revision || !order ||
-		undo->first_new + undo->added != entry_count || undo->first_new < ix_count) {
+	if (!undo || !undo->valid || undo->added == 0 || undo->revision != revision || !order || undo->first_new + undo->added != entry_count || undo->first_new < ix_count) {
 		return false;
 	}
 	size_t first = undo->first_new;

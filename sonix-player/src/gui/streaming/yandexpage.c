@@ -1,4 +1,6 @@
 #include "yandexpage.h"
+#include "src/gui/nowplaying/trackmenu.h"
+#include "src/gui/shell/playbackplace.h"
 
 #include <pthread.h>
 #include <stdint.h>
@@ -13,8 +15,8 @@
 #include "src/gui/shell/confirm.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/keyboard.h"
-#include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/main_menu.h"
+#include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/spinner.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/sx_card.h"
@@ -487,6 +489,14 @@ static void run_list_job(const job_t *job) {
 			ok = yandex_search_spoken(job->a, job->kind == JOB_SEARCH_BOOKS ? YANDEX_CONTENT_AUDIOBOOK : YANDEX_CONTENT_PODCAST, al, &na, tmp, &nt);
 		}
 		int n = ok ? 0 : -1;
+		if (job->kind == JOB_SEARCH && job->b[0]) {
+			if (strcmp(job->b, "artists"))
+				nr = 0;
+			if (strcmp(job->b, "albums"))
+				na = 0;
+			if (strcmp(job->b, "tracks"))
+				nt = 0;
+		}
 		for (int i = 0; n == 0 && i < nr; i++) {
 			result[result_count].kind = ROW_ARTIST;
 			result[result_count++].u.artist = ar[i];
@@ -686,10 +696,12 @@ static void run(job_kind_t kind, const char *a, const char *b, int n) {
 
 static bool playing_update(void);
 
+static void confirm_requested_place(void);
 static void playback_event(yandexplay_event_t event, const char *text) {
 	lv_obj_set_hidden(list_spin, true);
 	switch (event) {
 	case YANDEXPLAY_STARTED:
+		confirm_requested_place();
 		// 2.0: the page stays, the mini player comes up with the track (the
 		// player is a tap on it away), and the playing row is marked.
 		player_refresh_now_playing();
@@ -1199,6 +1211,9 @@ static int list_history_len;
 static list_step_t list_current;
 static bool list_has_current;
 static bool list_restore_pending;
+static playbackplace_t requested_place;
+static char requested_track[64];
+static bool returning_place;
 static unsigned list_restore_generation;
 
 static void show_list(const list_step_t *step);
@@ -1227,16 +1242,10 @@ static bool list_back_guard(void) {
 	return true;
 }
 
-static void open_list(const char *title, job_kind_t kind, const char *a, const char *b) {
-	list_step_t step;
-	memset(&step, 0, sizeof(step));
-	step.kind = kind;
-	snprintf(step.title, sizeof(step.title), "%s", title ? title : "");
-	snprintf(step.a, sizeof(step.a), "%s", a ? a : "");
-	snprintf(step.b, sizeof(step.b), "%s", b ? b : "");
+static void note_list_step(const list_step_t *step) {
 	if (lv_screen_active() != list_screen) {
 		list_history_len = 0; // entering from outside: the history restarts
-	} else if (list_has_current && list_current.kind != JOB_WAVE && !same_list(&list_current, &step)) {
+	} else if (list_has_current && list_current.kind != JOB_WAVE && !same_list(&list_current, step)) {
 		if (list_history_len == LIST_HISTORY_DEPTH) {
 			memmove(list_history, list_history + 1, (LIST_HISTORY_DEPTH - 1) * sizeof(list_history[0]));
 			list_history_len--;
@@ -1245,6 +1254,16 @@ static void open_list(const char *title, job_kind_t kind, const char *a, const c
 			svclist_capture(list, &list_current.anchor);
 		list_history[list_history_len++] = list_current;
 	}
+}
+
+static void open_list(const char *title, job_kind_t kind, const char *a, const char *b) {
+	list_step_t step;
+	memset(&step, 0, sizeof(step));
+	step.kind = kind;
+	snprintf(step.title, sizeof(step.title), "%s", title ? title : "");
+	snprintf(step.a, sizeof(step.a), "%s", a ? a : "");
+	snprintf(step.b, sizeof(step.b), "%s", b ? b : "");
+	note_list_step(&step);
 	list_current = step;
 	list_has_current = true;
 	show_list(&step);
@@ -1331,6 +1350,21 @@ static void show_list(const list_step_t *step) {
 		}
 		return;
 	}
+	if (returning_place && kind == JOB_WAVE) {
+		yandexlist_t *view = yandexplay_queue_view();
+		job_result_t *r = view ? calloc(1, sizeof(*r)) : NULL;
+		if (r) {
+			r->kind = JOB_WAVE;
+			r->generation = list_generation;
+			r->list = view;
+			job_done_async(r);
+		} else {
+			yandexlist_free(view);
+			lv_label_set_text(list_message, tr("trackmenu_queue_empty"));
+			lv_obj_set_hidden(list_message, false);
+		}
+		return;
+	}
 	lv_obj_set_hidden(list_spin, false);
 	run(kind, a, b, 0);
 }
@@ -1347,7 +1381,34 @@ static void retry_list(void) {
 // a liked list of thousands as ids, each track's details and file fetched
 // when playback nears it (yandexplay.c). A list of mixed rows (search, an
 // artist, what is saved) queues its tracks.
+static void remember_requested_place(int tapped) {
+	requested_track[0] = 0;
+	if (!list_has_current || !shown)
+		return;
+	row_t row;
+	if (shown->list)
+		yandexlist_ids(shown->list, tapped, requested_track, sizeof(requested_track), NULL, 0);
+	else if (view_row(tapped, &row) && row.kind == ROW_TRACK)
+		snprintf(requested_track, sizeof(requested_track), "%s", row.u.track.id);
+	requested_place = (playbackplace_t){.kind = list_current.kind, .index = tapped};
+	snprintf(requested_place.title, sizeof(requested_place.title), "%s", list_current.title);
+	snprintf(requested_place.a, sizeof(requested_place.a), "%s", list_current.a);
+	snprintf(requested_place.b, sizeof(requested_place.b), "%s", list_current.b);
+}
+
+static void confirm_requested_place(void) {
+	if (!requested_track[0])
+		return;
+	char path[512], id[64];
+	audio_get_current_file(path, sizeof(path));
+	yandexcache_track_id(path, id, sizeof(id));
+	if (!strcmp(id, requested_track))
+		playbackplace_arm("yandex", &requested_place, path);
+	requested_track[0] = 0;
+}
+
 static void play_rows(int tapped) {
+	remember_requested_place(tapped);
 	row_t r;
 	bool have = view_row(tapped, &r);
 	if (have && r.kind == ROW_TRACK && r.u.track.content_type == YANDEX_CONTENT_EPISODE) {
@@ -1866,8 +1927,11 @@ static void ensure_list(void) {
 static void build_list_page(gui_config_t *cfg) {
 	list_cfg = cfg;
 	list_screen = lv_obj_create(NULL);
+	switcher_browse_bind("yandex", list_screen, yandex_screen);
 	lv_obj_add_style(list_screen, &theme_style_screen, 0);
 	list_title = settingsrow_title(list_screen, cfg, "");
+	settingsrow_title_corner_slots(list_title, cfg, 1);
+	trackmenu_queue_button(list_screen, cfg, 0);
 	int top = settingsrow_content_top(cfg);
 
 	wave_bar = lv_obj_create(list_screen);
@@ -2101,6 +2165,7 @@ static void search_accept_cb(lv_event_t *e) {
 
 static void build_search_page(gui_config_t *cfg) {
 	search_screen = lv_obj_create(NULL);
+	switcher_browse_bind("yandex", search_screen, yandex_screen);
 	lv_obj_add_style(search_screen, &theme_style_screen, 0);
 	main_menu_search_header(search_screen, cfg, HOME_YANDEX);
 	int top = settingsrow_content_top(cfg);
@@ -2121,6 +2186,7 @@ static void build_search_page(gui_config_t *cfg) {
 	lv_obj_set_style_pad_hor(search_field, SX_CARD_PAD_H, 0);
 	lv_obj_set_style_text_font(search_field, &font_ui_24, 0);
 	keyboard_style_caret(search_field);
+	main_menu_search_bind(search_screen, search_field);
 	lv_obj_t *modes = sx_card_pills(search_screen);
 	lv_obj_set_width(modes, cfg->screen_width - 2 * SX_BODY_PAD_L);
 	lv_obj_set_pos(modes, SX_BODY_PAD_L, top + 72);
@@ -2203,7 +2269,7 @@ static void job_done_async(void *user) {
 	// asked for now if it is not here yet (once a session, see yandexsync).
 	yandexsync_likes_refresh(NULL);
 	// My Wave plays as soon as it has something: that is what the button means.
-	if (r->kind == JOB_WAVE && view_count() > 0 && wave_sleep_serial == sleeptimer_expiration_serial()) {
+	if (!returning_place && r->kind == JOB_WAVE && view_count() > 0 && wave_sleep_serial == sleeptimer_expiration_serial()) {
 		play_rows(0);
 	}
 }
@@ -2279,6 +2345,30 @@ static void open_new_releases_cb(lv_event_t *e) {
 	(void)e;
 	open_list(tr("yandex_new_releases"), JOB_NEW_RELEASES, NULL, NULL);
 }
+void yandexpage_search_results_kind(const char *query, int kind) {
+	gui_init_rest();
+	if (!yandex_logged_in()) {
+		switch_screen(yandex_screen);
+		return;
+	}
+	static const char *const kinds[] = {"tracks", "albums", "artists"};
+	open_list(query, JOB_SEARCH, query, kind >= 0 && kind <= 2 ? kinds[kind] : NULL);
+}
+
+void yandexpage_search_results(const char *query) { yandexpage_search_results_kind(query, -1); }
+
+void yandexpage_open_artist(const char *id, const char *name) {
+	if (yandex_logged_in())
+		open_list(name, JOB_ARTIST, id, NULL);
+}
+
+void yandexpage_note_search_play(const char *query, const char *path) {
+	playbackplace_t place = {.kind = JOB_SEARCH};
+	snprintf(place.title, sizeof(place.title), "%s", query);
+	snprintf(place.a, sizeof(place.a), "%s", query);
+	playbackplace_arm("yandex", &place, path);
+}
+
 void yandexpage_search_open(void) {
 	gui_init_rest();
 	switch_screen(yandex_logged_in() ? search_screen : yandex_screen);
@@ -2476,6 +2566,48 @@ bool yandexpage_open_album(const char *album_id, const char *title) {
 	return true;
 }
 
+static bool provider_open_playback_place(void) {
+	playbackplace_t place;
+	if (!yandex_logged_in() || !playbackplace_get("yandex", &place))
+		return false;
+	switch ((job_kind_t)place.kind) {
+	case JOB_LIKED:
+	case JOB_PLAYLIST:
+	case JOB_ALBUM:
+	case JOB_ARTIST:
+	case JOB_SEARCH:
+	case JOB_SAVED:
+	case JOB_SAVED_ALBUM:
+	case JOB_SEARCH_BOOKS:
+	case JOB_SEARCH_PODCASTS:
+	case JOB_WAVE:
+	case JOB_ARTIST_TRACKS:
+	case JOB_CHART:
+		break;
+	default:
+		return false;
+	}
+	list_step_t step = {.kind = (job_kind_t)place.kind};
+	snprintf(step.title, sizeof(step.title), "%.*s", (int)sizeof(step.title) - 1, place.title);
+	snprintf(step.a, sizeof(step.a), "%.*s", (int)sizeof(step.a) - 1, place.a);
+	snprintf(step.b, sizeof(step.b), "%.*s", (int)sizeof(step.b) - 1, place.b);
+	char path[512], id[64];
+	audio_get_current_file(path, sizeof(path));
+	yandexcache_track_id(path, id, sizeof(id));
+	if (!id[0])
+		yandexcache_track_id(place.path, id, sizeof(id));
+	step.anchor = (svclist_anchor_t){.index = place.index, .valid = true};
+	if (id[0])
+		snprintf(step.anchor.key, sizeof(step.anchor.key), "%d:%zu:%s:", ROW_TRACK, strlen(id), id);
+	note_list_step(&step);
+	list_current = step;
+	list_has_current = true;
+	returning_place = true;
+	show_list(&list_current);
+	returning_place = false;
+	return true;
+}
+
 static void *provider_open_album(const char *album_id, const char *title) { return yandexpage_open_album(album_id, title) ? list_screen : NULL; }
 
 void yandexpage_init(gui_config_t *cfg) {
@@ -2483,12 +2615,14 @@ void yandexpage_init(gui_config_t *cfg) {
 	// follows the card through the registry (stream_provider_set_root_all):
 	// here only the parts that need the GUI -- the mark over the artwork and
 	// "Show album" (provider.h).
-	const stream_provider_gui_t provider_gui = {.badge = &icon_yandex_badge, .open_album = provider_open_album};
+	const stream_provider_gui_t provider_gui = {.badge = &icon_yandex_badge, .open_album = provider_open_album, .open_playback_place = provider_open_playback_place};
 	stream_provider_attach_gui("yandex", &provider_gui);
 
 	yandex_screen = lv_obj_create(NULL);
+	switcher_browse_bind("yandex", yandex_screen, yandex_screen);
 	lv_obj_add_style(yandex_screen, &theme_style_screen, 0);
-	settingsrow_title(yandex_screen, cfg, "yandex");
+	settingsrow_title_corner_slots(settingsrow_title(yandex_screen, cfg, "yandex"), cfg, 1);
+	trackmenu_queue_button(yandex_screen, cfg, 0);
 
 	// The handoff's page: a column of cards, the sections first -- the
 	// prototype's five (My Wave, Liked, Playlists, Search, Saved on the card)

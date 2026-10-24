@@ -262,6 +262,8 @@ void playlist_set_custom(bool custom);
 // survives a power cycle -- watches this to know when a full rewrite is due
 // rather than rewriting on every track change.
 unsigned playlist_revision(void);
+// A different queue source, not a next/previous step or an insertion/reorder.
+unsigned playlist_source_revision(void);
 
 // GUI-owned bounded export. No worker may read the live queue. A producer
 // fills one caller-owned batch; a changed order/query rejects the whole capture.
@@ -390,8 +392,7 @@ typedef struct {
 	unsigned revision;
 } playlist_queue_undo_t;
 
-int playlist_queue_paths_undoable(const char *const *paths, int count, playlist_queue_where_t where,
-								  playlist_queue_undo_t *undo);
+int playlist_queue_paths_undoable(const char *const *paths, int count, playlist_queue_where_t where, playlist_queue_undo_t *undo);
 bool playlist_queue_undo(const playlist_queue_undo_t *undo);
 
 #endif // PLAYLIST_H

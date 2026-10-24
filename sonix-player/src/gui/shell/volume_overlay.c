@@ -59,7 +59,7 @@ static void apply_theme(void) {
 	const sx_palette_t *p = sx_pal();
 	lv_obj_set_style_bg_color(overlay, p->mini_bg, 0);
 	lv_obj_set_style_bg_color(overlay_slider, p->mini_ink, LV_PART_MAIN);
-	lv_obj_set_style_bg_color(overlay_slider, p->mini_ink, LV_PART_INDICATOR);
+	lv_obj_set_style_bg_color(overlay_slider, p->mini_action, LV_PART_INDICATOR);
 	lv_obj_set_style_image_recolor(overlay_icon, p->mini_ink, 0);
 	apply_label_color(shown_percent);
 }
@@ -173,9 +173,9 @@ void volume_overlay_init(gui_config_t *cfg) {
 	overlay = lv_obj_create(lv_layer_top());
 	lv_obj_remove_style_all(overlay);
 	lv_obj_set_size(overlay, OVERLAY_WIDTH, OVERLAY_HEIGHT);
-	lv_obj_set_pos(overlay, (int32_t)cfg->screen_width - SX_VOL_OSD_RIGHT - OVERLAY_WIDTH,
-				   ((int32_t)cfg->screen_height - OVERLAY_HEIGHT) / 2);
+	lv_obj_set_pos(overlay, (int32_t)cfg->screen_width - SX_VOL_OSD_RIGHT - OVERLAY_WIDTH, ((int32_t)cfg->screen_height - OVERLAY_HEIGHT) / 2);
 	lv_obj_set_style_radius(overlay, OVERLAY_RADIUS, 0);
+	sx_chrome_edge(overlay, SX_CHROME_FLOATING);
 	lv_obj_set_style_bg_color(overlay, sx_pal()->mini_bg, 0);
 	lv_obj_set_style_bg_opa(overlay, LV_OPA_COVER, 0);
 	lv_obj_set_style_pad_ver(overlay, 16, 0);

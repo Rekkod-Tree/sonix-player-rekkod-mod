@@ -1,5 +1,47 @@
 ﻿# Features
 
+## Listening context and mini-player (in development; R1 acceptance pending)
+
+- Normal mini-player uses an 88 px cover, a readable two-line caption and a
+  full-colour action button. Compact keeps its smaller footer without artwork;
+  Home uses Normal while the saved Compact preference applies elsewhere.
+  Artwork reuses the existing cache, with a small-thumbnail fallback.
+- Holding the mini-player previews a relative seek with target time and delta;
+  releasing commits once. Moving upward, losing the press or changing tracks
+  cancels. Unknown-length/live playback retains its ordinary controls.
+- Listening history records confirmed audio starts, including local books and
+  podcasts. Pause/resume and updated tags keep one event; a new listen gets a new
+  event. Pending writes are bounded and tied to the card that admitted them.
+  History and queue captions identify the source before the artist.
+- Card and service playback origins are remembered independently of browsing.
+  Section tiles reopen the last catalog page and scroll position in the current
+  session; a player-menu action opens the confirmed playback source. A first
+  entry without browsing context falls back to that source. Contexts are
+  invalidated on a card change; catalog pages retain their existing data.
+  Returning to a source reuses existing catalog pages and queue state; it does
+  not start a replacement wave. Queue shortcuts open the existing queue or book
+  chapters, and Back retains the caller's navigation context.
+- Everywhere search shares one query with Card, Yandex Music, Zvuk, Tidal,
+  Qobuz, Subsonic/Navidrome and the podcast directory. Connected sources appear
+  in the source picker; their native clients and pages handle result actions.
+  Podcast feeds retain their own type rather than becoming music albums. A small
+  grouped overview links to each full result list. Network search runs only on
+  submission, uses bounded payloads and exits each service worker when idle.
+  Slow services do not delay each other; pending work coalesces to the latest
+  query. Type filters appear after submission and filter retained results
+  without network requests. Editing shows deduplicated query history. Late query,
+  card and logged-out-service results cannot replace current results. A retry
+  addresses only its source, retaining other results. Overview workers also cap
+  response bodies at 256 KiB each, without limiting native lists or downloads.
+- Close-delimited API responses reject a network read failure instead of
+  reporting a partial body as successful. A clean EOF and an intentionally
+  limited prefix retain their existing behavior.
+- Rounded menus, the quick panel and mini-player share palette-specific edge
+  rendering. Graphite uses quiet curved edges; LCD keeps its mini-player plain
+  while separating overlay menus and the quick panel from nearby cards.
+  Terminal palettes retain full frames. These edges do not change control sizes
+  or add background work.
+
 ## Bluetooth service lifecycle (main; replacement image pending)
 
 - A BlueZ or BlueALSA owner replacement invalidates cached endpoints and late

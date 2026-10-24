@@ -39,9 +39,9 @@
 #include "src/system/device/power.h"
 #include "src/system/net/wifi.h"
 #include "src/system/net/wifitransfer.h"
-#include "src/system/playback/sleeptimer.h"
-#include "src/system/playback/device_state.h"
 #include "src/system/playback/audiobook.h"
+#include "src/system/playback/device_state.h"
+#include "src/system/playback/sleeptimer.h"
 #include "src/system/remote/airplay.h"
 #include "src/system/remote/dlna.h"
 #include "src/system/remote/sonixlink.h"
@@ -126,67 +126,19 @@ static lv_obj_t *filter_btn;
 // the circles. The keys stay out of the language files, where they never
 // belonged.
 static const char *const button_key[QP_BTN_COUNT] = {
-	[QP_BTN_WIFI] = "wifi",
-	[QP_BTN_BLUETOOTH] = "bluetooth",
-	[QP_BTN_AIRPLAY] = "airplay",
-	[QP_BTN_MSEB] = "mseb",
-	[QP_BTN_EQ] = "eq",
-	[QP_BTN_FADE] = "fade",
-	[QP_BTN_GAIN] = "gain",
-	[QP_BTN_LINEOUT] = "lineout",
-	[QP_BTN_SONIXLINK] = "sonixlink",
-	[QP_BTN_PEQ] = "peq",
-	[QP_BTN_DLNA] = "dlna",
-	[QP_BTN_SLEEP] = "sleep",
-	[QP_BTN_WIFI_TRANSFER] = "wifi_transfer",
-	[QP_BTN_GAPLESS] = "gapless",
-	[QP_BTN_VOLUME_LIMIT] = "volume_limit",
-	[QP_BTN_DAC] = "dac",
-	[QP_BTN_DAC_FILTER] = "dac_filter",
+	[QP_BTN_WIFI] = "wifi", [QP_BTN_BLUETOOTH] = "bluetooth", [QP_BTN_AIRPLAY] = "airplay", [QP_BTN_MSEB] = "mseb", [QP_BTN_EQ] = "eq", [QP_BTN_FADE] = "fade", [QP_BTN_GAIN] = "gain", [QP_BTN_LINEOUT] = "lineout", [QP_BTN_SONIXLINK] = "sonixlink", [QP_BTN_PEQ] = "peq", [QP_BTN_DLNA] = "dlna", [QP_BTN_SLEEP] = "sleep", [QP_BTN_WIFI_TRANSFER] = "wifi_transfer", [QP_BTN_GAPLESS] = "gapless", [QP_BTN_VOLUME_LIMIT] = "volume_limit", [QP_BTN_DAC] = "dac", [QP_BTN_DAC_FILTER] = "dac_filter",
 };
 
 static const char *const button_tag[QP_BTN_COUNT] = {
-	[QP_BTN_WIFI] = "wi_fi",
-	[QP_BTN_BLUETOOTH] = "bluetooth",
-	[QP_BTN_AIRPLAY] = "airplay",
-	[QP_BTN_MSEB] = "mseb",
-	[QP_BTN_EQ] = "equaliser",
-	[QP_BTN_FADE] = "fade",
-	[QP_BTN_GAIN] = "gain",
-	[QP_BTN_LINEOUT] = "quickpanel_line_out",
-	[QP_BTN_SONIXLINK] = "sonixlink",
-	[QP_BTN_PEQ] = "peq",
-	[QP_BTN_DLNA] = "dlna",
-	[QP_BTN_SLEEP] = "np_sleep",
-	[QP_BTN_WIFI_TRANSFER] = "wifitransfer_title",
-	[QP_BTN_GAPLESS] = "musicsettings_gapless_playback",
-	[QP_BTN_VOLUME_LIMIT] = "musicsettings_volume_limit",
-	[QP_BTN_DAC] = "quickpanel_dac_mode",
-	[QP_BTN_DAC_FILTER] = "musicsettings_filters",
+	[QP_BTN_WIFI] = "wi_fi", [QP_BTN_BLUETOOTH] = "bluetooth", [QP_BTN_AIRPLAY] = "airplay", [QP_BTN_MSEB] = "mseb", [QP_BTN_EQ] = "equaliser", [QP_BTN_FADE] = "fade", [QP_BTN_GAIN] = "gain", [QP_BTN_LINEOUT] = "quickpanel_line_out", [QP_BTN_SONIXLINK] = "sonixlink", [QP_BTN_PEQ] = "peq", [QP_BTN_DLNA] = "dlna", [QP_BTN_SLEEP] = "np_sleep", [QP_BTN_WIFI_TRANSFER] = "wifitransfer_title", [QP_BTN_GAPLESS] = "musicsettings_gapless_playback", [QP_BTN_VOLUME_LIMIT] = "musicsettings_volume_limit", [QP_BTN_DAC] = "quickpanel_dac_mode", [QP_BTN_DAC_FILTER] = "musicsettings_filters",
 };
 
 // Under the circles: a word or two, at most the width of a quarter of the card.
 static const char *const button_label[QP_BTN_COUNT] = {
-	[QP_BTN_WIFI] = "qp_label_wifi",
-	[QP_BTN_BLUETOOTH] = "qp_label_bluetooth",
-	[QP_BTN_AIRPLAY] = "qp_label_airplay",
-	[QP_BTN_MSEB] = "qp_label_mseb",
-	[QP_BTN_EQ] = "qp_label_eq",
-	[QP_BTN_FADE] = "qp_label_fade",
-	[QP_BTN_GAIN] = "qp_label_gain",
-	[QP_BTN_LINEOUT] = "qp_label_lineout",
-	[QP_BTN_SONIXLINK] = "qp_label_sonixlink",
-	[QP_BTN_PEQ] = "qp_label_peq",
-	[QP_BTN_DLNA] = "qp_label_dlna",
-	[QP_BTN_SLEEP] = "qp_label_sleep",
-	[QP_BTN_WIFI_TRANSFER] = "qp_label_wifi_transfer",
-	[QP_BTN_GAPLESS] = "qp_label_gapless",
-	[QP_BTN_VOLUME_LIMIT] = "qp_label_volume_limit",
-	[QP_BTN_DAC] = "qp_label_dac",
-	[QP_BTN_DAC_FILTER] = "qp_label_dac_filter",
+	[QP_BTN_WIFI] = "qp_label_wifi", [QP_BTN_BLUETOOTH] = "qp_label_bluetooth", [QP_BTN_AIRPLAY] = "qp_label_airplay", [QP_BTN_MSEB] = "qp_label_mseb", [QP_BTN_EQ] = "qp_label_eq", [QP_BTN_FADE] = "qp_label_fade", [QP_BTN_GAIN] = "qp_label_gain", [QP_BTN_LINEOUT] = "qp_label_lineout", [QP_BTN_SONIXLINK] = "qp_label_sonixlink", [QP_BTN_PEQ] = "qp_label_peq", [QP_BTN_DLNA] = "qp_label_dlna", [QP_BTN_SLEEP] = "qp_label_sleep", [QP_BTN_WIFI_TRANSFER] = "qp_label_wifi_transfer", [QP_BTN_GAPLESS] = "qp_label_gapless", [QP_BTN_VOLUME_LIMIT] = "qp_label_volume_limit", [QP_BTN_DAC] = "qp_label_dac", [QP_BTN_DAC_FILTER] = "qp_label_dac_filter",
 };
 
-static uint8_t slots[QP_SLOT_COUNT];  // the grid, QP_BTN_NONE where it is empty
+static uint8_t slots[QP_SLOT_COUNT]; // the grid, QP_BTN_NONE where it is empty
 static uint8_t hidden[QP_BTN_COUNT]; // the buttons that are not in the grid
 static uint8_t hidden_n;
 static bool order_loaded;
@@ -224,16 +176,16 @@ static uint32_t drag_begin_ms;
 // it back before a second one carries the card away.
 // ---------------------------------------------------------------------------
 
-static lv_obj_t *quick_row;	   // the first QP_SLOT_VISIBLE buttons
-static lv_obj_t *extra_clip;	   // the window the stretch opens, under the first lines
-static lv_obj_t *extra_row;	   // the rest, inside that window
-static lv_obj_t *bright_row;	   // moved down by the stretch
+static lv_obj_t *quick_row;		// the first QP_SLOT_VISIBLE buttons
+static lv_obj_t *extra_clip;	// the window the stretch opens, under the first lines
+static lv_obj_t *extra_row;		// the rest, inside that window
+static lv_obj_t *bright_row;	// moved down by the stretch
 static lv_obj_t *expand_handle; // the line under the slider, and a tap target
-static int card_h_rest;		   // the card's height with nothing past the eighth
-static int card_h_base;		   // the card's height at rest, handle room included
-static int expand_full;		   // how far the card stretches; 0 when nothing is past the eighth
-static int expand_h;		   // how far it is stretched now
-static int expand_from;		   // where a drag found it
+static int card_h_rest;			// the card's height with nothing past the eighth
+static int card_h_base;			// the card's height at rest, handle room included
+static int expand_full;			// how far the card stretches; 0 when nothing is past the eighth
+static int expand_h;			// how far it is stretched now
+static int expand_from;			// where a drag found it
 static uint32_t expand_begin_ms;
 
 // Set once a press has moved the card, so the click that ends the same press
@@ -412,8 +364,8 @@ static void panel_prepare(void) {
 	}
 	lv_slider_set_value(brightness_slider, (int32_t)value, LV_ANIM_OFF);
 	// The accent may have changed since the card was last down (a new cover).
-	lv_obj_set_style_bg_color(brightness_slider, sx_pal()->mini_ink, LV_PART_INDICATOR);
-	lv_obj_set_style_bg_color(brightness_slider, sx_pal()->mini_ink, LV_PART_KNOB);
+	lv_obj_set_style_bg_color(brightness_slider, sx_pal()->mini_action, LV_PART_INDICATOR);
+	lv_obj_set_style_bg_color(brightness_slider, sx_pal()->mini_action, LV_PART_KNOB);
 
 	refresh_audio_buttons();
 
@@ -659,9 +611,7 @@ static uint8_t parse_list(const char *saved, uint8_t *out, uint8_t cap, bool *pl
 			out[n++] = QP_BTN_NONE;
 			continue;
 		}
-		if ((len == 11 && !strncmp(start, "sleep_music", len)) ||
-			(len == 15 && !strncmp(start, "sleep_audiobook", len)) ||
-			(len == 13 && !strncmp(start, "sleep_podcast", len))) {
+		if ((len == 11 && !strncmp(start, "sleep_music", len)) || (len == 15 && !strncmp(start, "sleep_audiobook", len)) || (len == 13 && !strncmp(start, "sleep_podcast", len))) {
 			start = "sleep";
 			len = 5;
 		}
@@ -712,8 +662,7 @@ static void order_load(void) {
 	const char *saved_hidden = config_get_copy("quickpanel", "hidden", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE);
 	if ((!saved_order || !saved_order[0]) && (!saved_hidden || !saved_hidden[0])) {
 		static const uint8_t FRESH[] = {
-			QP_BTN_WIFI, QP_BTN_BLUETOOTH, QP_BTN_SLEEP, QP_BTN_AIRPLAY, QP_BTN_MSEB, QP_BTN_EQ, QP_BTN_VOLUME_LIMIT,
-			QP_BTN_DAC,	 QP_BTN_DAC_FILTER, QP_BTN_GAIN, QP_BTN_LINEOUT, QP_BTN_SONIXLINK, QP_BTN_PEQ,
+			QP_BTN_WIFI, QP_BTN_BLUETOOTH, QP_BTN_SLEEP, QP_BTN_AIRPLAY, QP_BTN_MSEB, QP_BTN_EQ, QP_BTN_VOLUME_LIMIT, QP_BTN_DAC, QP_BTN_DAC_FILTER, QP_BTN_GAIN, QP_BTN_LINEOUT, QP_BTN_SONIXLINK, QP_BTN_PEQ,
 		};
 		bool used[QP_BTN_COUNT] = {false};
 		int at = 0;
@@ -761,8 +710,7 @@ static void order_load(void) {
 		// sleep control, Wi-Fi transfer and gapless. Appending them would change a
 		// panel nobody asked to change, so they wait among the unused ones, where
 		// the settings page shows them.
-		bool waits = i == QP_BTN_DLNA || i == QP_BTN_SLEEP || i == QP_BTN_WIFI_TRANSFER || i == QP_BTN_GAPLESS ||
-					 i == QP_BTN_VOLUME_LIMIT || i == QP_BTN_DAC || i == QP_BTN_DAC_FILTER;
+		bool waits = i == QP_BTN_DLNA || i == QP_BTN_SLEEP || i == QP_BTN_WIFI_TRANSFER || i == QP_BTN_GAPLESS || i == QP_BTN_VOLUME_LIMIT || i == QP_BTN_DAC || i == QP_BTN_DAC_FILTER;
 		if ((saved_version < 2 && i == QP_BTN_FADE) || waits) {
 			hidden[hidden_n++] = (uint8_t)i;
 		} else {
@@ -1105,7 +1053,6 @@ const lv_image_dsc_t *quickpanel_button_icon(quickpanel_button_t button) {
 	}
 }
 
-
 // ---------------------------------------------------------------------------
 // construction
 // ---------------------------------------------------------------------------
@@ -1191,10 +1138,10 @@ static void circle_button_set_on(lv_obj_t *btn, bool on) {
 	lv_obj_t *label = lv_obj_get_child(lv_obj_get_parent(btn), 1);
 	if (label)
 		panel_set_color(label, LV_STYLE_TEXT_COLOR, p->mini_ink, 0);
-	panel_set_color(btn, LV_STYLE_BG_COLOR, on ? p->mini_ink : sx_mix(p->mini_ink, p->mini_bg, 16), 0);
-	panel_set_color(btn, LV_STYLE_BG_COLOR, sx_mix(p->mini_ink, p->mini_bg, on ? 85 : 28), LV_STATE_PRESSED);
+	panel_set_color(btn, LV_STYLE_BG_COLOR, on ? p->mini_action : sx_mix(p->mini_ink, p->mini_bg, 16), 0);
+	panel_set_color(btn, LV_STYLE_BG_COLOR, sx_mix(on ? p->mini_action : p->mini_ink, p->mini_bg, on ? 85 : 28), LV_STATE_PRESSED);
 	if (icon) {
-		sx_set_recolor(icon, on ? p->mini_bg : p->mini_ink);
+		sx_set_recolor(icon, on ? p->mini_on_action : p->mini_ink);
 	}
 }
 
@@ -1206,7 +1153,8 @@ static bool sleep_timer_armed(sleeptimer_kind_t kind);
 // the truth even when the setting was changed somewhere else.
 static void refresh_audio_buttons(void) {
 	const sx_palette_t *p = sx_pal();
-	if (settings_icon) sx_set_recolor(settings_icon, p->mini_ink);
+	if (settings_icon)
+		sx_set_recolor(settings_icon, p->mini_ink);
 	if (bright_row && lv_obj_get_child_count(bright_row))
 		sx_set_recolor(lv_obj_get_child(bright_row, 0), p->mini_ink);
 	if (expand_handle && lv_obj_get_child_count(expand_handle))
@@ -1215,8 +1163,8 @@ static void refresh_audio_buttons(void) {
 		panel_set_color(brightness_slider, LV_STYLE_BG_COLOR, p->mini_ink, LV_PART_MAIN);
 		if (lv_obj_get_style_bg_opa(brightness_slider, LV_PART_MAIN) != LV_OPA_20)
 			lv_obj_set_style_bg_opa(brightness_slider, LV_OPA_20, LV_PART_MAIN);
-		panel_set_color(brightness_slider, LV_STYLE_BG_COLOR, p->mini_ink, LV_PART_INDICATOR);
-		panel_set_color(brightness_slider, LV_STYLE_BG_COLOR, p->mini_ink, LV_PART_KNOB);
+		panel_set_color(brightness_slider, LV_STYLE_BG_COLOR, p->mini_action, LV_PART_INDICATOR);
+		panel_set_color(brightness_slider, LV_STYLE_BG_COLOR, p->mini_action, LV_PART_KNOB);
 	}
 	circle_button_set_on(eq_btn, eq_get_enabled());
 	circle_button_set_on(mseb_btn, mseb_get_enabled());
@@ -1458,10 +1406,7 @@ static void sonixlink_clicked_cb(lv_event_t *e) {
 // ---------------------------------------------------------------------------
 // One sleep control opens the shared picker; no hidden toggle gesture.
 // The existing player sheet supplies presets, track/album boundaries and Undo.
-static bool sleep_timer_armed(sleeptimer_kind_t kind) {
-	return (sleeptimer_enabled(kind) && sleeptimer_minutes(kind) > 0) ||
-		device_state_stop_after() != DEVICE_STATE_STOP_AFTER_NONE || audiobook_stop_at_chapter_end();
-}
+static bool sleep_timer_armed(sleeptimer_kind_t kind) { return (sleeptimer_enabled(kind) && sleeptimer_minutes(kind) > 0) || device_state_stop_after() != DEVICE_STATE_STOP_AFTER_NONE || audiobook_stop_at_chapter_end(); }
 static void sleep_music_clicked_cb(lv_event_t *e) {
 	(void)e;
 	if (long_press_consumed) {
@@ -1659,8 +1604,7 @@ static void filter_clicked_cb(lv_event_t *e) {
 	int current = musicsettings_dac_filter();
 	sx_sheet_item_t items[4];
 	for (int i = 0; i < 4; i++) {
-		items[i] = (sx_sheet_item_t){tr(musicsettings_dac_filter_name(i)), NULL, i == current, false, filter_picked,
-									 (void *)(intptr_t)i};
+		items[i] = (sx_sheet_item_t){tr(musicsettings_dac_filter_name(i)), NULL, i == current, false, filter_picked, (void *)(intptr_t)i};
 	}
 	sx_sheet_menu(tr("musicsettings_filters"), NULL, items, 4);
 }
@@ -1701,6 +1645,7 @@ void quickpanel_init(gui_config_t *cfg) {
 	lv_obj_add_style(panel, &sx_style_mini, 0);
 	lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, 0);
 	lv_obj_set_style_radius(panel, CC_RADIUS, 0);
+	sx_chrome_edge(panel, SX_CHROME_SHADE);
 	lv_obj_set_style_clip_corner(panel, false, 0);
 	lv_obj_set_style_pad_all(panel, CC_PAD, 0);
 	lv_obj_set_style_pad_top(panel, CC_PAD + CC_RADIUS, 0);
@@ -1833,8 +1778,8 @@ void quickpanel_init(gui_config_t *cfg) {
 	lv_obj_add_style(brightness_slider, &sx_style_press, LV_PART_MAIN);
 	lv_obj_set_style_bg_opa(brightness_slider, LV_OPA_COVER, LV_PART_MAIN);
 	lv_obj_set_style_radius(brightness_slider, LV_RADIUS_CIRCLE, LV_PART_INDICATOR);
-	lv_obj_set_style_bg_color(brightness_slider, sx_pal()->mini_ink, LV_PART_INDICATOR);
-	lv_obj_set_style_bg_color(brightness_slider, sx_pal()->mini_ink, LV_PART_KNOB);
+	lv_obj_set_style_bg_color(brightness_slider, sx_pal()->mini_action, LV_PART_INDICATOR);
+	lv_obj_set_style_bg_color(brightness_slider, sx_pal()->mini_action, LV_PART_KNOB);
 	lv_obj_set_style_bg_opa(brightness_slider, LV_OPA_COVER, LV_PART_KNOB);
 	lv_obj_set_style_radius(brightness_slider, LV_RADIUS_CIRCLE, LV_PART_KNOB);
 	lv_obj_set_style_shadow_width(brightness_slider, 0, LV_PART_KNOB);

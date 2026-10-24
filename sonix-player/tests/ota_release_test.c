@@ -397,6 +397,24 @@ int main(void) {
 	assert(select_entries("1.4.0", &bridge, 1) == OTA_UP_TO_DATE);
 	checks += 5;
 
+	// The next published build must be newer than the real stable 1.4.0.
+	bridge.tag = "v1.4.1";
+	bridge.name = "v1.4.1";
+	bridge.body = "<!-- Sonix-Version: 1.4.1 -->";
+	bridge.url = "https://github.com/Rekkod-Tree/sonix-player-rekkod-mod/releases/download/v1.4.1/r1.upt";
+	assert(select_entries("1.4.0", &bridge, 1) == OTA_OK);
+	assert(!strcmp(release.tag, "v1.4.1"));
+	assert(select_entries("1.4.1", &bridge, 1) == OTA_UP_TO_DATE);
+	assert(select_entries("1.5.0", &bridge, 1) == OTA_UP_TO_DATE);
+	const char *published_alphas[] = {"1.3.0-ui3-alpha10", "1.3.0-ui3-alpha20", "1.3.0-ui3-alpha25"};
+	assert(legacy_parse_version(bridge.tag, legacy_alias));
+	for (size_t i = 0; i < sizeof(published_alphas) / sizeof(published_alphas[0]); i++) {
+		assert(legacy_parse_version(published_alphas[i], legacy_installed));
+		assert(legacy_version_cmp(legacy_alias, legacy_installed) > 0);
+		assert(select_entries(published_alphas[i], &bridge, 1) == OTA_OK);
+	}
+	checks += 9;
+
 	// No retry storm or /latest fallback on offline, rate-limit, server or JSON errors.
 	snprintf(repo, sizeof(repo), "Rekkod-Tree/sonix-player-rekkod-mod");
 	snprintf(stem, sizeof(stem), "r1");

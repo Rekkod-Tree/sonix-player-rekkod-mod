@@ -28,8 +28,11 @@ void main_menu_refresh(void);
 void main_menu_poll_network(void);
 void main_menu_open_settings(void);
 void main_menu_open_search(void);
-// A visible source switch on the three search input pages. UI thread only.
+// Shared query/source controls. UI thread only.
 void main_menu_search_header(lv_obj_t *screen, gui_config_t *cfg, home_item_t source);
+void main_menu_search_scope_set(lv_obj_t *screen, home_item_t source);
+void main_menu_search_bind(lv_obj_t *screen, lv_obj_t *field);
+const char *main_menu_search_query(void);
 bool main_menu_get_entry(home_item_t item, grid_entry_t *out);
 void main_menu_hold(lv_event_t *e);
 

@@ -36,7 +36,7 @@ def function(text, name):
     return text[match.start():end] + '\n'
 
 
-code = ''.join(function(source, name) for name in ('np_mini_thumb_refresh', 'np_mini_from_cover', 'player_mini_mode_changed'))
+code = ''.join(function(source, name) for name in ('np_mini_take_thumb240', 'np_mini_thumb_refresh', 'np_mini_from_cover', 'player_mini_mode_changed', 'np_thumb240_drop', 'thumb240_arrived', 'np_thumb240_request', 'np_album_tone_now', 'np_album_changed'))
 variants = [('actual', code, False)]
 if args.negative:
     variants += [
@@ -44,6 +44,8 @@ if args.negative:
         ('hidden-scaled-copy', code.replace('!sx_mini_wants_cover() || ', '', 1), True),
         ('missing-mode-detach', code.replace(function(code, 'player_mini_mode_changed'), function(code, 'player_mini_mode_changed').replace('sx_mini_set_cover(NULL, 0);', '(void)0;', 1)), True),
         ('lost-cover-accent-request', code.replace('if (np_album_id && !covertone_for_album', 'if (false && np_album_id && !covertone_for_album', 1), True),
+        ('ui-large-cache-read', code.replace('np_thumb240_request();', 'covertone_thumb(np_album_id, COVERTONE_THUMB_LARGE, &mini_thumb_dsc, mini_thumb_buf, sizeof(mini_thumb_buf));', 1), True),
+        ('same-album-premature-free', code.replace('np_album_tone_known = np_album_tone_now();', 'sx_artview_release_cover(&mini_cover_copy); np_album_tone_known = np_album_tone_now();', 1), True),
     ]
 out = args.results.resolve()
 out.mkdir(parents=True, exist_ok=True)
@@ -59,7 +61,7 @@ with tempfile.TemporaryDirectory(prefix='mini67-policy-') as temp:
     for name, text, negative in variants:
         (t / 'actual_cover_demand.inc').write_text(text, encoding='utf-8', newline='\n')
         binary = t / name
-        built = subprocess.run([*flags, '-I' + str(t), str(F / 'mini_player_cover_test.c'), '-Wl,--gc-sections', '-o', str(binary)],
+        built = subprocess.run([*flags, '-I' + str(t), str(F / 'mini_player_async_cover_test.c'), '-Wl,--gc-sections', '-o', str(binary)],
                                capture_output=True, text=True, encoding='utf-8', timeout=60)
         (out / (name + '-build.log')).write_text(built.stdout + built.stderr, encoding='utf-8', newline='\n')
         assert built.returncode == 0, built.stderr

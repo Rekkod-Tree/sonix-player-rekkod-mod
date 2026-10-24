@@ -2,6 +2,7 @@
 // Uses LVGL's own input and rendering API; no desktop automation is required.
 #include "src/system/core/logging.h"
 #include <assert.h>
+#include <dirent.h>
 #include <errno.h>
 #include <signal.h>
 #include <stdio.h>
@@ -25,25 +26,29 @@
 #include "src/gui/library/music.h"
 #include "src/gui/library/playlistpage.h"
 #include "src/gui/library/search.h"
+#include "src/gui/library/searchsource.h"
 #include "src/gui/nowplaying/btline.h"
 #include "src/gui/nowplaying/coverflow.h"
+#include "src/gui/nowplaying/historypage.h"
+#include "src/gui/nowplaying/npicons.h"
 #include "src/gui/nowplaying/player.h"
+#include "src/gui/nowplaying/trackmenu.h"
 #include "src/gui/settings/appearance.h"
-#include "src/gui/settings/hometiles.h"
-#include "src/gui/shell/bookresume.h"
-#include "src/system/playback/audiobook.h"
 #include "src/gui/settings/ccsettings.h"
 #include "src/gui/settings/devoptions.h"
+#include "src/gui/settings/hometiles.h"
 #include "src/gui/settings/language.h"
 #include "src/gui/settings/musicsettings.h"
 #include "src/gui/settings/powersettings.h"
 #include "src/gui/settings/remap.h"
 #include "src/gui/settings/settings.h"
 #include "src/gui/settings/systempage.h"
+#include "src/gui/shell/bookresume.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/keyboard.h"
 #include "src/gui/shell/main_menu.h"
 #include "src/gui/shell/morepage.h"
+#include "src/gui/shell/playbackplace.h"
 #include "src/gui/shell/quickpanel.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/sx_mini.h"
@@ -60,6 +65,7 @@
 #include "src/gui/streaming/streamerror.h"
 #include "src/gui/streaming/streaming.h"
 #include "src/gui/streaming/subsonicpage.h"
+#include "src/gui/streaming/svcui.h"
 #include "src/gui/streaming/tidalpage.h"
 #include "src/gui/streaming/yandexpage.h"
 #include "src/gui/streaming/zvukpage.h"
@@ -72,11 +78,15 @@
 #include "src/system/device/power.h"
 #include "src/system/image/png_write.h"
 #include "src/system/library/audiobookdb.h"
+#include "src/system/playback/audiobook.h"
 #include "src/system/playback/device_state.h"
+#include "src/system/playback/playhistory.h"
 #include "src/system/playback/playlist.h"
+#include "src/system/streaming/provider.h"
 #include "src/system/streaming/yandex.h"
 #include "src/system/streaming/yandexdl.h"
 #include "src/system/streaming/zvuk.h"
+#include "src/system/streaming/zvukcache.h"
 #include "src/system/streaming/zvukdl.h"
 
 static const char *out_dir;
@@ -1056,8 +1066,8 @@ static void surface_states(void) {
 }
 
 #include "graphite_components.inc"
-#include "graphite_upstream.inc"
 #include "graphite_feedback.inc"
+#include "graphite_upstream.inc"
 
 static void player_home_gestures(void) {
 	int height = lv_display_get_vertical_resolution(lv_display_get_default());
@@ -1156,11 +1166,14 @@ static void player_home_gestures(void) {
 }
 
 static lv_obj_t *find_visible_image(lv_obj_t *root, const lv_image_dsc_t *glyph) {
-	if (lv_obj_is_hidden(root)) return NULL;
-	if (lv_obj_check_type(root, &lv_image_class) && lv_image_get_src(root) == glyph) return root;
+	if (lv_obj_is_hidden(root))
+		return NULL;
+	if (lv_obj_check_type(root, &lv_image_class) && lv_image_get_src(root) == glyph)
+		return root;
 	for (uint32_t i = 0; i < lv_obj_get_child_count(root); i++) {
 		lv_obj_t *found = find_visible_image(lv_obj_get_child(root, i), glyph);
-		if (found) return found;
+		if (found)
+			return found;
 	}
 	return NULL;
 }
@@ -1207,7 +1220,7 @@ static void home_layout_states(void) {
 		assert(lv_obj_get_child_count(lv_obj_get_child(grid, 0)) == 0);
 		switch_screen_no_history(morepage_screen);
 		lv_obj_update_layout(morepage_screen);
-        assert(find_label(morepage_screen, tr("settings")) && find_label(morepage_screen, tr("music")));
+		assert(find_label(morepage_screen, tr("settings")) && find_label(morepage_screen, tr("music")));
 		assert(find_label(morepage_screen, tr("dac")) && find_label(morepage_screen, tr("file_explorer")));
 		switch_screen_no_history(main_menu_screen);
 		capture("home-empty-fixed-more");
@@ -1238,7 +1251,10 @@ static void home_layout_states(void) {
 			lv_area_t box;
 			lv_obj_get_coords(grip, &box);
 			int x = (box.x1 + box.x2) / 2, y = (box.y1 + box.y2) / 2;
-			input(x, y, true); input(x, y + 24, true); input(x, y + 100, true); input(x, y + 100, false);
+			input(x, y, true);
+			input(x, y + 24, true);
+			input(x, y + 100, true);
+			input(x, y + 100, false);
 			assert(main_menu_at(1) == HOME_SEARCH);
 		}
 		theme_set_dark(true);
@@ -1271,7 +1287,10 @@ static void home_layout_states(void) {
 		assert(audiobookdb_scan_start(books_root));
 		break;
 	case 9:
-		if (audiobookdb_scan_running()) { step--; break; }
+		if (audiobookdb_scan_running()) {
+			step--;
+			break;
+		}
 		assert(audiobookdb_count() > 0);
 		audiobooks_play_at(book, book, 17);
 		break;
@@ -1284,7 +1303,8 @@ static void home_layout_states(void) {
 		assert(config_get_copy("home", "resume_book_1", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE)[0]);
 		struct stat first, last;
 		assert(!stat(config_path_copy((char[512]){0}, 512), &first));
-		for (int i = 0; i < 100; i++) bookresume_note(&state);
+		for (int i = 0; i < 100; i++)
+			bookresume_note(&state);
 		assert(!stat(config_path_copy((char[512]){0}, 512), &last));
 		assert(first.st_mtim.tv_sec == last.st_mtim.tv_sec && first.st_mtim.tv_nsec == last.st_mtim.tv_nsec);
 		device_state_toggle_play_pause();
@@ -1449,6 +1469,8 @@ static void home_layout_states(void) {
 }
 
 #include "src/system/playback/sleeptimer.h"
+// Scenario includes share helpers in declaration order.
+// clang-format off
 #include "graphite_quick_actions.inc"
 #include "graphite_sleep_wait.inc"
 #include "graphite_catalog.inc"
@@ -1461,22 +1483,83 @@ static void home_layout_states(void) {
 #include "graphite_search_scope.inc"
 #include "graphite_release_polish.inc"
 #include "graphite_pause_wait.inc"
+#include "graphite_ux_context.inc"
+#include "graphite_chrome_edges.inc"
+// clang-format on
 
 static void run(lv_timer_t *timer) {
-	if (getenv("SONIX_UI_TEST_PAUSE_WAIT")) { pause_wait_states(); return; }
-	if (getenv("SONIX_UI_TEST_RELEASE_POLISH")) { release_polish_states(); return; }
-	if (getenv("SONIX_UI_TEST_PLAYLIST_CONTENT")) { playlist_content_states(timer); return; }
-	if (getenv("SONIX_UI_TEST_IMPORT_MINI")) { import_mini_states(); return; }
-	if (getenv("SONIX_UI_TEST_CARET_PARK")) { caret_park_states(timer); return; }
-	if (getenv("SONIX_UI_TEST_SEARCH_SCOPE")) { search_scope_states(); return; }
-	if (getenv("SONIX_UI_TEST_QUEUE_EXPORT")) { queue_export_states(); return; }
-	if (getenv("SONIX_UI_TEST_PLAYLIST_ROLES")) { playlist_roles_states(); return; }
-	if (getenv("SONIX_UI_TEST_FEEDBACK")) { feedback_states(); return; }
-	if (getenv("SONIX_UI_TEST_SPOTIFY")) { spotify_states(); return; }
-	if (getenv("SONIX_UI_TEST_CATALOG")) { catalog_states(); return; }
-	if (getenv("SONIX_UI_TEST_SLEEP_WAIT")) { sleep_wait_states(); return; }
-	if (getenv("SONIX_UI_TEST_QUICK_ACTIONS")) { quick_actions_states(); return; }
-	if (getenv("SONIX_UI_TEST_HOME_LAYOUT")) { home_layout_states(); return; }
+	if (getenv("SONIX_UI_TEST_CHROME_EDGES")) {
+		chrome_edges_states();
+		return;
+	}
+	if (getenv("SONIX_UI_TEST_SEARCH_SOURCES")) {
+		ux_sources_states();
+		return;
+	}
+	if (getenv("SONIX_UI_TEST_SEARCH_NETWORK")) {
+		ux_network_states();
+		return;
+	}
+	if (getenv("SONIX_UI_TEST_UX_CONTEXT")) {
+		ux_context_states();
+		return;
+	}
+	if (getenv("SONIX_UI_TEST_PAUSE_WAIT")) {
+		pause_wait_states();
+		return;
+	}
+	if (getenv("SONIX_UI_TEST_RELEASE_POLISH")) {
+		release_polish_states();
+		return;
+	}
+	if (getenv("SONIX_UI_TEST_PLAYLIST_CONTENT")) {
+		playlist_content_states(timer);
+		return;
+	}
+	if (getenv("SONIX_UI_TEST_IMPORT_MINI")) {
+		import_mini_states();
+		return;
+	}
+	if (getenv("SONIX_UI_TEST_CARET_PARK")) {
+		caret_park_states(timer);
+		return;
+	}
+	if (getenv("SONIX_UI_TEST_SEARCH_SCOPE")) {
+		search_scope_states();
+		return;
+	}
+	if (getenv("SONIX_UI_TEST_QUEUE_EXPORT")) {
+		queue_export_states();
+		return;
+	}
+	if (getenv("SONIX_UI_TEST_PLAYLIST_ROLES")) {
+		playlist_roles_states();
+		return;
+	}
+	if (getenv("SONIX_UI_TEST_FEEDBACK")) {
+		feedback_states();
+		return;
+	}
+	if (getenv("SONIX_UI_TEST_SPOTIFY")) {
+		spotify_states();
+		return;
+	}
+	if (getenv("SONIX_UI_TEST_CATALOG")) {
+		catalog_states();
+		return;
+	}
+	if (getenv("SONIX_UI_TEST_SLEEP_WAIT")) {
+		sleep_wait_states();
+		return;
+	}
+	if (getenv("SONIX_UI_TEST_QUICK_ACTIONS")) {
+		quick_actions_states();
+		return;
+	}
+	if (getenv("SONIX_UI_TEST_HOME_LAYOUT")) {
+		home_layout_states();
+		return;
+	}
 	if (getenv("SONIX_UI_TEST_PLAYER_HOME_ONLY")) {
 		static int step;
 		int height = lv_display_get_vertical_resolution(lv_display_get_default());

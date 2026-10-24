@@ -8,6 +8,7 @@
 #include "src/system/streaming/podcaststate.h"
 
 void podcastpage_init(gui_config_t *cfg);
+void podcastpage_search_results_kind(const char *query, int kind);
 
 // The section's screen, for the streaming grid. There is only one: the two
 // entries are pills -- like the audiobooks' all / recent / finished -- and a

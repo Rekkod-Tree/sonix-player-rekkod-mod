@@ -5,17 +5,19 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "src/gui/fonts/fonts.h"
 #include "src/gui/library/browser.h"
 #include "src/gui/library/libraryscan.h"
-#include "src/gui/nowplaying/coverflow.h"
-#include "src/gui/fonts/fonts.h"
-#include "src/gui/shell/gridpage.h"
-#include "src/gui/shell/gui.h"
-#include "src/gui/shell/icons.h"
 #include "src/gui/library/medialist.h"
 #include "src/gui/library/playlistpage.h"
 #include "src/gui/library/search.h"
 #include "src/gui/library/shufflecard.h"
+#include "src/gui/nowplaying/coverflow.h"
+#include "src/gui/nowplaying/historypage.h"
+#include "src/gui/nowplaying/trackmenu.h"
+#include "src/gui/shell/gridpage.h"
+#include "src/gui/shell/gui.h"
+#include "src/gui/shell/icons.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/sx_frame.h"
@@ -32,17 +34,11 @@ lv_obj_t *music_screen;
 static void open_all_tracks(void) { medialist_open(tr("music_all_tracks"), LIBRARY_LIST_TRACKS, LIBRARY_FILTER_NONE, NULL); }
 static void open_albums(void) { medialist_open(tr("albums"), LIBRARY_LIST_ALBUMS, LIBRARY_FILTER_NONE, NULL); }
 static void open_artists(void) { medialist_open(tr("artists"), LIBRARY_LIST_ARTISTS, LIBRARY_FILTER_NONE, NULL); }
-static void open_album_artists(void) {
-	medialist_open(tr("music_album_artists"), LIBRARY_LIST_ALBUM_ARTISTS, LIBRARY_FILTER_NONE, NULL);
-}
+static void open_album_artists(void) { medialist_open(tr("music_album_artists"), LIBRARY_LIST_ALBUM_ARTISTS, LIBRARY_FILTER_NONE, NULL); }
 static void open_genres(void) { medialist_open(tr("music_genres"), LIBRARY_LIST_GENRES, LIBRARY_FILTER_NONE, NULL); }
 static void open_years(void) { medialist_open(tr("music_year"), LIBRARY_LIST_YEARS, LIBRARY_FILTER_NONE, NULL); }
-static void open_favourites(void) {
-	medialist_open(tr("favourites"), LIBRARY_LIST_FAVOURITES, LIBRARY_FILTER_NONE, NULL);
-}
-static void open_most_played(void) {
-	medialist_open(tr("music_most_played"), LIBRARY_LIST_MOST_PLAYED, LIBRARY_FILTER_NONE, NULL);
-}
+static void open_favourites(void) { medialist_open(tr("favourites"), LIBRARY_LIST_FAVOURITES, LIBRARY_FILTER_NONE, NULL); }
+static void open_most_played(void) { medialist_open(tr("music_most_played"), LIBRARY_LIST_MOST_PLAYED, LIBRARY_FILTER_NONE, NULL); }
 // The records that arrived last and the tracks heard last: short lists, the
 // newest on top, LIBRARY_RECENT_MAX of each. The count is the album list's
 // filter value, so the same handle code that narrows a list to one year
@@ -52,9 +48,7 @@ static void open_recently_added(void) {
 	snprintf(limit, sizeof(limit), "%d", LIBRARY_RECENT_MAX);
 	medialist_open(tr("music_recently_added"), LIBRARY_LIST_ALBUMS, LIBRARY_FILTER_RECENT, limit);
 }
-static void open_recently_played(void) {
-	medialist_open(tr("music_recently_played"), LIBRARY_LIST_RECENTLY_PLAYED, LIBRARY_FILTER_NONE, NULL);
-}
+static void open_recently_played(void) { historypage_open(NULL); }
 static void open_browse(void) { switch_screen(browser_screen); }
 static void open_playlists(void) { playlistpage_open(); }
 
@@ -97,13 +91,14 @@ static const struct {
 	// transfer arrows for what has just come onto the card, the resume glyph
 	// for what was being listened to.
 	[MUSIC_TILE_RECENTLY_ADDED] = {"recent_added", {"music_recently_added", &icon_menu_wifi_transfer, NULL, open_recently_added}},
-	[MUSIC_TILE_RECENTLY_PLAYED] = {"recent_played", {"music_recently_played", &icon_menu_audiobook_continue, NULL, open_recently_played}},
+	[MUSIC_TILE_RECENTLY_PLAYED] = {"recent_played", {"queue_history", &icon_menu_audiobook_continue, NULL, open_recently_played}},
 	[MUSIC_TILE_PLAYLISTS] = {"playlists", {"playlists", &icon_menu_playlist, NULL, open_playlists, playlists_description}},
 	[MUSIC_TILE_BROWSE] = {"browse", {"music_browse", &icon_menu_explorer, NULL, open_browse}},
 };
 
 bool music_home_entry(music_tile_t tile, grid_entry_t *entry) {
-	if (tile < 0 || tile >= MUSIC_TILE_COUNT || !entry) return false;
+	if (tile < 0 || tile >= MUSIC_TILE_COUNT || !entry)
+		return false;
 	*entry = TILES[tile].entry;
 	return true;
 }
@@ -141,8 +136,7 @@ static int parse_list(const char *text, music_tile_t *list) {
 		const char *end = strchr(at, ',');
 		size_t len = end ? (size_t)(end - at) : strlen(at);
 		int tile = tile_by_id(at, len);
-		if (tile >= 0 && !listed(in_use, in_use_n, (music_tile_t)tile) && !listed(hidden, hidden_n, (music_tile_t)tile) &&
-			!listed(list, n, (music_tile_t)tile)) {
+		if (tile >= 0 && !listed(in_use, in_use_n, (music_tile_t)tile) && !listed(hidden, hidden_n, (music_tile_t)tile) && !listed(list, n, (music_tile_t)tile)) {
 			list[n++] = (music_tile_t)tile;
 		}
 		if (!end) {
@@ -264,13 +258,9 @@ bool music_tiles_move_hidden(music_tile_t tile, int position) {
 	return true;
 }
 
-const char *music_tile_tag(music_tile_t tile) {
-	return tile >= 0 && tile < MUSIC_TILE_COUNT ? TILES[tile].entry.label : "";
-}
+const char *music_tile_tag(music_tile_t tile) { return tile >= 0 && tile < MUSIC_TILE_COUNT ? TILES[tile].entry.label : ""; }
 
-const lv_image_dsc_t *music_tile_icon(music_tile_t tile) {
-	return tile >= 0 && tile < MUSIC_TILE_COUNT ? TILES[tile].entry.icon : NULL;
-}
+const lv_image_dsc_t *music_tile_icon(music_tile_t tile) { return tile >= 0 && tile < MUSIC_TILE_COUNT ? TILES[tile].entry.icon : NULL; }
 
 void music_rebuild_tiles(void) {
 	if (!tile_grid || !grid_cfg) {
@@ -444,8 +434,7 @@ static void upgrade_show(bool tiles_shown) {
 	bool first = true;
 	for (size_t i = 0; i < sizeof(FEATURES) / sizeof(FEATURES[0]) && used < (int)sizeof(text); i++) {
 		if (pending & FEATURES[i].feature) {
-			used += snprintf(text + used, sizeof(text) - (size_t)used, "%s%s", first ? " " : ", ",
-							 tr(FEATURES[i].tag));
+			used += snprintf(text + used, sizeof(text) - (size_t)used, "%s%s", first ? " " : ", ", tr(FEATURES[i].tag));
 			first = false;
 		}
 	}
@@ -481,6 +470,7 @@ static lv_obj_t *corner_button(gui_config_t *cfg, int slot, const lv_image_dsc_t
 }
 
 void music_init(gui_config_t *cfg) {
+	switcher_browse_bind("music", music_screen, music_screen);
 	// Built empty and filled from the saved order. With more tiles than the
 	// three rows other sections have, the page scrolls to the rest.
 	grid_cfg = cfg;
@@ -500,8 +490,8 @@ void music_init(gui_config_t *cfg) {
 	music_fit_slot();
 	sx_frame_on_body_change(music_fit_slot);
 
-	// One button in the corner, so the heading has to be told to clear it.
-	settingsrow_title_corner_slots(settingsrow_title(music_screen, cfg, "music"), cfg, 1);
+	settingsrow_title_corner_slots(settingsrow_title(music_screen, cfg, "music"), cfg, 2);
+	trackmenu_queue_button(music_screen, cfg, 1);
 
 	lv_obj_t *search_btn = corner_button(cfg, 0, &icon_search);
 	lv_obj_add_event_cb(search_btn, search_cb, LV_EVENT_CLICKED, NULL);

@@ -30,14 +30,14 @@
 #define SX_BODY_PAD_L 16
 #define SX_BODY_PAD_R 16 // 32 with the A-Z lane
 #define SX_BODY_PAD_R_LANE 32
-#define SX_EDGE_BACK_W 22	  // the strip along the left edge a back swipe starts in
+#define SX_EDGE_BACK_W 22 // the strip along the left edge a back swipe starts in
 
 // ---------- A list row ----------
 #define SX_ROW_H 88
 #define SX_ROW_H_BIG 104
-#define SX_ROW_H_COMPACT 64	  // the queue; with large rows 84
+#define SX_ROW_H_COMPACT 64 // the queue; with large rows 84
 #define SX_ROW_H_COMPACT_BIG 84
-#define SX_ROW_THUMB 56		  // large rows 68, compact 48
+#define SX_ROW_THUMB 56 // large rows 68, compact 48
 #define SX_ROW_THUMB_BIG 64
 #define SX_ROW_THUMB_COMPACT 48
 #define SX_ROW_THUMB_R 12
@@ -48,8 +48,8 @@
 #define SX_ROW_INNER_GAP 12
 #define SX_ROW_TITLE_FONT 26
 #define SX_ROW_SUB_FONT 20
-#define SX_ROW_TRAIL_W 72	  // the star button or the chevron at the right
-#define SX_ROW_NUM_W 32		  // the track number on an album page
+#define SX_ROW_TRAIL_W 72 // the star button or the chevron at the right
+#define SX_ROW_NUM_W 32	  // the track number on an album page
 
 // ---------- A settings card ----------
 #define SX_CARD_R 20
@@ -69,14 +69,14 @@
 #define SX_SWITCH_H 36
 #define SX_SWITCH_KNOB 28
 #define SX_SWATCH 52
-#define SX_BAR_H 8			  // a card's fill bar (cache used, scan progress)
+#define SX_BAR_H 8 // a card's fill bar (cache used, scan progress)
 
 // ---------- Tiles (home, Music, Streaming, Networks, More) ----------
 #define SX_TILE_GAP 12
 #define SX_TILE_R 20
 #define SX_TILE_H_MAX_HOME 232
 #define SX_TILE_H_MAX 204
-#define SX_TILE_H_MIN 120	  // height = (H - top - 88 - 15 - 2 * 12) / 3, kept in range
+#define SX_TILE_H_MIN 120 // height = (H - top - 88 - 15 - 2 * 12) / 3, kept in range
 #define SX_TILE_FONT 24
 #define SX_TILE_H_R1 188
 #define SX_TILE_H_R3 164
@@ -92,7 +92,7 @@
 #define SX_MINI_COMPACT_TARGET 64
 #define SX_MINI_COMPACT_PLAY 44
 #define SX_MINI_R 20
-#define SX_MINI_COVER 64
+#define SX_MINI_COVER 88
 #define SX_MINI_COVER_R 12
 #define SX_MINI_PLAY 64
 #define SX_MINI_PLAY_TARGET 88
@@ -129,33 +129,33 @@
 #define SX_TOAST_R 18
 #define SX_TOAST_MS 6000
 #define SX_TOAST_FONT 22
-#define SX_TOAST_MARGIN 16	  // from the sides
+#define SX_TOAST_MARGIN 16 // from the sides
 #define SX_VOL_OSD_W 64
 #define SX_VOL_OSD_H 300
 #define SX_VOL_OSD_MS 1500
-#define SX_VOL_OSD_RIGHT 14	  // from the right edge
+#define SX_VOL_OSD_RIGHT 14 // from the right edge
 #define SX_AZ_LANE_W 28
 #define SX_AZ_BUBBLE 104
 #define SX_CC_BTN 64
 
 // ---------- Gestures and time ----------
 #define SX_LONGPRESS_MS 450
-#define SX_SWIPE_LOCK_PX 10	  // past this a row is taken sideways
+#define SX_SWIPE_LOCK_PX 10 // past this a row is taken sideways
 #define SX_SWIPE_COMMIT_PX 100
 #define SX_SWIPE_MAX_PX 160
-#define SX_DRAG_LOCK_PX 12	  // the player and the sheet, downwards
+#define SX_DRAG_LOCK_PX 12 // the player and the sheet, downwards
 #define SX_NP_COLLAPSE_PX 110
 #define SX_SHEET_CLOSE_PX 80
 #define SX_TOAST_DISMISS_PX 30
-#define SX_CC_CLOSE_PX 60	  // upwards
-#define SX_MINI_SWIPE_PX 60	  // sideways; upwards it is 40
+#define SX_CC_CLOSE_PX 60	// upwards
+#define SX_MINI_SWIPE_PX 60 // sideways; upwards it is 40
 #define SX_MINI_SWIPE_UP_PX 40
 #define SX_EDGE_BACK_PX 70
-#define SX_PREV_RESTART_S 3	  // previous after 3 s goes to the start of the track
-#define SX_ANIM_NAV_MS 180	  // cubic-bezier(.2,.8,.2,1), close to lv_anim_path_ease_out
+#define SX_PREV_RESTART_S 3 // previous after 3 s goes to the start of the track
+#define SX_ANIM_NAV_MS 180	// cubic-bezier(.2,.8,.2,1), close to lv_anim_path_ease_out
 #define SX_ANIM_SHEET_MS 200
 #define SX_ANIM_ROW_SNAP_MS 150
-#define SX_EQ_FRAME_MS 100	  // the equaliser bars, about 10 frames a second
+#define SX_EQ_FRAME_MS 100 // the equaliser bars, about 10 frames a second
 
 // ---------- The neutral palette (tint from cover off) ----------
 #define SX_D_BG 0x11151A

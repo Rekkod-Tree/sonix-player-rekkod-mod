@@ -97,9 +97,9 @@ static lv_obj_t *bat_bolt;
 static lv_obj_t *bat_label;
 static lv_obj_t *vol_label;
 static lv_obj_t *vol_icon;
-static lv_obj_t *hp_icon;		 // headphones or USB audio output
-static lv_obj_t *airplay_icon;	 // incoming AirPlay, not local play/pause
-static lv_obj_t *library_icon;	 // Detect changes at work, or just done
+static lv_obj_t *hp_icon;		  // headphones or USB audio output
+static lv_obj_t *airplay_icon;	  // incoming AirPlay, not local play/pause
+static lv_obj_t *library_icon;	  // Detect changes at work, or just done
 static lv_timer_t *library_timer; // takes the check glyph away
 static lv_obj_t *sonixlink_icon;  // shown while a phone is driving the player
 static void refresh_airplay_icon(void);
@@ -144,13 +144,11 @@ static void bar_remove_local(lv_obj_t *obj, lv_style_prop_t prop) {
 	}
 }
 
-static void bar_set_image_opa(lv_obj_t *obj, lv_opa_t opa) {
-	bar_set_local(obj, LV_STYLE_IMAGE_OPA, (lv_style_value_t){.num = opa});
-}
+static void bar_set_image_opa(lv_obj_t *obj, lv_opa_t opa) { bar_set_local(obj, LV_STYLE_IMAGE_OPA, (lv_style_value_t){.num = opa}); }
 static void refresh_sonixlink_icon(void);
 static lv_obj_t *clock_label;
-static lv_obj_t *bt_icon;   // bluetooth, leftmost of the right-hand group
-static lv_obj_t *wifi_icon; // wifi, between bluetooth and the charge percentage
+static lv_obj_t *bt_icon;		  // bluetooth, leftmost of the right-hand group
+static lv_obj_t *wifi_icon;		  // wifi, between bluetooth and the charge percentage
 static lv_obj_t *container_left;  // volume group (and the clock, when "left")
 static lv_obj_t *container_right; // battery group (and the clock, when "right")
 static lv_timer_t *battery_timer;
@@ -185,7 +183,7 @@ static lv_style_t tint_icon_style;
 static bool over_art;
 static bool control_panel_palette;
 static bool playback_palette;
-static bool over_art_blur;	   // asked for a blur behind the bar
+static bool over_art_blur;		// asked for a blur behind the bar
 static bool over_art_blur_held; // ...and topbar_hold_backdrop_blur() holds it off
 
 static lv_color_t shell_color(bool known) {
@@ -203,7 +201,7 @@ static lv_color_t shell_color(bool known) {
 }
 // Warnings use one readable role; normal hardware states remain neutral.
 static lv_color_t warning_color(void) {
-	bool dark_surface = control_panel_palette ? lv_color_eq(sx_pal()->mini_ink, lv_color_white()) : over_art || theme_is_dark();
+	bool dark_surface = control_panel_palette ? lv_color_brightness(sx_pal()->mini_bg) < 128 : over_art || theme_is_dark();
 	return lv_color_hex(dark_surface ? SX_DANGER_TEXT : SX_L_DANGER_TEXT);
 }
 
@@ -438,7 +436,6 @@ static void refresh_headphone_icon(void) {
 	}
 
 	lv_obj_set_hidden(hp_icon, false);
-
 }
 
 // The two radios, immediately left of the charge percentage: bluetooth first,
@@ -673,9 +670,7 @@ static void timer_update_cb(lv_timer_t *timer) {
 	// enough for plugging the charger in to show at once. What is on this poll
 	// is what nobody is standing over -- the playback colour, Wi-Fi transfer,
 	// DAC mode.
-	led_update_playback(state.status == AUDIO_STATUS_PLAYING, state.stream_sample_rate,
-						!state.live && podcastcache_is_episode(state.current_file),
-						!state.live && audio_get_dsd_multiple() > 0);
+	led_update_playback(state.status == AUDIO_STATUS_PLAYING, state.stream_sample_rate, !state.live && podcastcache_is_episode(state.current_file), !state.live && audio_get_dsd_multiple() > 0);
 	// Wi-Fi transfer takes the same route: its pattern stays lit, screen off
 	// included, for as long as the transfer is on. The switch rather than the
 	// process, because this poll is five seconds apart and the server takes a

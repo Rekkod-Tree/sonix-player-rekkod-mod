@@ -9,8 +9,8 @@
 #include <errno.h>
 #include <limits.h>
 #include <pthread.h>
-#include <stdint.h>
 #include <stdatomic.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,14 +20,14 @@
 #include <unistd.h>
 
 #include "src/system/core/config.h"
+#include "src/system/core/utils.h"
 #include "src/system/db/sqlite3.h"
+#include "src/system/decode/apedec.h"
+#include "src/system/decode/mp4.h"
 #include "src/system/library/covertone.h"
 #include "src/system/library/cue.h"
 #include "src/system/library/librarycovers.h"
-#include "src/system/decode/mp4.h"
-#include "src/system/decode/apedec.h"
 #include "src/system/library/metadata.h"
-#include "src/system/core/utils.h"
 
 // The schema.
 //
@@ -106,6 +106,7 @@ static const char *const SCHEMA[] = {
 	// Also local: where playback was left (the "Ricorda traccia" option). One
 	// row only; id is always 0.
 	"CREATE TABLE IF NOT EXISTS PLAYBACK_STATE(id INT PRIMARY KEY, path TEXT, position REAL, updated_at INT)",
+	"CREATE TABLE IF NOT EXISTS PLAYBACK_PLACE(source TEXT PRIMARY KEY, route BLOB NOT NULL)",
 
 	// Also local: the playback queue as it will play, so a reboot comes back
 	// with next and prev still meaning something. One row per entry, plus a
@@ -358,8 +359,7 @@ static pthread_mutex_t db_lock = PTHREAD_MUTEX_INITIALIZER;
 // A favourite's artist: the index's, where it has the track -- what the list
 // of all the tracks shows -- and the one stored with the star otherwise. A
 // track starred from a list is stored with no artist at all.
-#define FAV_ARTIST \
-	"COALESCE(NULLIF((SELECT m.artist FROM MEDIA_TABLE m WHERE m.path = FAVOURITES.path LIMIT 1), ''), artist)"
+#define FAV_ARTIST "COALESCE(NULLIF((SELECT m.artist FROM MEDIA_TABLE m WHERE m.path = FAVOURITES.path LIMIT 1), ''), artist)"
 // The title the same way: the library's, then the one written down at starring.
 #define FAV_NAME "COALESCE(NULLIF((SELECT m.name FROM MEDIA_TABLE m WHERE m.path = FAVOURITES.path LIMIT 1), ''), name)"
 
@@ -376,9 +376,7 @@ _Static_assert(LIBRARY_RECENT_MAX == 100, "LIBRARY_RECENT_MAX_SQL must spell LIB
 // The latest LIBRARY_RECENT_MAX counted plays still in the index, latest first.
 // The limit sits inside the IN so that the count of the list -- the same query
 // with its outer ORDER BY cut off, see library_index_open() -- is limited too.
-#define PLAYS_RECENT                                                                                                  \
-	"rowid IN (SELECT rowid FROM PLAY_COUNTS WHERE " PLAYS_IN_INDEX " ORDER BY last_played DESC, rowid DESC LIMIT "  \
-	LIBRARY_RECENT_MAX_SQL ")"
+#define PLAYS_RECENT "rowid IN (SELECT rowid FROM PLAY_COUNTS WHERE " PLAYS_IN_INDEX " ORDER BY last_played DESC, rowid DESC LIMIT " LIBRARY_RECENT_MAX_SQL ")"
 #define PLAYS_RECENT_ORDER "last_played DESC, rowid DESC"
 
 typedef enum {
@@ -422,9 +420,7 @@ static void bump_all_generations(void) {
 	}
 }
 
-unsigned library_database_epoch(void) {
-	return atomic_load(&database_online) ? atomic_load(&database_epoch) : 0;
-}
+unsigned library_database_epoch(void) { return atomic_load(&database_online) ? atomic_load(&database_epoch) : 0; }
 
 unsigned library_revision(library_list_t kind) {
 	pthread_mutex_lock(&db_lock);
@@ -515,9 +511,9 @@ typedef enum {
 	SORT_GROUP_LATIN,
 	SORT_GROUP_GREEK,
 	SORT_GROUP_CYRILLIC,
-	SORT_GROUP_KANA,	// Japanese hiragana/katakana
-	SORT_GROUP_CJK,		// Chinese (and Japanese kanji, which share the block)
-	SORT_GROUP_HANGUL,	// Korean
+	SORT_GROUP_KANA,   // Japanese hiragana/katakana
+	SORT_GROUP_CJK,	   // Chinese (and Japanese kanji, which share the block)
+	SORT_GROUP_HANGUL, // Korean
 	SORT_GROUP_OTHER,
 } sort_group_t;
 
@@ -621,12 +617,10 @@ static sort_group_t sort_group_of(uint32_t code) {
 	if (code >= 0x400 && code <= 0x4FF) {
 		return SORT_GROUP_CYRILLIC;
 	}
-	if ((code >= 0x3040 && code <= 0x30FF) || (code >= 0x31F0 && code <= 0x31FF) ||
-		(code >= 0xFF66 && code <= 0xFF9D)) {
+	if ((code >= 0x3040 && code <= 0x30FF) || (code >= 0x31F0 && code <= 0x31FF) || (code >= 0xFF66 && code <= 0xFF9D)) {
 		return SORT_GROUP_KANA;
 	}
-	if ((code >= 0x3400 && code <= 0x4DBF) || (code >= 0x4E00 && code <= 0x9FFF) ||
-		(code >= 0xF900 && code <= 0xFAFF)) {
+	if ((code >= 0x3400 && code <= 0x4DBF) || (code >= 0x4E00 && code <= 0x9FFF) || (code >= 0xF900 && code <= 0xFAFF)) {
 		return SORT_GROUP_CJK;
 	}
 	if ((code >= 0x1100 && code <= 0x11FF) || (code >= 0xAC00 && code <= 0xD7AF)) {
@@ -643,9 +637,9 @@ static sort_group_t sort_group_of(uint32_t code) {
 // one being exiled past Z. Covers Latin-1 Supplement and Latin Extended-A,
 // which is every accent a European tag realistically carries.
 static uint32_t fold_latin_accent(uint32_t code) {
-	static const char LATIN1[] = "aaaaaaaceeeeiiii" // C0-CF
+	static const char LATIN1[] = "aaaaaaaceeeeiiii"	  // C0-CF
 								 "dnooooo\0ouuuuyps"  // D0-DF
-								 "aaaaaaaceeeeiiii" // E0-EF
+								 "aaaaaaaceeeeiiii"	  // E0-EF
 								 "dnooooo\0ouuuuypy"; // F0-FF
 
 	if (code >= 0xC0 && code <= 0xFF) {
@@ -659,26 +653,26 @@ static uint32_t fold_latin_accent(uint32_t code) {
 	// put S-caron among the Ts and L-stroke among the Ns -- in the sort and,
 	// once there was one, on the A-Z strip.
 	if (code >= 0x100 && code <= 0x17F) {
-		static const char EXT_A[] = "aaaaaa"		// 100-105 A with macron, breve, ogonek
-									"cccccccc"		// 106-10D
-									"dddd"			// 10E-111
-									"eeeeeeeeee"	// 112-11B
-									"gggggggg"		// 11C-123
-									"hhhh"			// 124-127
-									"iiiiiiiiiiii"	// 128-133, the IJ ligature included
-									"jj"			// 134-135
-									"kkk"			// 136-138
-									"llllllllll"	// 139-142, L with stroke included
-									"nnnnnnnnn"		// 143-14B
-									"oooooooo"		// 14C-153, the OE ligature included
-									"rrrrrr"		// 154-159
-									"ssssssss"		// 15A-161
-									"tttttt"		// 162-167
-									"uuuuuuuuuuuu"	// 168-173
-									"ww"			// 174-175
-									"yyy"			// 176-178
-									"zzzzzz"		// 179-17E
-									"s";			// 17F the long s
+		static const char EXT_A[] = "aaaaaa"	   // 100-105 A with macron, breve, ogonek
+									"cccccccc"	   // 106-10D
+									"dddd"		   // 10E-111
+									"eeeeeeeeee"   // 112-11B
+									"gggggggg"	   // 11C-123
+									"hhhh"		   // 124-127
+									"iiiiiiiiiiii" // 128-133, the IJ ligature included
+									"jj"		   // 134-135
+									"kkk"		   // 136-138
+									"llllllllll"   // 139-142, L with stroke included
+									"nnnnnnnnn"	   // 143-14B
+									"oooooooo"	   // 14C-153, the OE ligature included
+									"rrrrrr"	   // 154-159
+									"ssssssss"	   // 15A-161
+									"tttttt"	   // 162-167
+									"uuuuuuuuuuuu" // 168-173
+									"ww"		   // 174-175
+									"yyy"		   // 176-178
+									"zzzzzz"	   // 179-17E
+									"s";		   // 17F the long s
 		size_t index = code - 0x100;
 		if (index < sizeof(EXT_A) - 1) {
 			return (uint32_t)EXT_A[index];
@@ -731,8 +725,7 @@ static int skip_article(const char *text, int length) {
 	if (!skip_articles) {
 		return 0;
 	}
-	static const char *const ARTICLES[] = {"the ", "a ",  "an ", "il ",  "lo ", "la ", "i ",
-										   "gli ", "le ", "l'",  "un ", "uno ", "una "};
+	static const char *const ARTICLES[] = {"the ", "a ", "an ", "il ", "lo ", "la ", "i ", "gli ", "le ", "l'", "un ", "uno ", "una "};
 
 	for (size_t i = 0; i < sizeof(ARTICLES) / sizeof(ARTICLES[0]); i++) {
 		int article_length = (int)strlen(ARTICLES[i]);
@@ -925,8 +918,7 @@ static void foldcase_sql(sqlite3_context *ctx, int argc, sqlite3_value **argv) {
 #define SEARCH_RS '\x1e'
 #define SEARCH_US '\x1f'
 
-static void search_key(const char *title, const char *artist, const char *album, const char *album_artist, char *out,
-					   size_t size) {
+static void search_key(const char *title, const char *artist, const char *album, const char *album_artist, char *out, size_t size) {
 	const char *parts[4] = {album, album_artist, title, artist};
 	size_t at = 0;
 	out[0] = '\0';
@@ -1058,8 +1050,8 @@ static void albumid_sql(sqlite3_context *ctx, int argc, sqlite3_value **argv) {
 // when the value has one. A value saved before albums had keys is a name alone
 // and still matches every album of that name. Constant in the row, so the
 // lookup still goes through media_album_key_idx.
-#define ALBUM_VALUE_MATCH                                                                                             \
-	"album = (CASE WHEN instr(?1, char(31)) > 0 THEN substr(?1, 1, instr(?1, char(31)) - 1) ELSE ?1 END)"             \
+#define ALBUM_VALUE_MATCH                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              \
+	"album = (CASE WHEN instr(?1, char(31)) > 0 THEN substr(?1, 1, instr(?1, char(31)) - 1) ELSE ?1 END)"                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              \
 	" AND (instr(?1, char(31)) = 0 OR album_key = substr(?1, instr(?1, char(31)) + 1))"
 
 // A row of ALBUM_GROUP_TABLE as an album value: the name, the separator and the key.
@@ -1067,14 +1059,13 @@ static void albumid_sql(sqlite3_context *ctx, int argc, sqlite3_value **argv) {
 
 // When the newest file of the ALBUM_GROUP_TABLE row `g` arrived: how new the
 // album is, for the lists that run by date.
-#define ALBUM_GROUP_NEWEST                                                                                            \
-	"(SELECT MAX(m.ctime) FROM MEDIA_TABLE m WHERE m.album = g.album AND m.album_key = g.album_key)"
+#define ALBUM_GROUP_NEWEST "(SELECT MAX(m.ctime) FROM MEDIA_TABLE m WHERE m.album = g.album AND m.album_key = g.album_key)"
 
 // The year of the ALBUM_GROUP_TABLE row `g`: the latest its tracks carry, NULL
 // when none of them carries one. A reissue tagged track by track with the
 // original year and one bonus track with its own still files under the reissue.
-#define ALBUM_GROUP_YEAR                                                                                              \
-	"(SELECT MAX(CASE WHEN m.year > 0 THEN m.year END) FROM MEDIA_TABLE m"                                           \
+#define ALBUM_GROUP_YEAR                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               \
+	"(SELECT MAX(CASE WHEN m.year > 0 THEN m.year END) FROM MEDIA_TABLE m"                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             \
 	" WHERE m.album = g.album AND m.album_key = g.album_key)"
 
 // A year as a sort key that sends the rows without one to the end, whichever
@@ -1085,8 +1076,8 @@ static void albumid_sql(sqlite3_context *ctx, int argc, sqlite3_value **argv) {
 
 // The first track of the ALBUM_GROUP_TABLE row `g`, by disc and track number,
 // with the columns asked for: the one whose cover and artist the row shows.
-#define ALBUM_GROUP_FIRST(columns)                                                                                    \
-	"(SELECT " columns " FROM MEDIA_TABLE m WHERE m.album = g.album AND m.album_key = g.album_key" \
+#define ALBUM_GROUP_FIRST(columns)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     \
+	"(SELECT " columns " FROM MEDIA_TABLE m WHERE m.album = g.album AND m.album_key = g.album_key"                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     \
 	" ORDER BY COALESCE(m.disc,1), m.dis_id LIMIT 1)"
 
 // The single character a name is filed under in an A-Z index, and the group it
@@ -1221,9 +1212,7 @@ static bool exec(const char *sql) {
 // The same, for a statement whose failure is the expected answer: adding a
 // column that is already there. Logging that on every boot would be five lines
 // of noise saying nothing went wrong.
-static bool exec_quiet(const char *sql) {
-	return sqlite3_exec(db, sql, NULL, NULL, NULL) == SQLITE_OK;
-}
+static bool exec_quiet(const char *sql) { return sqlite3_exec(db, sql, NULL, NULL, NULL) == SQLITE_OK; }
 
 // A monotonic millisecond reading, only ever used as a difference.
 static uint32_t now_ms(void) {
@@ -1300,12 +1289,7 @@ static const struct {
 	const char *table;
 	const char *column;
 } KEYED_TABLES[] = {
-	{"MEDIA_TABLE", "name"},
-	{"ALBUM_TABLE", "album"},
-	{"ARTIST_TABLE", "artist"},
-	{"ALBUM_ARTIST_TABLE", "album_artist"},
-	{"GENRE_TABLE", "genre"},
-	{"ALBUM_GROUP_TABLE", "album"},
+	{"MEDIA_TABLE", "name"}, {"ALBUM_TABLE", "album"}, {"ARTIST_TABLE", "artist"}, {"ALBUM_ARTIST_TABLE", "album_artist"}, {"GENRE_TABLE", "genre"}, {"ALBUM_GROUP_TABLE", "album"},
 };
 
 // Runs a list of index statements. A DROP INDEX follows the CREATE of the index
@@ -1412,8 +1396,7 @@ static void *backfill_worker(void *arg) {
 	// albums, not hundreds of thousands.
 	for (size_t i = 1; i < sizeof(KEYED_TABLES) / sizeof(KEYED_TABLES[0]) && !backfill_stop; i++) {
 		char sql[192];
-		snprintf(sql, sizeof(sql), "UPDATE %s SET sortkey=sortkey(%s) WHERE sortkey IS NULL", KEYED_TABLES[i].table,
-				 KEYED_TABLES[i].column);
+		snprintf(sql, sizeof(sql), "UPDATE %s SET sortkey=sortkey(%s) WHERE sortkey IS NULL", KEYED_TABLES[i].table, KEYED_TABLES[i].column);
 		pthread_mutex_lock(&db_lock);
 		if (db && exec(sql)) {
 			filled += sqlite3_changes(db);
@@ -1457,8 +1440,7 @@ static void *backfill_worker(void *arg) {
 	if (!backfill_stop && !sortkeys_missing()) {
 		build_sort_indexes();
 		sortkeys_ready = true;
-		printf("library: %d sort keys filled in in %u ms; the lists are indexed from now on\n", filled,
-			   now_ms() - started_ms);
+		printf("library: %d sort keys filled in in %u ms; the lists are indexed from now on\n", filled, now_ms() - started_ms);
 	}
 	searchkeys_fill();
 	return NULL;
@@ -1499,8 +1481,7 @@ static void backfill_stop_and_wait(void) {
 static bool list_uses_sortkey(library_list_t kind) {
 	// Favourites run by when they were starred and a playlist by the order it
 	// was built, so neither has a sort key to read.
-	return sortkeys_ready && kind != LIBRARY_LIST_FAVOURITES && kind != LIBRARY_LIST_PLAYLIST &&
-		   kind != LIBRARY_LIST_MOST_PLAYED && kind != LIBRARY_LIST_RECENTLY_PLAYED;
+	return sortkeys_ready && kind != LIBRARY_LIST_FAVOURITES && kind != LIBRARY_LIST_PLAYLIST && kind != LIBRARY_LIST_MOST_PLAYED && kind != LIBRARY_LIST_RECENTLY_PLAYED;
 }
 
 static void next_mount_serial(void);
@@ -1511,15 +1492,13 @@ static void links_check(void);
 // it goes; an index that is already there gets it here, once, in one statement
 // over the tracks rather than a rescan of the card.
 static void album_groups_fill(void) {
-	if (count_rows("SELECT 1 FROM ALBUM_GROUP_TABLE LIMIT 1") > 0 ||
-		count_rows("SELECT 1 FROM MEDIA_TABLE WHERE album <> '' LIMIT 1") == 0) {
+	if (count_rows("SELECT 1 FROM ALBUM_GROUP_TABLE LIMIT 1") > 0 || count_rows("SELECT 1 FROM MEDIA_TABLE WHERE album <> '' LIMIT 1") == 0) {
 		return;
 	}
 	uint32_t started_ms = now_ms();
 	exec("INSERT OR IGNORE INTO ALBUM_GROUP_TABLE(album, album_key, sortkey)"
 		 " SELECT album, albumkey(album_artist, path), sortkey(album) FROM MEDIA_TABLE WHERE album <> ''");
-	printf("library: %d albums told apart by artist in %u ms\n", count_rows("SELECT COUNT(*) FROM ALBUM_GROUP_TABLE"),
-		   now_ms() - started_ms);
+	printf("library: %d albums told apart by artist in %u ms\n", count_rows("SELECT COUNT(*) FROM ALBUM_GROUP_TABLE"), now_ms() - started_ms);
 }
 
 // The album_key column on an index written before it existed: one statement
@@ -1564,13 +1543,11 @@ static bool db_open_file(const char *db_path) {
 	sqlite3_create_function(db, "sortkey", 1, SQLITE_UTF8 | SQLITE_DETERMINISTIC, NULL, sortkey_sql, NULL, NULL);
 
 	// And the folding on its own, which the search matches through.
-	sqlite3_create_function(db, "foldcase", 1, SQLITE_UTF8 | SQLITE_DETERMINISTIC, NULL, foldcase_sql, NULL,
-							NULL);
+	sqlite3_create_function(db, "foldcase", 1, SQLITE_UTF8 | SQLITE_DETERMINISTIC, NULL, foldcase_sql, NULL, NULL);
 
 	// The search: the key a row is found by, and the test.
 	sqlite3_create_function(db, "searchkey", 4, SQLITE_UTF8 | SQLITE_DETERMINISTIC, NULL, searchkey_sql, NULL, NULL);
-	sqlite3_create_function(db, "searchmatch", 3, SQLITE_UTF8 | SQLITE_DETERMINISTIC, NULL, searchmatch_sql, NULL,
-							NULL);
+	sqlite3_create_function(db, "searchmatch", 3, SQLITE_UTF8 | SQLITE_DETERMINISTIC, NULL, searchmatch_sql, NULL, NULL);
 
 	// And whose an album is, for telling apart two records with one name.
 	sqlite3_create_function(db, "albumkey", 2, SQLITE_UTF8 | SQLITE_DETERMINISTIC, NULL, albumkey_sql, NULL, NULL);
@@ -1694,8 +1671,7 @@ static unsigned index_features_guess(void) {
 	// Nine in ten: a few files without a length are this firmware's ordinary
 	// result, a sample mostly without one is an older scan.
 	bool current = files == 0 || timed * 10 >= files * 9;
-	printf("library: index from before its features were recorded; %d of %d sampled tracks have a length, %s\n",
-		   timed, files, current ? "taken as current" : "taken as an older scan");
+	printf("library: index from before its features were recorded; %d of %d sampled tracks have a length, %s\n", timed, files, current ? "taken as current" : "taken as an older scan");
 	// Only the two features that came before the number was kept: anything
 	// added since (the covers) is missing from such an index by definition.
 	return INDEX_FEATURES_KNOWN | (current ? (LIBRARY_INDEX_COMPILATIONS | LIBRARY_INDEX_DURATIONS) : 0);
@@ -1725,12 +1701,12 @@ unsigned library_index_missing(void) { return db ? index_missing : 0; }
 // and number, the track the Albums list takes its cover from) with that
 // track's mtime, and the row kept for it, if any. ALBUM_COVER is joined by its
 // primary key through albumid(), so a kept row costs a lookup and not a scan.
-#define COVER_ALBUM_COLUMNS                                                                                           \
-	"SELECT g.rowid, g.album, g.album_key, f.path, f.mtime, c.id IS NOT NULL, c.cover_h, c.cover_c, c.cover_l,"     \
-	" c.kind, c.thumbs, c.slot, c.version, c.track, c.track_mtime, c.src, c.cover_mtime, c.src_size, c.dir_mtime"   \
-	" FROM ALBUM_GROUP_TABLE g"                                                                                     \
-	" JOIN MEDIA_TABLE f ON f.rowid = (SELECT m.rowid FROM MEDIA_TABLE m WHERE m.album = g.album"                    \
-	" AND m.album_key = g.album_key ORDER BY COALESCE(m.disc,1), m.dis_id LIMIT 1)"                                \
+#define COVER_ALBUM_COLUMNS                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            \
+	"SELECT g.rowid, g.album, g.album_key, f.path, f.mtime, c.id IS NOT NULL, c.cover_h, c.cover_c, c.cover_l,"                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        \
+	" c.kind, c.thumbs, c.slot, c.version, c.track, c.track_mtime, c.src, c.cover_mtime, c.src_size, c.dir_mtime"                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      \
+	" FROM ALBUM_GROUP_TABLE g"                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        \
+	" JOIN MEDIA_TABLE f ON f.rowid = (SELECT m.rowid FROM MEDIA_TABLE m WHERE m.album = g.album"                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      \
+	" AND m.album_key = g.album_key ORDER BY COALESCE(m.disc,1), m.dis_id LIMIT 1)"                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    \
 	" LEFT JOIN ALBUM_COVER c ON c.id = albumid(g.album, g.album_key)"
 
 static void copy_column(sqlite3_stmt *stmt, int col, char *out, size_t size) {
@@ -1767,8 +1743,7 @@ static void cover_album_from_row(sqlite3_stmt *stmt, library_cover_album_t *out)
 	out->kept_dir_mtime = sqlite3_column_int64(stmt, 18);
 }
 
-int library_covers_albums(library_covers_select_t which, int version, int64_t after, int id_base,
-						  library_cover_album_t *out, int max) {
+int library_covers_albums(library_covers_select_t which, int version, int64_t after, int id_base, library_cover_album_t *out, int max) {
 	if (!out || max <= 0) {
 		return 0;
 	}
@@ -1783,8 +1758,7 @@ int library_covers_albums(library_covers_select_t which, int version, int64_t af
 		only = " AND c.id IS NOT NULL AND c.kind IN (1, 2) AND c.version = ?3 AND c.track = f.path"
 			   " AND c.track_mtime IS IFNULL(f.mtime, 0) AND (IFNULL(c.thumbs, 0) & 3) <> 3";
 	}
-	snprintf(sql, sizeof(sql),
-			 COVER_ALBUM_COLUMNS " WHERE g.rowid > ?1 AND g.album <> ''%s%s ORDER BY g.rowid LIMIT ?2", only,
+	snprintf(sql, sizeof(sql), COVER_ALBUM_COLUMNS " WHERE g.rowid > ?1 AND g.album <> ''%s%s ORDER BY g.rowid LIMIT ?2", only,
 			 id_base > 0 ? " AND EXISTS (SELECT 1 FROM MEDIA_TABLE n WHERE n.album = g.album"
 						   " AND n.album_key = g.album_key AND n.id > ?4)"
 						 : "");
@@ -1820,10 +1794,9 @@ bool library_covers_album(int64_t id, int version, library_cover_album_t *out) {
 	// The kept row says which album it is; one never seen is looked for among
 	// all of them by its hash, a walk of a few thousand short rows.
 	if (db && sqlite3_prepare_v2(db,
-								 COVER_ALBUM_COLUMNS
-								 " WHERE g.album <> '' AND ((g.album, g.album_key) IN (SELECT album, album_key"
-								 " FROM ALBUM_COVER WHERE id = ?1) OR (NOT EXISTS (SELECT 1 FROM ALBUM_COVER"
-								 " WHERE id = ?1) AND albumid(g.album, g.album_key) = ?1)) LIMIT 1",
+								 COVER_ALBUM_COLUMNS " WHERE g.album <> '' AND ((g.album, g.album_key) IN (SELECT album, album_key"
+													 " FROM ALBUM_COVER WHERE id = ?1) OR (NOT EXISTS (SELECT 1 FROM ALBUM_COVER"
+													 " WHERE id = ?1) AND albumid(g.album, g.album_key) = ?1)) LIMIT 1",
 								 -1, &stmt, NULL) == SQLITE_OK) {
 		sqlite3_bind_int64(stmt, 1, id);
 		if (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -1840,9 +1813,7 @@ int library_covers_load(void (*cb)(const library_cover_brief_t *row, void *user)
 	int count = 0;
 	pthread_mutex_lock(&db_lock);
 	sqlite3_stmt *stmt = NULL;
-	if (db && cb &&
-		sqlite3_prepare_v2(db, "SELECT id, cover_h, cover_c, cover_l, kind, thumbs, slot, version FROM ALBUM_COVER", -1,
-						   &stmt, NULL) == SQLITE_OK) {
+	if (db && cb && sqlite3_prepare_v2(db, "SELECT id, cover_h, cover_c, cover_l, kind, thumbs, slot, version FROM ALBUM_COVER", -1, &stmt, NULL) == SQLITE_OK) {
 		while (sqlite3_step(stmt) == SQLITE_ROW) {
 			library_cover_brief_t row = {
 				.id = sqlite3_column_int64(stmt, 0),
@@ -1863,8 +1834,7 @@ int library_covers_load(void (*cb)(const library_cover_brief_t *row, void *user)
 	return count;
 }
 
-bool library_cover_store(const library_cover_album_t *album, const library_cover_brief_t *row, const char *src,
-						 int64_t src_mtime, int64_t src_size, int64_t dir_mtime) {
+bool library_cover_store(const library_cover_album_t *album, const library_cover_brief_t *row, const char *src, int64_t src_mtime, int64_t src_size, int64_t dir_mtime) {
 	if (!album || !row || !row->id) {
 		return false;
 	}
@@ -1911,8 +1881,7 @@ bool library_cover_store(const library_cover_album_t *album, const library_cover
 void library_cover_set_thumbs(int64_t id, int thumbs, int32_t slot) {
 	pthread_mutex_lock(&db_lock);
 	sqlite3_stmt *stmt = NULL;
-	if (db && sqlite3_prepare_v2(db, "UPDATE ALBUM_COVER SET thumbs = ?2, slot = ?3 WHERE id = ?1", -1, &stmt, NULL) ==
-				  SQLITE_OK) {
+	if (db && sqlite3_prepare_v2(db, "UPDATE ALBUM_COVER SET thumbs = ?2, slot = ?3 WHERE id = ?1", -1, &stmt, NULL) == SQLITE_OK) {
 		sqlite3_bind_int64(stmt, 1, id);
 		sqlite3_bind_int(stmt, 2, thumbs);
 		if (slot >= 0) {
@@ -1930,10 +1899,11 @@ int64_t library_cover_find_by_track(const char *track, int64_t track_mtime, int 
 	int64_t id = 0;
 	pthread_mutex_lock(&db_lock);
 	sqlite3_stmt *stmt = NULL;
-	if (db && track && sqlite3_prepare_v2(db,
-										  "SELECT id FROM ALBUM_COVER WHERE track = ?1 AND track_mtime = ?2 AND"
-										  " version = ?3 AND kind <> 4 LIMIT 1",
-										  -1, &stmt, NULL) == SQLITE_OK) {
+	if (db && track &&
+		sqlite3_prepare_v2(db,
+						   "SELECT id FROM ALBUM_COVER WHERE track = ?1 AND track_mtime = ?2 AND"
+						   " version = ?3 AND kind <> 4 LIMIT 1",
+						   -1, &stmt, NULL) == SQLITE_OK) {
 		sqlite3_bind_text(stmt, 1, track, -1, SQLITE_STATIC);
 		sqlite3_bind_int64(stmt, 2, track_mtime);
 		sqlite3_bind_int(stmt, 3, version);
@@ -1950,8 +1920,7 @@ bool library_cover_rekey(int64_t old_id, int64_t new_id, const char *album, cons
 	bool ok = false;
 	pthread_mutex_lock(&db_lock);
 	sqlite3_stmt *stmt = NULL;
-	if (db && sqlite3_prepare_v2(db, "UPDATE OR REPLACE ALBUM_COVER SET id = ?2, album = ?3, album_key = ?4 WHERE id = ?1",
-								 -1, &stmt, NULL) == SQLITE_OK) {
+	if (db && sqlite3_prepare_v2(db, "UPDATE OR REPLACE ALBUM_COVER SET id = ?2, album = ?3, album_key = ?4 WHERE id = ?1", -1, &stmt, NULL) == SQLITE_OK) {
 		sqlite3_bind_int64(stmt, 1, old_id);
 		sqlite3_bind_int64(stmt, 2, new_id);
 		sqlite3_bind_text(stmt, 3, album ? album : "", -1, SQLITE_STATIC);
@@ -2258,11 +2227,7 @@ int library_list(library_list_t kind, char out[][256], int max) {
 		const char *table;
 		const char *column;
 	} SOURCES[] = {
-		{"MEDIA_TABLE", "name"},
-		{"ALBUM_TABLE", "album"},
-		{"ARTIST_TABLE", "artist"},
-		{"ALBUM_ARTIST_TABLE", "album_artist"},
-		{"GENRE_TABLE", "genre"},
+		{"MEDIA_TABLE", "name"}, {"ALBUM_TABLE", "album"}, {"ARTIST_TABLE", "artist"}, {"ALBUM_ARTIST_TABLE", "album_artist"}, {"GENRE_TABLE", "genre"},
 	};
 
 	if (kind < 0 || kind >= (int)(sizeof(SOURCES) / sizeof(SOURCES[0])) || max <= 0) {
@@ -2270,8 +2235,7 @@ int library_list(library_list_t kind, char out[][256], int max) {
 	}
 
 	char sql[256];
-	snprintf(sql, sizeof(sql), "SELECT %s FROM %s WHERE %s <> '' ORDER BY %s COLLATE listorder LIMIT %d",
-			 SOURCES[kind].column, SOURCES[kind].table, SOURCES[kind].column, SOURCES[kind].column, max);
+	snprintf(sql, sizeof(sql), "SELECT %s FROM %s WHERE %s <> '' ORDER BY %s COLLATE listorder LIMIT %d", SOURCES[kind].column, SOURCES[kind].table, SOURCES[kind].column, SOURCES[kind].column, max);
 
 	pthread_mutex_lock(&db_lock);
 
@@ -2327,16 +2291,13 @@ static const char *filter_where(library_filter_t filter) {
 	case LIBRARY_FILTER_ARTIST:
 		return artist_links ? "(artist=?1 OR path IN (SELECT path FROM ARTIST_LINK WHERE artist=?1))" : "artist=?1";
 	case LIBRARY_FILTER_ALBUM_ARTIST:
-		return album_artist_links
-				   ? "(album_artist=?1 OR path IN (SELECT path FROM ALBUM_ARTIST_LINK WHERE album_artist=?1))"
-				   : "album_artist=?1";
+		return album_artist_links ? "(album_artist=?1 OR path IN (SELECT path FROM ALBUM_ARTIST_LINK WHERE album_artist=?1))" : "album_artist=?1";
 	case LIBRARY_FILTER_GENRE:
 		return genre_links ? "(genre=?1 OR path IN (SELECT path FROM GENRE_LINK WHERE genre=?1))" : "genre=?1";
 	case LIBRARY_FILTER_YEAR:
 		// The tracks of the albums of that year, by the album's year and not
 		// the track's own, so the tracks are those of the records listed.
-		return "(album, album_key) IN (SELECT g.album, g.album_key FROM ALBUM_GROUP_TABLE g WHERE " ALBUM_GROUP_YEAR
-			   " = CAST(?1 AS INTEGER))";
+		return "(album, album_key) IN (SELECT g.album, g.album_key FROM ALBUM_GROUP_TABLE g WHERE " ALBUM_GROUP_YEAR " = CAST(?1 AS INTEGER))";
 	case LIBRARY_FILTER_RECENT:
 		// The tracks of the records added last: the same albums, and as many,
 		// as the album list of them shows.
@@ -2355,8 +2316,7 @@ bool library_track_title(const char *path, char *out, size_t out_size) {
 	pthread_mutex_lock(&db_lock);
 	bool found = false;
 	sqlite3_stmt *stmt = NULL;
-	if (db && sqlite3_prepare_v2(db, "SELECT name FROM MEDIA_TABLE WHERE path=? LIMIT 1", -1, &stmt, NULL) ==
-				  SQLITE_OK) {
+	if (db && sqlite3_prepare_v2(db, "SELECT name FROM MEDIA_TABLE WHERE path=? LIMIT 1", -1, &stmt, NULL) == SQLITE_OK) {
 		sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT);
 		if (sqlite3_step(stmt) == SQLITE_ROW) {
 			const unsigned char *name = sqlite3_column_text(stmt, 0);
@@ -2386,9 +2346,7 @@ size_t library_track_places(const char *const *paths, size_t count, library_plac
 
 		pthread_mutex_lock(&db_lock);
 		sqlite3_stmt *stmt = NULL;
-		if (!db || sqlite3_prepare_v2(db,
-									  "SELECT album, COALESCE(disc,1), dis_id FROM MEDIA_TABLE WHERE path=? LIMIT 1",
-									  -1, &stmt, NULL) != SQLITE_OK) {
+		if (!db || sqlite3_prepare_v2(db, "SELECT album, COALESCE(disc,1), dis_id FROM MEDIA_TABLE WHERE path=? LIMIT 1", -1, &stmt, NULL) != SQLITE_OK) {
 			pthread_mutex_unlock(&db_lock);
 			break;
 		}
@@ -2399,8 +2357,7 @@ size_t library_track_places(const char *const *paths, size_t count, library_plac
 			sqlite3_bind_text(stmt, 1, paths[i], -1, SQLITE_STATIC);
 			if (sqlite3_step(stmt) == SQLITE_ROW) {
 				const unsigned char *album = sqlite3_column_text(stmt, 0);
-				cb(i, album ? (const char *)album : "", sqlite3_column_int(stmt, 1), sqlite3_column_int(stmt, 2),
-				   user);
+				cb(i, album ? (const char *)album : "", sqlite3_column_int(stmt, 1), sqlite3_column_int(stmt, 2), user);
 				found++;
 			}
 			sqlite3_reset(stmt);
@@ -2429,10 +2386,7 @@ bool library_album_artist(const char *album, char *out, size_t size) {
 	pthread_mutex_lock(&db_lock);
 	bool found = false;
 	sqlite3_stmt *stmt = NULL;
-	if (db && sqlite3_prepare_v2(db,
-								 "SELECT COALESCE(NULLIF(album_artist,''), artist) FROM MEDIA_TABLE WHERE " ALBUM_VALUE_MATCH
-								 " ORDER BY COALESCE(disc,1), dis_id LIMIT 1",
-								 -1, &stmt, NULL) == SQLITE_OK) {
+	if (db && sqlite3_prepare_v2(db, "SELECT COALESCE(NULLIF(album_artist,''), artist) FROM MEDIA_TABLE WHERE " ALBUM_VALUE_MATCH " ORDER BY COALESCE(disc,1), dis_id LIMIT 1", -1, &stmt, NULL) == SQLITE_OK) {
 		sqlite3_bind_text(stmt, 1, album, -1, SQLITE_TRANSIENT);
 		if (sqlite3_step(stmt) == SQLITE_ROW) {
 			const unsigned char *artist = sqlite3_column_text(stmt, 0);
@@ -2463,10 +2417,7 @@ bool library_album_info(const char *album, library_album_info_t *out) {
 	sqlite3_stmt *stmt = NULL;
 	if (db && sqlite3_prepare_v2(db,
 								 "SELECT COALESCE(NULLIF(album_artist,''), artist), genre,"
-								 " (SELECT MAX(CASE WHEN year > 0 THEN year END) FROM MEDIA_TABLE WHERE " ALBUM_VALUE_MATCH
-								 "), (SELECT COUNT(*) FROM MEDIA_TABLE WHERE " ALBUM_VALUE_MATCH
-								 "), (SELECT TOTAL(MAX(end_time, 0)) FROM MEDIA_TABLE WHERE " ALBUM_VALUE_MATCH
-								 "), (SELECT COUNT(*) FROM MEDIA_TABLE WHERE " ALBUM_VALUE_MATCH " AND IFNULL(end_time, 0) <= 0"
+								 " (SELECT MAX(CASE WHEN year > 0 THEN year END) FROM MEDIA_TABLE WHERE " ALBUM_VALUE_MATCH "), (SELECT COUNT(*) FROM MEDIA_TABLE WHERE " ALBUM_VALUE_MATCH "), (SELECT TOTAL(MAX(end_time, 0)) FROM MEDIA_TABLE WHERE " ALBUM_VALUE_MATCH "), (SELECT COUNT(*) FROM MEDIA_TABLE WHERE " ALBUM_VALUE_MATCH " AND IFNULL(end_time, 0) <= 0"
 								 ") FROM MEDIA_TABLE WHERE " ALBUM_VALUE_MATCH " ORDER BY COALESCE(disc,1), dis_id LIMIT 1",
 								 -1, &stmt, NULL) == SQLITE_OK) {
 		sqlite3_bind_text(stmt, 1, album, -1, SQLITE_TRANSIENT);
@@ -2502,10 +2453,7 @@ int library_album_places(const char *album, uint16_t *disc, uint16_t *track, int
 	pthread_mutex_lock(&db_lock);
 	int count = 0;
 	sqlite3_stmt *stmt = NULL;
-	if (db && sqlite3_prepare_v2(db,
-								 "SELECT COALESCE(disc,1), dis_id FROM MEDIA_TABLE WHERE " ALBUM_VALUE_MATCH
-								 " ORDER BY " TRACK_ORDER_IN_ALBUM,
-								 -1, &stmt, NULL) == SQLITE_OK) {
+	if (db && sqlite3_prepare_v2(db, "SELECT COALESCE(disc,1), dis_id FROM MEDIA_TABLE WHERE " ALBUM_VALUE_MATCH " ORDER BY " TRACK_ORDER_IN_ALBUM, -1, &stmt, NULL) == SQLITE_OK) {
 		sqlite3_bind_text(stmt, 1, album, -1, SQLITE_TRANSIENT);
 		while (sqlite3_step(stmt) == SQLITE_ROW) {
 			if (count < max) {
@@ -2540,8 +2488,7 @@ bool library_track_names(const char *path, char *title_out, size_t title_size, c
 	pthread_mutex_lock(&db_lock);
 	bool found = false;
 	sqlite3_stmt *stmt = NULL;
-	if (db && sqlite3_prepare_v2(db, "SELECT name, artist FROM MEDIA_TABLE WHERE path=? LIMIT 1", -1, &stmt, NULL) ==
-				  SQLITE_OK) {
+	if (db && sqlite3_prepare_v2(db, "SELECT name, artist FROM MEDIA_TABLE WHERE path=? LIMIT 1", -1, &stmt, NULL) == SQLITE_OK) {
 		sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT);
 		if (sqlite3_step(stmt) == SQLITE_ROW) {
 			const unsigned char *name = sqlite3_column_text(stmt, 0);
@@ -2562,13 +2509,9 @@ bool library_track_names(const char *path, char *title_out, size_t title_size, c
 
 static library_quality_t track_quality(const char *path, int *rate_out, int *bits_out, uint32_t *length_out);
 
-library_quality_t library_track_quality(const char *path, int *rate_out, int *bits_out) {
-	return track_quality(path, rate_out, bits_out, NULL);
-}
+library_quality_t library_track_quality(const char *path, int *rate_out, int *bits_out) { return track_quality(path, rate_out, bits_out, NULL); }
 
-library_quality_t library_track_quality_length(const char *path, uint32_t *length_ms) {
-	return track_quality(path, NULL, NULL, length_ms);
-}
+library_quality_t library_track_quality_length(const char *path, uint32_t *length_ms) { return track_quality(path, NULL, NULL, length_ms); }
 
 static library_quality_t track_quality(const char *path, int *rate_out, int *bits_out, uint32_t *length_out) {
 	if (length_out) {
@@ -2587,8 +2530,7 @@ static library_quality_t track_quality(const char *path, int *rate_out, int *bit
 	int format = -1, rate = 0, bits = 0;
 	pthread_mutex_lock(&db_lock);
 	sqlite3_stmt *stmt = NULL;
-	if (db && sqlite3_prepare_v2(db, "SELECT format, sample_rate, bit, end_time FROM MEDIA_TABLE WHERE path=? LIMIT 1",
-								 -1, &stmt, NULL) == SQLITE_OK) {
+	if (db && sqlite3_prepare_v2(db, "SELECT format, sample_rate, bit, end_time FROM MEDIA_TABLE WHERE path=? LIMIT 1", -1, &stmt, NULL) == SQLITE_OK) {
 		sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT);
 		if (sqlite3_step(stmt) == SQLITE_ROW) {
 			format = sqlite3_column_int(stmt, 0);
@@ -2728,8 +2670,7 @@ static bool track_album(const char *path, bool with_key, char *out, size_t out_s
 	pthread_mutex_lock(&db_lock);
 	bool found = false;
 	sqlite3_stmt *stmt = NULL;
-	if (db && sqlite3_prepare_v2(db, "SELECT album, album_key FROM MEDIA_TABLE WHERE path=? LIMIT 1",
-								 -1, &stmt, NULL) == SQLITE_OK) {
+	if (db && sqlite3_prepare_v2(db, "SELECT album, album_key FROM MEDIA_TABLE WHERE path=? LIMIT 1", -1, &stmt, NULL) == SQLITE_OK) {
 		sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT);
 		if (sqlite3_step(stmt) == SQLITE_ROW) {
 			const unsigned char *album = sqlite3_column_text(stmt, 0);
@@ -2751,17 +2692,12 @@ static bool track_album(const char *path, bool with_key, char *out, size_t out_s
 
 bool library_track_album(const char *path, char *out, size_t out_size) { return track_album(path, false, out, out_size); }
 
-bool library_track_album_value(const char *path, char *out, size_t out_size) {
-	return track_album(path, true, out, out_size);
-}
+bool library_track_album_value(const char *path, char *out, size_t out_size) { return track_album(path, true, out, out_size); }
 
 // The album artists that say nothing about who is singing: the one a
 // compilation without an album artist is filed under, and the spellings
 // taggers use for the same thing.
-static bool album_artist_various(const char *name) {
-	return strcasecmp(name, LIBRARY_VARIOUS_ARTISTS) == 0 || strcasecmp(name, "Various") == 0 ||
-		   strcasecmp(name, "VA") == 0 || strcasecmp(name, "V.A.") == 0;
-}
+static bool album_artist_various(const char *name) { return strcasecmp(name, LIBRARY_VARIOUS_ARTISTS) == 0 || strcasecmp(name, "Various") == 0 || strcasecmp(name, "VA") == 0 || strcasecmp(name, "V.A.") == 0; }
 
 bool library_track_artist_page(const char *path, char *out, size_t out_size, bool *by_album_artist) {
 	if (!path || !path[0] || !out || out_size == 0) {
@@ -2772,8 +2708,7 @@ bool library_track_artist_page(const char *path, char *out, size_t out_size, boo
 
 	pthread_mutex_lock(&db_lock);
 	sqlite3_stmt *stmt = NULL;
-	if (db && sqlite3_prepare_v2(db, "SELECT artist, album_artist FROM MEDIA_TABLE WHERE path=? LIMIT 1", -1, &stmt,
-								 NULL) == SQLITE_OK) {
+	if (db && sqlite3_prepare_v2(db, "SELECT artist, album_artist FROM MEDIA_TABLE WHERE path=? LIMIT 1", -1, &stmt, NULL) == SQLITE_OK) {
 		sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT);
 		if (sqlite3_step(stmt) == SQLITE_ROW) {
 			const char *artist = (const char *)sqlite3_column_text(stmt, 0);
@@ -2910,30 +2845,66 @@ void library_note_play(const char *path) {
 	pthread_mutex_unlock(&db_lock);
 }
 
-void library_history_add(const char *path, const char *name, const char *artist, long long played_at) {
+void library_history_add(const char *path, const char *name, const char *artist, long long played_at) { (void)library_history_record_at(library_database_epoch(), path, name, artist, played_at); }
+
+long long library_history_record_at(unsigned epoch, const char *path, const char *name, const char *artist, long long played_at) {
 	if (!path || !path[0]) {
-		return;
+		return 0;
 	}
+	long long id = 0;
 	pthread_mutex_lock(&db_lock);
+	if (!db || !epoch || epoch != database_epoch) {
+		pthread_mutex_unlock(&db_lock);
+		return 0;
+	}
+	if (!sqlite3_get_autocommit(db)) {
+		pthread_mutex_unlock(&db_lock);
+		return -1;
+	}
+	if (!exec_quiet("SAVEPOINT history_record")) {
+		pthread_mutex_unlock(&db_lock);
+		return 0;
+	}
 	sqlite3_stmt *stmt = NULL;
-	if (db && sqlite3_prepare_v2(db, "INSERT INTO PLAY_HISTORY(path, name, artist, played_at) VALUES(?1, ?2, ?3, ?4)", -1, &stmt, NULL) == SQLITE_OK) {
-		sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT);
-		sqlite3_bind_text(stmt, 2, name ? name : "", -1, SQLITE_TRANSIENT);
-		sqlite3_bind_text(stmt, 3, artist ? artist : "", -1, SQLITE_TRANSIENT);
-		sqlite3_bind_int64(stmt, 4, played_at);
-		if (sqlite3_step(stmt) != SQLITE_DONE) {
-			fprintf(stderr, "library: '%s' not added to the history: %s\n", path, sqlite3_errmsg(db));
-		} else {
-			history_newest = (long long)sqlite3_last_insert_rowid(db);
-		}
-		sqlite3_finalize(stmt);
-		// Only the latest are kept: the ids only grow, so everything this far
-		// below the newest is older than what is kept.
-		char sql[128];
-		snprintf(sql, sizeof(sql), "DELETE FROM PLAY_HISTORY WHERE id <= (SELECT MAX(id) FROM PLAY_HISTORY) - %d", LIBRARY_HISTORY_MAX);
-		exec(sql);
+	bool ok = sqlite3_prepare_v2(db, "INSERT INTO PLAY_HISTORY(path, name, artist, played_at) VALUES(?1, ?2, ?3, ?4)", -1, &stmt, NULL) == SQLITE_OK;
+	ok = ok && sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT) == SQLITE_OK && sqlite3_bind_text(stmt, 2, name ? name : "", -1, SQLITE_TRANSIENT) == SQLITE_OK && sqlite3_bind_text(stmt, 3, artist ? artist : "", -1, SQLITE_TRANSIENT) == SQLITE_OK && sqlite3_bind_int64(stmt, 4, played_at) == SQLITE_OK && sqlite3_step(stmt) == SQLITE_DONE;
+	if (ok)
+		id = (long long)sqlite3_last_insert_rowid(db);
+	ok = sqlite3_finalize(stmt) == SQLITE_OK && ok;
+	char sql[128];
+	snprintf(sql, sizeof(sql), "DELETE FROM PLAY_HISTORY WHERE id <= (SELECT MAX(id) FROM PLAY_HISTORY) - %d", LIBRARY_HISTORY_MAX);
+	ok = ok && exec_quiet(sql);
+	if (ok && exec_quiet("RELEASE history_record")) {
+		history_newest = id;
+	} else {
+		exec_quiet("ROLLBACK TO history_record");
+		exec_quiet("RELEASE history_record");
+		id = 0;
 	}
 	pthread_mutex_unlock(&db_lock);
+	return id;
+}
+
+int library_history_update_at(unsigned epoch, long long id, const char *path, const char *name, const char *artist) {
+	if (id <= 0 || !path || !path[0])
+		return 0;
+	pthread_mutex_lock(&db_lock);
+	if (!db || !epoch || epoch != database_epoch) {
+		pthread_mutex_unlock(&db_lock);
+		return 0;
+	}
+	if (!sqlite3_get_autocommit(db)) {
+		pthread_mutex_unlock(&db_lock);
+		return -1;
+	}
+	int result = 0;
+	sqlite3_stmt *stmt = NULL;
+	bool ok = sqlite3_prepare_v2(db, "UPDATE PLAY_HISTORY SET name=?3, artist=?4 WHERE id=?1 AND path=?2", -1, &stmt, NULL) == SQLITE_OK;
+	ok = ok && sqlite3_bind_int64(stmt, 1, id) == SQLITE_OK && sqlite3_bind_text(stmt, 2, path, -1, SQLITE_TRANSIENT) == SQLITE_OK && sqlite3_bind_text(stmt, 3, name ? name : "", -1, SQLITE_TRANSIENT) == SQLITE_OK && sqlite3_bind_text(stmt, 4, artist ? artist : "", -1, SQLITE_TRANSIENT) == SQLITE_OK && sqlite3_step(stmt) == SQLITE_DONE;
+	if (sqlite3_finalize(stmt) == SQLITE_OK && ok)
+		result = 1;
+	pthread_mutex_unlock(&db_lock);
+	return result;
 }
 
 int library_history_items(library_history_item_t **out) {
@@ -2944,7 +2915,7 @@ int library_history_items(library_history_item_t **out) {
 	pthread_mutex_lock(&db_lock);
 	int count = 0;
 	sqlite3_stmt *stmt = NULL;
-	if (db && sqlite3_prepare_v2(db, "SELECT id, played_at FROM PLAY_HISTORY ORDER BY id", -1, &stmt, NULL) == SQLITE_OK) {
+	if (db && sqlite3_prepare_v2(db, "SELECT id, played_at FROM PLAY_HISTORY ORDER BY id DESC LIMIT 1000", -1, &stmt, NULL) == SQLITE_OK) {
 		int room = 0;
 		library_history_item_t *items = NULL;
 		while (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -2962,10 +2933,56 @@ int library_history_items(library_history_item_t **out) {
 			count++;
 		}
 		sqlite3_finalize(stmt);
+		for (int i = 0; i < count / 2; i++) {
+			library_history_item_t swap = items[i];
+			items[i] = items[count - 1 - i];
+			items[count - 1 - i] = swap;
+		}
 		*out = items;
 	}
 	pthread_mutex_unlock(&db_lock);
 	return count;
+}
+
+static bool place_source_valid(const char *source) {
+	static const char *const allowed[] = {"music", "yandex", "zvuk", "qobuz", "tidal", "subsonic", "podcast"};
+	for (size_t i = 0; source && i < sizeof(allowed) / sizeof(allowed[0]); i++)
+		if (!strcmp(source, allowed[i]))
+			return true;
+	return false;
+}
+
+int library_place_store_at(unsigned wanted_epoch, const char *source, const void *route, size_t size) {
+	if (!wanted_epoch || !place_source_valid(source) || !route || !size || size > 2048)
+		return 0;
+	pthread_mutex_lock(&db_lock);
+	int result = 0;
+	sqlite3_stmt *stmt = NULL;
+	if (db && wanted_epoch == library_database_epoch()) {
+		if (!sqlite3_get_autocommit(db))
+			result = -1;
+		else if (sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO PLAYBACK_PLACE(source,route) VALUES(?1,?2)", -1, &stmt, NULL) == SQLITE_OK && sqlite3_bind_text(stmt, 1, source, -1, SQLITE_TRANSIENT) == SQLITE_OK && sqlite3_bind_blob(stmt, 2, route, (int)size, SQLITE_TRANSIENT) == SQLITE_OK && sqlite3_step(stmt) == SQLITE_DONE)
+			result = 1;
+	}
+	if (sqlite3_finalize(stmt) != SQLITE_OK)
+		result = 0;
+	pthread_mutex_unlock(&db_lock);
+	return result;
+}
+
+bool library_place_read_at(unsigned wanted_epoch, const char *source, void *route, size_t size) {
+	if (!wanted_epoch || !place_source_valid(source) || !route || !size || size > 2048)
+		return false;
+	pthread_mutex_lock(&db_lock);
+	sqlite3_stmt *stmt = NULL;
+	bool found = false;
+	if (db && wanted_epoch == library_database_epoch() && sqlite3_prepare_v2(db, "SELECT route FROM PLAYBACK_PLACE WHERE source=?1", -1, &stmt, NULL) == SQLITE_OK && sqlite3_bind_text(stmt, 1, source, -1, SQLITE_TRANSIENT) == SQLITE_OK && sqlite3_step(stmt) == SQLITE_ROW && sqlite3_column_bytes(stmt, 0) == (int)size) {
+		memcpy(route, sqlite3_column_blob(stmt, 0), size);
+		found = true;
+	}
+	sqlite3_finalize(stmt);
+	pthread_mutex_unlock(&db_lock);
+	return found;
 }
 
 long long library_history_revision(void) {
@@ -2982,11 +2999,13 @@ long long library_history_revision(void) {
 	return newest;
 }
 
-bool library_history_entry(long long id, char *path, size_t path_size, char *name, size_t name_size, char *artist, size_t artist_size) {
+bool library_history_entry(long long id, char *path, size_t path_size, char *name, size_t name_size, char *artist, size_t artist_size) { return library_history_entry_at(library_database_epoch(), id, path, path_size, name, name_size, artist, artist_size); }
+
+bool library_history_entry_at(unsigned wanted_epoch, long long id, char *path, size_t path_size, char *name, size_t name_size, char *artist, size_t artist_size) {
 	pthread_mutex_lock(&db_lock);
 	bool found = false;
 	sqlite3_stmt *stmt = NULL;
-	if (db && sqlite3_prepare_v2(db, "SELECT path, name, artist FROM PLAY_HISTORY WHERE id = ?1", -1, &stmt, NULL) == SQLITE_OK) {
+	if (db && wanted_epoch && wanted_epoch == library_database_epoch() && sqlite3_prepare_v2(db, "SELECT path, name, artist FROM PLAY_HISTORY WHERE id = ?1", -1, &stmt, NULL) == SQLITE_OK) {
 		sqlite3_bind_int64(stmt, 1, id);
 		if (sqlite3_step(stmt) == SQLITE_ROW) {
 			const unsigned char *p = sqlite3_column_text(stmt, 0);
@@ -3109,9 +3128,7 @@ int library_forget_under(const char *prefix) {
 	return removed;
 }
 
-int library_for_each(library_list_t kind, library_filter_t filter, const char *value, library_row_cb cb, void *user) {
-	return library_for_each_ordered(kind, filter, value, LIBRARY_ORDER_DEFAULT, cb, user);
-}
+int library_for_each(library_list_t kind, library_filter_t filter, const char *value, library_row_cb cb, void *user) { return library_for_each_ordered(kind, filter, value, LIBRARY_ORDER_DEFAULT, cb, user); }
 
 // The ORDER BY of a track list. Inside one album the disc order is the natural
 // one; everywhere else the titles read best alphabetically. The orders asked
@@ -3129,14 +3146,13 @@ int library_for_each(library_list_t kind, library_filter_t filter, const char *v
 // ALBUM_GROUP_YEAR works it out for the album list -- the latest its tracks
 // carry -- so an artist's tracks fall into the same order as their records. A
 // lookup on media_album_key_idx per row, on a list as long as one artist.
-#define TRACK_ALBUM_YEAR                                                                                              \
-	"(SELECT MAX(CASE WHEN y.year > 0 THEN y.year END) FROM MEDIA_TABLE y"                                           \
+#define TRACK_ALBUM_YEAR                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               \
+	"(SELECT MAX(CASE WHEN y.year > 0 THEN y.year END) FROM MEDIA_TABLE y"                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             \
 	" WHERE y.album = MEDIA_TABLE.album AND y.album_key = MEDIA_TABLE.album_key)"
 
 // When the newest file of the album a MEDIA_TABLE row belongs to arrived,
 // as ALBUM_GROUP_NEWEST has it for the album list.
-#define TRACK_ALBUM_NEWEST                                                                                            \
-	"(SELECT MAX(y.ctime) FROM MEDIA_TABLE y WHERE y.album = MEDIA_TABLE.album AND y.album_key = MEDIA_TABLE.album_key)"
+#define TRACK_ALBUM_NEWEST "(SELECT MAX(y.ctime) FROM MEDIA_TABLE y WHERE y.album = MEDIA_TABLE.album AND y.album_key = MEDIA_TABLE.album_key)"
 
 // -1 until first asked; then the [library] artist_albums_by_year setting,
 // kept here so the queries built off the interface thread (SonixLink) read
@@ -3158,19 +3174,13 @@ void library_set_artist_albums_by_year(bool on) {
 
 // The lists an artist or a genre is made of: the records, and the tracks
 // gathered by record. Those run by release year when the setting says so.
-static bool filter_by_year(library_filter_t filter) {
-	return (filter == LIBRARY_FILTER_ARTIST || filter == LIBRARY_FILTER_ALBUM_ARTIST ||
-			filter == LIBRARY_FILTER_GENRE) &&
-		   library_artist_albums_by_year();
-}
+static bool filter_by_year(library_filter_t filter) { return (filter == LIBRARY_FILTER_ARTIST || filter == LIBRARY_FILTER_ALBUM_ARTIST || filter == LIBRARY_FILTER_GENRE) && library_artist_albums_by_year(); }
 
-static void track_order_sql(char *out, size_t size, library_order_t order, library_filter_t filter, bool in_album,
-							const char *by_name) {
+static void track_order_sql(char *out, size_t size, library_order_t order, library_filter_t filter, bool in_album, const char *by_name) {
 	if (order == LIBRARY_ORDER_ALBUM && filter_by_year(filter)) {
 		// One artist's records the way their page lists them: oldest first,
 		// the ones with no year at the end, a year's records by name.
-		snprintf(out, size, YEAR_KEY_UP(TRACK_ALBUM_YEAR) ", " ALBUM_ORDER_KEY ", " TRACK_ORDER_IN_ALBUM ", %s",
-				 by_name);
+		snprintf(out, size, YEAR_KEY_UP(TRACK_ALBUM_YEAR) ", " ALBUM_ORDER_KEY ", " TRACK_ORDER_IN_ALBUM ", %s", by_name);
 	} else if (order == LIBRARY_ORDER_ALBUM && filter == LIBRARY_FILTER_RECENT) {
 		// The records added last, played newest record first, as listed.
 		snprintf(out, size, TRACK_ALBUM_NEWEST " DESC, " ALBUM_ORDER_KEY ", " TRACK_ORDER_IN_ALBUM ", %s", by_name);
@@ -3179,16 +3189,13 @@ static void track_order_sql(char *out, size_t size, library_order_t order, libra
 	} else if (order == LIBRARY_ORDER_ADDED) {
 		snprintf(out, size, TRACK_ORDER_ADDED ", %s", by_name);
 	} else if (order == LIBRARY_ORDER_YEAR || order == LIBRARY_ORDER_YEAR_DESC) {
-		snprintf(out, size, "%s, " ALBUM_ORDER_KEY ", " TRACK_ORDER_IN_ALBUM ", %s",
-				 order == LIBRARY_ORDER_YEAR ? YEAR_KEY_UP(TRACK_YEAR) : YEAR_KEY_DOWN(TRACK_YEAR), by_name);
+		snprintf(out, size, "%s, " ALBUM_ORDER_KEY ", " TRACK_ORDER_IN_ALBUM ", %s", order == LIBRARY_ORDER_YEAR ? YEAR_KEY_UP(TRACK_YEAR) : YEAR_KEY_DOWN(TRACK_YEAR), by_name);
 	} else if (order == LIBRARY_ORDER_ARTIST) {
 		// Every track by the artist its row shows, put through the sort key the
 		// artist lists use (so "The Beatles" files under B here as there), the
 		// tracks without one last; then each artist's records by name, each in
 		// disc order. Worked out when the list is opened, not as it scrolls.
-		snprintf(out, size, "(artist IS NULL OR artist = ''), sortkey(artist), " ALBUM_ORDER_KEY
-							", " TRACK_ORDER_IN_ALBUM ", %s",
-				 by_name);
+		snprintf(out, size, "(artist IS NULL OR artist = ''), sortkey(artist), " ALBUM_ORDER_KEY ", " TRACK_ORDER_IN_ALBUM ", %s", by_name);
 	} else if (in_album) {
 		snprintf(out, size, TRACK_ORDER_IN_ALBUM ", %s", by_name);
 	} else {
@@ -3196,8 +3203,7 @@ static void track_order_sql(char *out, size_t size, library_order_t order, libra
 	}
 }
 
-int library_for_each_ordered(library_list_t kind, library_filter_t filter, const char *value, library_order_t order,
-							 library_row_cb cb, void *user) {
+int library_for_each_ordered(library_list_t kind, library_filter_t filter, const char *value, library_order_t order, library_row_cb cb, void *user) {
 	if (!cb || filter == LIBRARY_FILTER_SEARCH) {
 		return 0; // a search is read through a handle
 	}
@@ -3211,18 +3217,14 @@ int library_for_each_ordered(library_list_t kind, library_filter_t filter, const
 	if (kind == LIBRARY_LIST_FAVOURITES) {
 		snprintf(sql, sizeof(sql), "SELECT name, path, %s FROM FAVOURITES ORDER BY added_at, rowid", FAV_ARTIST);
 	} else if (kind == LIBRARY_LIST_MOST_PLAYED) {
-		snprintf(sql, sizeof(sql), "SELECT " PLAYS_NAME ", path, " PLAYS_ARTIST " FROM PLAY_COUNTS WHERE " PLAYS_IN_INDEX
-								   " ORDER BY " PLAYS_ORDER);
+		snprintf(sql, sizeof(sql), "SELECT " PLAYS_NAME ", path, " PLAYS_ARTIST " FROM PLAY_COUNTS WHERE " PLAYS_IN_INDEX " ORDER BY " PLAYS_ORDER);
 	} else if (kind == LIBRARY_LIST_RECENTLY_PLAYED) {
-		snprintf(sql, sizeof(sql), "SELECT " PLAYS_NAME ", path, " PLAYS_ARTIST " FROM PLAY_COUNTS WHERE " PLAYS_RECENT
-								   " ORDER BY " PLAYS_RECENT_ORDER);
+		snprintf(sql, sizeof(sql), "SELECT " PLAYS_NAME ", path, " PLAYS_ARTIST " FROM PLAY_COUNTS WHERE " PLAYS_RECENT " ORDER BY " PLAYS_RECENT_ORDER);
 	} else if (kind == LIBRARY_LIST_TRACKS) {
 		char order_sql[384];
-		track_order_sql(order_sql, sizeof(order_sql), order, filter, col && value && filter == LIBRARY_FILTER_ALBUM,
-						by_name);
+		track_order_sql(order_sql, sizeof(order_sql), order, filter, col && value && filter == LIBRARY_FILTER_ALBUM, by_name);
 		if (col && value) {
-			snprintf(sql, sizeof(sql), "SELECT name, path, artist FROM MEDIA_TABLE WHERE %s ORDER BY %s",
-					 filter_where(filter), order_sql);
+			snprintf(sql, sizeof(sql), "SELECT name, path, artist FROM MEDIA_TABLE WHERE %s ORDER BY %s", filter_where(filter), order_sql);
 		} else {
 			snprintf(sql, sizeof(sql), "SELECT name, path, artist FROM MEDIA_TABLE ORDER BY %s", order_sql);
 		}
@@ -3231,11 +3233,7 @@ int library_for_each_ordered(library_list_t kind, library_filter_t filter, const
 			const char *table;
 			const char *column;
 		} SOURCES[] = {
-			{"MEDIA_TABLE", "name"},
-			{"ALBUM_TABLE", "album"},
-			{"ARTIST_TABLE", "artist"},
-			{"ALBUM_ARTIST_TABLE", "album_artist"},
-			{"GENRE_TABLE", "genre"},
+			{"MEDIA_TABLE", "name"}, {"ALBUM_TABLE", "album"}, {"ARTIST_TABLE", "artist"}, {"ALBUM_ARTIST_TABLE", "album_artist"}, {"GENRE_TABLE", "genre"},
 		};
 		if (kind < 0 || kind >= (int)(sizeof(SOURCES) / sizeof(SOURCES[0]))) {
 			return 0;
@@ -3245,14 +3243,12 @@ int library_for_each_ordered(library_list_t kind, library_filter_t filter, const
 			// caller one representative track per album to load the art from.
 			snprintf(sql, sizeof(sql),
 					 "SELECT " ALBUM_GROUP_VALUE ", " ALBUM_GROUP_FIRST("m.path") ", NULL FROM ALBUM_GROUP_TABLE g"
-					 " WHERE album <> '' ORDER BY %s",
+																				  " WHERE album <> '' ORDER BY %s",
 					 list_uses_sortkey(kind) ? "sortkey" : "album COLLATE listorder");
 		} else if (list_uses_sortkey(kind)) {
-			snprintf(sql, sizeof(sql), "SELECT %s, NULL, NULL FROM %s WHERE %s <> '' ORDER BY sortkey",
-					 SOURCES[kind].column, SOURCES[kind].table, SOURCES[kind].column);
+			snprintf(sql, sizeof(sql), "SELECT %s, NULL, NULL FROM %s WHERE %s <> '' ORDER BY sortkey", SOURCES[kind].column, SOURCES[kind].table, SOURCES[kind].column);
 		} else {
-			snprintf(sql, sizeof(sql), "SELECT %s, NULL, NULL FROM %s WHERE %s <> '' ORDER BY %s COLLATE listorder",
-					 SOURCES[kind].column, SOURCES[kind].table, SOURCES[kind].column, SOURCES[kind].column);
+			snprintf(sql, sizeof(sql), "SELECT %s, NULL, NULL FROM %s WHERE %s <> '' ORDER BY %s COLLATE listorder", SOURCES[kind].column, SOURCES[kind].table, SOURCES[kind].column, SOURCES[kind].column);
 		}
 	}
 
@@ -3367,8 +3363,7 @@ static bool playlist_table(const char *name, char *out, size_t out_size) {
 // tags as they are now, and the ones written down with the entry for a track
 // the library does not have.
 #define PLAYLIST_TITLE "COALESCE(NULLIF((SELECT m.name FROM MEDIA_TABLE m WHERE m.path = p.path LIMIT 1), ''), p.title)"
-#define PLAYLIST_ARTIST                                                                                        \
-	"COALESCE(NULLIF((SELECT m.artist FROM MEDIA_TABLE m WHERE m.path = p.path LIMIT 1), ''), p.artist)"
+#define PLAYLIST_ARTIST "COALESCE(NULLIF((SELECT m.artist FROM MEDIA_TABLE m WHERE m.path = p.path LIMIT 1), ''), p.artist)"
 
 // The ordered query behind a list, as SQL. `select` is what to ask for, so the
 // same builder serves both the row-id pass and the streaming reader.
@@ -3419,8 +3414,7 @@ static char *top_level_order_by(char *sql) {
 	return NULL;
 }
 
-static void list_sql(char *sql, size_t size, const char *select, library_list_t kind, library_filter_t filter,
-					 const char *value, library_order_t order) {
+static void list_sql(char *sql, size_t size, const char *select, library_list_t kind, library_filter_t filter, const char *value, library_order_t order) {
 	const char *col = filter_column(filter);
 
 	// A search: the rows that hold every word of the query, in list order,
@@ -3442,8 +3436,7 @@ static void list_sql(char *sql, size_t size, const char *select, library_list_t 
 			// that order -- twenty thousand reads scattered over the card for
 			// a query that finds three. The plus makes it read the table
 			// front to back instead, once, and sort what it found.
-			snprintf(sql, size, "SELECT %s FROM MEDIA_TABLE WHERE name <> '' AND searchmatch(%s, ?1, 0) ORDER BY %s",
-					 select, track_key, list_uses_sortkey(kind) ? "+sortkey" : "name COLLATE listorder");
+			snprintf(sql, size, "SELECT %s FROM MEDIA_TABLE WHERE name <> '' AND searchmatch(%s, ?1, 0) ORDER BY %s", select, track_key, list_uses_sortkey(kind) ? "+sortkey" : "name COLLATE listorder");
 		} else if (kind == LIBRARY_LIST_ALBUMS) {
 			// The album's part of the key of any one of its tracks: the name
 			// and the album artist are the same on all of them. One seek into
@@ -3503,8 +3496,7 @@ static void list_sql(char *sql, size_t size, const char *select, library_list_t 
 		}
 		// A truncated statement is not a slower statement, it is a different
 		// one, so it is refused rather than run.
-		if (snprintf(sql, size, "SELECT %s FROM %s p WHERE " PLAYLIST_SHOWN " ORDER BY p.idx", select, quoted) >=
-			(int)size) {
+		if (snprintf(sql, size, "SELECT %s FROM %s p WHERE " PLAYLIST_SHOWN " ORDER BY p.idx", select, quoted) >= (int)size) {
 			sql[0] = '\0';
 		}
 		return;
@@ -3517,11 +3509,9 @@ static void list_sql(char *sql, size_t size, const char *select, library_list_t 
 
 	if (kind == LIBRARY_LIST_TRACKS) {
 		char order_sql[384];
-		track_order_sql(order_sql, sizeof(order_sql), order, filter, col && value && filter == LIBRARY_FILTER_ALBUM,
-						by_name);
+		track_order_sql(order_sql, sizeof(order_sql), order, filter, col && value && filter == LIBRARY_FILTER_ALBUM, by_name);
 		if (col && value) {
-			snprintf(sql, size, "SELECT %s FROM MEDIA_TABLE WHERE %s ORDER BY %s", select, filter_where(filter),
-					 order_sql);
+			snprintf(sql, size, "SELECT %s FROM MEDIA_TABLE WHERE %s ORDER BY %s", select, filter_where(filter), order_sql);
 		} else {
 			snprintf(sql, size, "SELECT %s FROM MEDIA_TABLE ORDER BY %s", select, order_sql);
 		}
@@ -3532,8 +3522,7 @@ static void list_sql(char *sql, size_t size, const char *select, library_list_t 
 	// its albums, which is how row_by_id_sql() finds the year again. Counted
 	// as the distinct years, since there is no table of them to count.
 	if (kind == LIBRARY_LIST_YEARS) {
-		const char *years =
-			"SELECT g.rowid AS rid, " ALBUM_GROUP_YEAR " AS y FROM ALBUM_GROUP_TABLE g WHERE g.album <> ''";
+		const char *years = "SELECT g.rowid AS rid, " ALBUM_GROUP_YEAR " AS y FROM ALBUM_GROUP_TABLE g WHERE g.album <> ''";
 		if (strncmp(select, "COUNT(", 6) == 0) {
 			snprintf(sql, size, "SELECT COUNT(DISTINCT y) FROM (%s) WHERE y IS NOT NULL", years);
 		} else {
@@ -3544,10 +3533,7 @@ static void list_sql(char *sql, size_t size, const char *select, library_list_t 
 
 	// One year's records, by name.
 	if (kind == LIBRARY_LIST_ALBUMS && filter == LIBRARY_FILTER_YEAR && value) {
-		snprintf(sql, size,
-				 "SELECT %s FROM ALBUM_GROUP_TABLE g WHERE album <> '' AND " ALBUM_GROUP_YEAR
-				 " = CAST(?1 AS INTEGER) ORDER BY %s",
-				 select, list_uses_sortkey(kind) ? "sortkey" : "album COLLATE listorder");
+		snprintf(sql, size, "SELECT %s FROM ALBUM_GROUP_TABLE g WHERE album <> '' AND " ALBUM_GROUP_YEAR " = CAST(?1 AS INTEGER) ORDER BY %s", select, list_uses_sortkey(kind) ? "sortkey" : "album COLLATE listorder");
 		return;
 	}
 
@@ -3557,8 +3543,7 @@ static void list_sql(char *sql, size_t size, const char *select, library_list_t 
 	// qualify is a question for MEDIA_TABLE -- answered off media_artist_ctime_idx,
 	// media_album_artist_ctime_idx or media_genre_sort_idx, once, so the subquery is
 	// a lookup and not a scan.
-	if (kind == LIBRARY_LIST_ALBUMS && col && value &&
-		(filter == LIBRARY_FILTER_ARTIST || filter == LIBRARY_FILTER_ALBUM_ARTIST || filter == LIBRARY_FILTER_GENRE)) {
+	if (kind == LIBRARY_LIST_ALBUMS && col && value && (filter == LIBRARY_FILTER_ARTIST || filter == LIBRARY_FILTER_ALBUM_ARTIST || filter == LIBRARY_FILTER_GENRE)) {
 		// By release year when the setting is on (it is by default): a
 		// discography reads in the order it was made, and a name order puts
 		// a debut after the record that made it famous. A year's records,
@@ -3567,8 +3552,7 @@ static void list_sql(char *sql, size_t size, const char *select, library_list_t 
 				 "SELECT %s FROM ALBUM_GROUP_TABLE g WHERE g.album <> ''"
 				 " AND (g.album, g.album_key) IN (SELECT album, album_key FROM MEDIA_TABLE WHERE %s)"
 				 " ORDER BY %s%s",
-				 select, filter_where(filter), filter_by_year(filter) ? YEAR_KEY_UP(ALBUM_GROUP_YEAR) ", " : "",
-				 list_uses_sortkey(kind) ? "g.sortkey" : "g.album COLLATE listorder");
+				 select, filter_where(filter), filter_by_year(filter) ? YEAR_KEY_UP(ALBUM_GROUP_YEAR) ", " : "", list_uses_sortkey(kind) ? "g.sortkey" : "g.album COLLATE listorder");
 		return;
 	}
 
@@ -3579,9 +3563,7 @@ static void list_sql(char *sql, size_t size, const char *select, library_list_t 
 	// media_artist_ctime_idx or media_album_artist_ctime_idx, read from the
 	// index alone.
 	if (order == LIBRARY_ORDER_ADDED && kind == LIBRARY_LIST_ALBUMS) {
-		snprintf(sql, size, "SELECT %s FROM ALBUM_GROUP_TABLE g WHERE album <> '' ORDER BY " ALBUM_GROUP_NEWEST
-				 ", %s",
-				 select, list_uses_sortkey(kind) ? "sortkey" : "album COLLATE listorder");
+		snprintf(sql, size, "SELECT %s FROM ALBUM_GROUP_TABLE g WHERE album <> '' ORDER BY " ALBUM_GROUP_NEWEST ", %s", select, list_uses_sortkey(kind) ? "sortkey" : "album COLLATE listorder");
 		return;
 	}
 	// Every record by its artist -- the name the row shows under the title,
@@ -3591,34 +3573,25 @@ static void list_sql(char *sql, size_t size, const char *select, library_list_t 
 	// media_album_key_idx per album, and a sort: run when the list is opened,
 	// not when it scrolls.
 	if (order == LIBRARY_ORDER_ARTIST && kind == LIBRARY_LIST_ALBUMS) {
-		snprintf(sql, size,
-				 "SELECT %s FROM ALBUM_GROUP_TABLE g WHERE album <> '' ORDER BY sortkey(" ALBUM_GROUP_FIRST(
-					 "COALESCE(NULLIF(m.album_artist,''), m.artist)") "), " YEAR_KEY_UP(ALBUM_GROUP_YEAR) ", %s",
-				 select, list_uses_sortkey(kind) ? "sortkey" : "album COLLATE listorder");
+		snprintf(sql, size, "SELECT %s FROM ALBUM_GROUP_TABLE g WHERE album <> '' ORDER BY sortkey(" ALBUM_GROUP_FIRST("COALESCE(NULLIF(m.album_artist,''), m.artist)") "), " YEAR_KEY_UP(ALBUM_GROUP_YEAR) ", %s", select, list_uses_sortkey(kind) ? "sortkey" : "album COLLATE listorder");
 		return;
 	}
 	// Every record by year, the albums of one year by name.
 	if ((order == LIBRARY_ORDER_YEAR || order == LIBRARY_ORDER_YEAR_DESC) && kind == LIBRARY_LIST_ALBUMS) {
-		snprintf(sql, size, "SELECT %s FROM ALBUM_GROUP_TABLE g WHERE album <> '' ORDER BY %s, %s", select,
-				 order == LIBRARY_ORDER_YEAR ? YEAR_KEY_UP(ALBUM_GROUP_YEAR) : YEAR_KEY_DOWN(ALBUM_GROUP_YEAR),
-				 list_uses_sortkey(kind) ? "sortkey" : "album COLLATE listorder");
+		snprintf(sql, size, "SELECT %s FROM ALBUM_GROUP_TABLE g WHERE album <> '' ORDER BY %s, %s", select, order == LIBRARY_ORDER_YEAR ? YEAR_KEY_UP(ALBUM_GROUP_YEAR) : YEAR_KEY_DOWN(ALBUM_GROUP_YEAR), list_uses_sortkey(kind) ? "sortkey" : "album COLLATE listorder");
 		return;
 	}
 	if (order == LIBRARY_ORDER_ADDED && (kind == LIBRARY_LIST_ARTISTS || kind == LIBRARY_LIST_ALBUM_ARTISTS)) {
 		const char *table = kind == LIBRARY_LIST_ARTISTS ? "ARTIST_TABLE" : "ALBUM_ARTIST_TABLE";
 		const char *column = kind == LIBRARY_LIST_ARTISTS ? "artist" : "album_artist";
 		char by_name[64];
-		snprintf(by_name, sizeof(by_name), "%s%s", list_uses_sortkey(kind) ? "sortkey" : column,
-				 list_uses_sortkey(kind) ? "" : " COLLATE listorder");
+		snprintf(by_name, sizeof(by_name), "%s%s", list_uses_sortkey(kind) ? "sortkey" : column, list_uses_sortkey(kind) ? "" : " COLLATE listorder");
 		// An artist that is one of the names a tag split into is also as new as
 		// the newest of those tracks.
-		const char *linked =
-			kind == LIBRARY_LIST_ARTISTS && artist_links
-				? " OR m.path IN (SELECT l.path FROM ARTIST_LINK l WHERE l.artist = ARTIST_TABLE.artist)"
-			: kind == LIBRARY_LIST_ALBUM_ARTISTS && album_artist_links
-				? " OR m.path IN (SELECT l.path FROM ALBUM_ARTIST_LINK l"
-				  " WHERE l.album_artist = ALBUM_ARTIST_TABLE.album_artist)"
-				: "";
+		const char *linked = kind == LIBRARY_LIST_ARTISTS && artist_links				? " OR m.path IN (SELECT l.path FROM ARTIST_LINK l WHERE l.artist = ARTIST_TABLE.artist)"
+							 : kind == LIBRARY_LIST_ALBUM_ARTISTS && album_artist_links ? " OR m.path IN (SELECT l.path FROM ALBUM_ARTIST_LINK l"
+																						  " WHERE l.album_artist = ALBUM_ARTIST_TABLE.album_artist)"
+																						: "";
 		snprintf(sql, size,
 				 "SELECT %s FROM %s WHERE %s <> ''"
 				 " ORDER BY (SELECT MAX(m.ctime) FROM MEDIA_TABLE m WHERE m.%s = %s.%s%s), %s",
@@ -3630,22 +3603,16 @@ static void list_sql(char *sql, size_t size, const char *select, library_list_t 
 		const char *table;
 		const char *column;
 	} SOURCES[] = {
-		{"MEDIA_TABLE", "name"},
-		{"ALBUM_GROUP_TABLE", "album"},
-		{"ARTIST_TABLE", "artist"},
-		{"ALBUM_ARTIST_TABLE", "album_artist"},
-		{"GENRE_TABLE", "genre"},
+		{"MEDIA_TABLE", "name"}, {"ALBUM_GROUP_TABLE", "album"}, {"ARTIST_TABLE", "artist"}, {"ALBUM_ARTIST_TABLE", "album_artist"}, {"GENRE_TABLE", "genre"},
 	};
 	if (kind < 0 || kind >= (int)(sizeof(SOURCES) / sizeof(SOURCES[0]))) {
 		sql[0] = '\0';
 		return;
 	}
 	if (list_uses_sortkey(kind)) {
-		snprintf(sql, size, "SELECT %s FROM %s WHERE %s <> '' ORDER BY sortkey", select, SOURCES[kind].table,
-				 SOURCES[kind].column);
+		snprintf(sql, size, "SELECT %s FROM %s WHERE %s <> '' ORDER BY sortkey", select, SOURCES[kind].table, SOURCES[kind].column);
 	} else {
-		snprintf(sql, size, "SELECT %s FROM %s WHERE %s <> '' ORDER BY %s COLLATE listorder", select,
-				 SOURCES[kind].table, SOURCES[kind].column, SOURCES[kind].column);
+		snprintf(sql, size, "SELECT %s FROM %s WHERE %s <> '' ORDER BY %s COLLATE listorder", select, SOURCES[kind].table, SOURCES[kind].column, SOURCES[kind].column);
 	}
 }
 
@@ -3660,8 +3627,7 @@ static const char *row_by_id_sql(library_list_t kind, const char *value, char *o
 		if (!playlist_table(value, quoted, sizeof(quoted))) {
 			return NULL;
 		}
-		if (snprintf(out, out_size, "SELECT " PLAYLIST_TITLE ", p.path, " PLAYLIST_ARTIST " FROM %s p WHERE p.rowid=?",
-					 quoted) >= (int)out_size) {
+		if (snprintf(out, out_size, "SELECT " PLAYLIST_TITLE ", p.path, " PLAYLIST_ARTIST " FROM %s p WHERE p.rowid=?", quoted) >= (int)out_size) {
 			return NULL;
 		}
 		return out;
@@ -3679,8 +3645,7 @@ static const char *row_by_id_sql(library_list_t kind, const char *value, char *o
 		// its artist on a file that has none. Lists that show it read it from
 		// here; a window of rows is a dozen lookups on the album index.
 		return "SELECT " ALBUM_GROUP_VALUE ", " ALBUM_GROUP_FIRST("m.path") ","
-			   " " ALBUM_GROUP_FIRST("COALESCE(NULLIF(m.album_artist,''), m.artist)")
-			   " FROM ALBUM_GROUP_TABLE g WHERE rowid=?";
+																			" " ALBUM_GROUP_FIRST("COALESCE(NULLIF(m.album_artist,''), m.artist)") " FROM ALBUM_GROUP_TABLE g WHERE rowid=?";
 	case LIBRARY_LIST_ARTISTS:
 		return "SELECT artist, NULL, NULL FROM ARTIST_TABLE WHERE rowid=?";
 	case LIBRARY_LIST_ALBUM_ARTISTS:
@@ -3723,8 +3688,7 @@ static const char *name_column(library_list_t kind) {
 	}
 }
 
-library_index_t *library_index_open(library_list_t kind, library_filter_t filter, const char *value,
-									library_order_t order, bool desc) {
+library_index_t *library_index_open(library_list_t kind, library_filter_t filter, const char *value, library_order_t order, bool desc) {
 	struct library_index *ix = calloc(1, sizeof(*ix));
 	if (!ix) {
 		return NULL;
@@ -3738,11 +3702,7 @@ library_index_t *library_index_open(library_list_t kind, library_filter_t filter
 	const char *col = filter_column(filter);
 	// The filtered lists take a bound value: a track list narrowed to one
 	// album/artist/genre, and an album list narrowed to one artist or genre.
-	bool bound = col && value &&
-				 (kind == LIBRARY_LIST_TRACKS ||
-				  (kind == LIBRARY_LIST_ALBUMS &&
-				   (filter == LIBRARY_FILTER_ARTIST || filter == LIBRARY_FILTER_ALBUM_ARTIST ||
-					filter == LIBRARY_FILTER_GENRE || filter == LIBRARY_FILTER_YEAR || filter == LIBRARY_FILTER_RECENT)));
+	bool bound = col && value && (kind == LIBRARY_LIST_TRACKS || (kind == LIBRARY_LIST_ALBUMS && (filter == LIBRARY_FILTER_ARTIST || filter == LIBRARY_FILTER_ALBUM_ARTIST || filter == LIBRARY_FILTER_GENRE || filter == LIBRARY_FILTER_YEAR || filter == LIBRARY_FILTER_RECENT)));
 	// A search binds the words the value becomes, not the value.
 	char pattern[256];
 	if (filter == LIBRARY_FILTER_SEARCH) {
@@ -3869,13 +3829,7 @@ library_index_t *library_index_open(library_list_t kind, library_filter_t filter
 		// ordered by that letter. Favourites run by when they were starred, an
 		// album by disc position, an artist's records by album -- three lists
 		// whose order has nothing to do with the alphabet.
-		bool by_name = kind != LIBRARY_LIST_FAVOURITES && kind != LIBRARY_LIST_PLAYLIST && kind != LIBRARY_LIST_YEARS &&
-					   kind != LIBRARY_LIST_MOST_PLAYED && kind != LIBRARY_LIST_RECENTLY_PLAYED &&
-					   filter != LIBRARY_FILTER_RECENT &&
-					   order != LIBRARY_ORDER_ALBUM && order != LIBRARY_ORDER_ADDED && order != LIBRARY_ORDER_YEAR &&
-					   order != LIBRARY_ORDER_YEAR_DESC && order != LIBRARY_ORDER_ARTIST &&
-					   !(kind == LIBRARY_LIST_TRACKS && filter == LIBRARY_FILTER_ALBUM) &&
-					   !(kind == LIBRARY_LIST_ALBUMS && filter_by_year(filter));
+		bool by_name = kind != LIBRARY_LIST_FAVOURITES && kind != LIBRARY_LIST_PLAYLIST && kind != LIBRARY_LIST_YEARS && kind != LIBRARY_LIST_MOST_PLAYED && kind != LIBRARY_LIST_RECENTLY_PLAYED && filter != LIBRARY_FILTER_RECENT && order != LIBRARY_ORDER_ALBUM && order != LIBRARY_ORDER_ADDED && order != LIBRARY_ORDER_YEAR && order != LIBRARY_ORDER_YEAR_DESC && order != LIBRARY_ORDER_ARTIST && !(kind == LIBRARY_LIST_TRACKS && filter == LIBRARY_FILTER_ALBUM) && !(kind == LIBRARY_LIST_ALBUMS && filter_by_year(filter));
 		ix->buckets_valid = by_name && ix->count > 0;
 	}
 
@@ -3941,9 +3895,7 @@ bool library_index_buckets(const library_index_t *ix, int counts[LIBRARY_INDEX_B
 // A descending list is the same row ids read from the other end. No DESC query
 // is ever issued: the collation would have to sort the table a second time to
 // answer one.
-static int row_slot(const struct library_index *ix, int index) {
-	return ix->desc ? ix->count - 1 - index : index;
-}
+static int row_slot(const struct library_index *ix, int index) { return ix->desc ? ix->count - 1 - index : index; }
 
 int library_index_window(const library_index_t *ix, int offset, int count, library_row_cb cb, void *user) {
 	if (!ix || !cb || offset < 0 || count <= 0 || offset >= ix->count) {
@@ -4056,11 +4008,7 @@ bool library_index_export_id(const library_index_t *ix, int position, int32_t *o
 }
 
 bool library_index_export_ack(library_index_t *ix, const library_export_receipt_t *receipt) {
-	if (!ix || !receipt || !receipt->valid || !receipt->source.spec.valid ||
-		ix->kind != LIBRARY_LIST_PLAYLIST || receipt->source.spec.kind != LIBRARY_LIST_PLAYLIST ||
-		library_database_epoch() != receipt->source.database_epoch || ix->generation != receipt->source.generation ||
-		ix->filter != receipt->source.spec.filter || ix->order != receipt->source.spec.order ||
-		ix->desc != receipt->source.spec.desc || strcmp(ix->value, receipt->source.spec.value) != 0)
+	if (!ix || !receipt || !receipt->valid || !receipt->source.spec.valid || ix->kind != LIBRARY_LIST_PLAYLIST || receipt->source.spec.kind != LIBRARY_LIST_PLAYLIST || library_database_epoch() != receipt->source.database_epoch || ix->generation != receipt->source.generation || ix->filter != receipt->source.spec.filter || ix->order != receipt->source.spec.order || ix->desc != receipt->source.spec.desc || strcmp(ix->value, receipt->source.spec.value) != 0)
 		return false;
 	// The receipt describes an earlier committed point. A later global mutation
 	// still differs from new_generation and the next worker will reject it.
@@ -4126,15 +4074,11 @@ int library_index_find_path(const library_index_t *ix, const char *path) {
 		if (!playlist_table(ix->value, quoted, sizeof(quoted))) {
 			return -1;
 		}
-		if (snprintf(sql, sizeof(sql), "SELECT p.rowid FROM %s p WHERE p.path = ? AND " PLAYLIST_SHOWN, quoted) >=
-			(int)sizeof(sql)) {
+		if (snprintf(sql, sizeof(sql), "SELECT p.rowid FROM %s p WHERE p.path = ? AND " PLAYLIST_SHOWN, quoted) >= (int)sizeof(sql)) {
 			return -1;
 		}
 	} else {
-		const char *table = ix->kind == LIBRARY_LIST_FAVOURITES	 ? "FAVOURITES"
-							: ix->kind == LIBRARY_LIST_MOST_PLAYED || ix->kind == LIBRARY_LIST_RECENTLY_PLAYED
-								? "PLAY_COUNTS"
-																   : "MEDIA_TABLE";
+		const char *table = ix->kind == LIBRARY_LIST_FAVOURITES ? "FAVOURITES" : ix->kind == LIBRARY_LIST_MOST_PLAYED || ix->kind == LIBRARY_LIST_RECENTLY_PLAYED ? "PLAY_COUNTS" : "MEDIA_TABLE";
 		snprintf(sql, sizeof(sql), "SELECT rowid FROM %s WHERE path = ?", table);
 	}
 
@@ -4169,8 +4113,7 @@ int library_index_find_name(const library_index_t *ix, const char *name) {
 		library_album_title(name, album, sizeof(album));
 		const char *sep = strchr(name, LIBRARY_ALBUM_KEY_SEP);
 		key = sep ? sep + 1 : NULL;
-		sql = key ? "SELECT rowid FROM ALBUM_GROUP_TABLE WHERE album = ?1 AND album_key = ?2"
-				  : "SELECT rowid FROM ALBUM_GROUP_TABLE WHERE album = ?1 ORDER BY rowid";
+		sql = key ? "SELECT rowid FROM ALBUM_GROUP_TABLE WHERE album = ?1 AND album_key = ?2" : "SELECT rowid FROM ALBUM_GROUP_TABLE WHERE album = ?1 ORDER BY rowid";
 		name = album;
 		break;
 	}
@@ -4303,9 +4246,7 @@ static void namelist_free(namelist_t *l) {
 // named .m4a: that is indexed, and still inspected (see is_video_file) because
 // the extension alone proves nothing.
 static bool is_playable(const char *name) {
-	static const char *const EXTENSIONS[] = {".wav",  ".mp3", ".flac", ".ogg",  ".dsf",  ".dff",
-											 ".aif",  ".aiff", ".aifc", ".caf", ".opus", ".wv",
-											 ".m4a",  ".alac", ".aac",  ".ape",  ".cue"};
+	static const char *const EXTENSIONS[] = {".wav", ".mp3", ".flac", ".ogg", ".dsf", ".dff", ".aif", ".aiff", ".aifc", ".caf", ".opus", ".wv", ".m4a", ".alac", ".aac", ".ape", ".cue"};
 
 	for (size_t i = 0; i < sizeof(EXTENSIONS) / sizeof(EXTENSIONS[0]); i++) {
 		if (has_extension(name, EXTENSIONS[i])) {
@@ -4353,15 +4294,11 @@ typedef struct {
 	uint32_t duration_ms;
 } stream_info_t;
 
-static uint32_t le32(const unsigned char *p) {
-	return ((uint32_t)p[3] << 24) | ((uint32_t)p[2] << 16) | ((uint32_t)p[1] << 8) | p[0];
-}
+static uint32_t le32(const unsigned char *p) { return ((uint32_t)p[3] << 24) | ((uint32_t)p[2] << 16) | ((uint32_t)p[1] << 8) | p[0]; }
 
 static uint64_t le64(const unsigned char *p) { return ((uint64_t)le32(p + 4) << 32) | le32(p); }
 
-static uint32_t be32(const unsigned char *p) {
-	return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3];
-}
+static uint32_t be32(const unsigned char *p) { return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3]; }
 
 static uint32_t samples_to_ms(uint64_t samples, uint32_t rate) {
 	if (rate == 0 || samples == 0) {
@@ -4375,12 +4312,10 @@ static uint32_t samples_to_ms(uint64_t samples, uint32_t rate) {
 // when there is one. 0 when there is none or the head cannot be read.
 static long id3v2_skip(FILE *f) {
 	unsigned char head[10];
-	if (fseek(f, 0, SEEK_SET) != 0 || fread(head, 1, sizeof(head), f) != sizeof(head) ||
-		memcmp(head, "ID3", 3) != 0) {
+	if (fseek(f, 0, SEEK_SET) != 0 || fread(head, 1, sizeof(head), f) != sizeof(head) || memcmp(head, "ID3", 3) != 0) {
 		return 0;
 	}
-	long size = ((long)(head[6] & 0x7f) << 21) | ((long)(head[7] & 0x7f) << 14) | ((long)(head[8] & 0x7f) << 7) |
-				(head[9] & 0x7f);
+	long size = ((long)(head[6] & 0x7f) << 21) | ((long)(head[7] & 0x7f) << 14) | ((long)(head[8] & 0x7f) << 7) | (head[9] & 0x7f);
 	return size + ((head[5] & 0x10) ? 20 : 10);
 }
 
@@ -4409,8 +4344,7 @@ static void probe_flac(FILE *f, stream_info_t *out) {
 
 static void probe_wav(FILE *f, off_t file_size, stream_info_t *out) {
 	unsigned char head[12];
-	if (fread(head, 1, sizeof(head), f) != sizeof(head) || memcmp(head, "RIFF", 4) != 0 ||
-		memcmp(head + 8, "WAVE", 4) != 0) {
+	if (fread(head, 1, sizeof(head), f) != sizeof(head) || memcmp(head, "RIFF", 4) != 0 || memcmp(head + 8, "WAVE", 4) != 0) {
 		return;
 	}
 	// The chunks, until `data`. Bounded: a file that is not one would otherwise
@@ -4455,8 +4389,7 @@ static void probe_wav(FILE *f, off_t file_size, stream_info_t *out) {
 // the decoder reads.
 static void probe_dsf(FILE *f, stream_info_t *out) {
 	unsigned char head[80]; // 28 of DSD chunk, then the head of the fmt chunk
-	if (fread(head, 1, sizeof(head), f) != sizeof(head) || memcmp(head, "DSD ", 4) != 0 ||
-		memcmp(head + 28, "fmt ", 4) != 0) {
+	if (fread(head, 1, sizeof(head), f) != sizeof(head) || memcmp(head, "DSD ", 4) != 0 || memcmp(head + 28, "fmt ", 4) != 0) {
 		return;
 	}
 	out->rate = (int)le32(head + 28 + 28);
@@ -4488,7 +4421,7 @@ static void probe_mp3(FILE *f, off_t file_size, stream_info_t *out) {
 			continue;
 		}
 		int version = (buf[i + 1] >> 3) & 3; // 3 MPEG-1, 2 MPEG-2, 0 MPEG-2.5
-		int layer = (buf[i + 1] >> 1) & 3;	  // 1 is layer III
+		int layer = (buf[i + 1] >> 1) & 3;	 // 1 is layer III
 		int bitrate_index = buf[i + 2] >> 4;
 		int rate_index = (buf[i + 2] >> 2) & 3;
 		if (version == 1 || layer != 1 || bitrate_index == 0 || bitrate_index == 15 || rate_index == 3) {
@@ -4590,8 +4523,7 @@ static void probe_ogg(FILE *f, off_t file_size, stream_info_t *out) {
 // outside the table is written elsewhere in the block, and that file keeps no
 // length.
 static void probe_wavpack(FILE *f, stream_info_t *out) {
-	static const uint32_t RATES[15] = {6000,  8000,	 9600,	11025, 12000, 16000, 22050, 24000,
-									   32000, 44100, 48000, 64000, 88200, 96000, 192000};
+	static const uint32_t RATES[15] = {6000, 8000, 9600, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000, 64000, 88200, 96000, 192000};
 	unsigned char head[32];
 	if (fread(head, 1, sizeof(head), f) != sizeof(head) || memcmp(head, "wvpk", 4) != 0) {
 		return;
@@ -4611,8 +4543,7 @@ static void probe_wavpack(FILE *f, stream_info_t *out) {
 // is what metadata_read() found on the way, which for FLAC and MP4 already
 // holds all of it. `alac` says the file is lossless MP4, which the extension
 // cannot say: a .m4a is AAC or ALAC and only the sample entry knows which.
-static void probe_stream(const char *path, const char *filename, const song_metadata_t *tags, off_t file_size,
-						 stream_info_t *out) {
+static void probe_stream(const char *path, const char *filename, const song_metadata_t *tags, off_t file_size, stream_info_t *out) {
 	memset(out, 0, sizeof(*out));
 
 	if (tags->has_stream) {
@@ -4847,8 +4778,7 @@ static bool lines_write(const char *file, const char *const *names, int count) {
 
 #define ARTIST_EXCEPTIONS_FILE "artist_exceptions.txt"
 #define ARTIST_EXCEPTIONS_DEFAULT "AC/DC"
-#define ARTIST_SEPARATORS_DEFAULT                                                                                    \
-	(LIBRARY_SPLIT_SEMICOLON | LIBRARY_SPLIT_SLASH | LIBRARY_SPLIT_AMPERSAND | LIBRARY_SPLIT_FEAT)
+#define ARTIST_SEPARATORS_DEFAULT (LIBRARY_SPLIT_SEMICOLON | LIBRARY_SPLIT_SLASH | LIBRARY_SPLIT_AMPERSAND | LIBRARY_SPLIT_FEAT)
 #define GENRE_SEPARATORS_DEFAULT (LIBRARY_SPLIT_SEMICOLON | LIBRARY_SPLIT_SLASH | LIBRARY_SPLIT_COMMA)
 
 bool library_split_artists(void) { return config_get_bool("library", "split_artists", false); }
@@ -4858,9 +4788,7 @@ void library_set_split_artists(bool on) {
 	config_save();
 }
 
-unsigned library_artist_separators(void) {
-	return (unsigned)config_get_int("library", "artist_separators", ARTIST_SEPARATORS_DEFAULT);
-}
+unsigned library_artist_separators(void) { return (unsigned)config_get_int("library", "artist_separators", ARTIST_SEPARATORS_DEFAULT); }
 
 void library_set_artist_separators(unsigned separators) {
 	config_set_int("library", "artist_separators", (long)separators);
@@ -4874,9 +4802,7 @@ void library_set_split_genres(bool on) {
 	config_save();
 }
 
-unsigned library_genre_separators(void) {
-	return (unsigned)config_get_int("library", "genre_separators", GENRE_SEPARATORS_DEFAULT);
-}
+unsigned library_genre_separators(void) { return (unsigned)config_get_int("library", "genre_separators", GENRE_SEPARATORS_DEFAULT); }
 
 void library_set_genre_separators(unsigned separators) {
 	config_set_int("library", "genre_separators", (long)separators);
@@ -4901,9 +4827,7 @@ char **library_artist_exceptions(int *count) {
 
 void library_artist_exceptions_free(char **names, int count) { names_free(names, count); }
 
-void library_set_artist_exceptions(const char *const *names, int count) {
-	lines_write(ARTIST_EXCEPTIONS_FILE, names, count);
-}
+void library_set_artist_exceptions(const char *const *names, int count) { lines_write(ARTIST_EXCEPTIONS_FILE, names, count); }
 
 bool library_join_albums(void) { return config_get_bool("library", "join_albums", false); }
 
@@ -4965,8 +4889,7 @@ static void rules_signature(const scan_rules_t *r, char *out, size_t size) {
 	if (r->album_artist_separators) {
 		snprintf(album_artists, sizeof(album_artists), "/b%u", r->album_artist_separators);
 	}
-	snprintf(out, size, "a%u/g%u/j%d/x%08x%s", r->artist_separators, r->genre_separators, r->join_albums ? 1 : 0,
-			 r->artist_separators ? (unsigned)hash : 0u, album_artists);
+	snprintf(out, size, "a%u/g%u/j%d/x%08x%s", r->artist_separators, r->genre_separators, r->join_albums ? 1 : 0, r->artist_separators ? (unsigned)hash : 0u, album_artists);
 }
 
 // With db_lock held.
@@ -4974,8 +4897,7 @@ static void organize_state_put(const scan_rules_t *r) {
 	char signature[64];
 	rules_signature(r, signature, sizeof(signature));
 	sqlite3_stmt *stmt = NULL;
-	if (db && sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO ORGANIZE_STATE(id, rules) VALUES(0, ?1)", -1, &stmt, NULL) ==
-				  SQLITE_OK) {
+	if (db && sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO ORGANIZE_STATE(id, rules) VALUES(0, ?1)", -1, &stmt, NULL) == SQLITE_OK) {
 		sqlite3_bind_text(stmt, 1, signature, -1, SQLITE_TRANSIENT);
 		sqlite3_step(stmt);
 		sqlite3_finalize(stmt);
@@ -5031,18 +4953,11 @@ static int split_word_at(const char *text, const char *p, unsigned separators, b
 	static const struct {
 		unsigned bit;
 		const char *word;
-		bool stop;	   // may end in a full stop: "feat.", "vs."
-		bool exact;	   // the case as written
+		bool stop;	  // may end in a full stop: "feat.", "vs."
+		bool exact;	  // the case as written
 		bool outside; // outside brackets only
 	} WORDS[] = {
-		{LIBRARY_SPLIT_FEAT, "featuring", true, false, false},
-		{LIBRARY_SPLIT_FEAT, "feat", true, false, false},
-		{LIBRARY_SPLIT_FEAT, "ft", true, false, false},
-		{LIBRARY_SPLIT_VS, "versus", true, false, false},
-		{LIBRARY_SPLIT_VS, "vs", true, false, false},
-		{LIBRARY_SPLIT_X, "x", false, true, true},
-		{LIBRARY_SPLIT_WITH, "with", false, false, true},
-		{LIBRARY_SPLIT_AND, "and", false, false, true},
+		{LIBRARY_SPLIT_FEAT, "featuring", true, false, false}, {LIBRARY_SPLIT_FEAT, "feat", true, false, false}, {LIBRARY_SPLIT_FEAT, "ft", true, false, false}, {LIBRARY_SPLIT_VS, "versus", true, false, false}, {LIBRARY_SPLIT_VS, "vs", true, false, false}, {LIBRARY_SPLIT_X, "x", false, true, true}, {LIBRARY_SPLIT_WITH, "with", false, false, true}, {LIBRARY_SPLIT_AND, "and", false, false, true},
 	};
 	if (p == text || (p[-1] != ' ' && p[-1] != '(' && p[-1] != '[')) {
 		return 0;
@@ -5083,7 +4998,7 @@ static int split_symbol_at(const char *p, unsigned separators) {
 		{LIBRARY_SPLIT_COMMA, "\xe3\x80\x81"}, // U+3001, the ideographic comma
 		{LIBRARY_SPLIT_PLUS, "+"},
 		{LIBRARY_SPLIT_PLUS, "\xef\xbc\x8b"}, // U+FF0B
-		{LIBRARY_SPLIT_X, "\xc3\x97"},		   // U+00D7, the multiplication sign
+		{LIBRARY_SPLIT_X, "\xc3\x97"},		  // U+00D7, the multiplication sign
 	};
 	for (size_t i = 0; i < sizeof(SYMBOLS) / sizeof(SYMBOLS[0]); i++) {
 		size_t n = strlen(SYMBOLS[i].symbol);
@@ -5131,8 +5046,7 @@ static void split_trim(split_part_t *part) {
 // "Rock (Hard/Soft)" one each. Writes the names, trimmed and without repeats,
 // and returns how many; 0 when the text is one name, which is then the text
 // itself, untouched.
-static int split_names(const char *text, unsigned separators, char *const *exceptions, int exception_count,
-					   char out[][SPLIT_NAME_MAX], int max) {
+static int split_names(const char *text, unsigned separators, char *const *exceptions, int exception_count, char out[][SPLIT_NAME_MAX], int max) {
 	if (!text || !text[0] || !separators) {
 		return 0;
 	}
@@ -5258,17 +5172,11 @@ static bool prepare_statements(void) {
 		return false;
 	}
 
-	if (sqlite3_prepare_v2(db, "INSERT OR IGNORE INTO ALBUM_GROUP_TABLE(album,album_key,sortkey) VALUES(?,?,?)", -1,
-						   &stmt_album_group, NULL) != SQLITE_OK) {
+	if (sqlite3_prepare_v2(db, "INSERT OR IGNORE INTO ALBUM_GROUP_TABLE(album,album_key,sortkey) VALUES(?,?,?)", -1, &stmt_album_group, NULL) != SQLITE_OK) {
 		return false;
 	}
 
-	if (sqlite3_prepare_v2(db, "INSERT INTO ARTIST_LINK(path,artist) VALUES(?,?)", -1, &stmt_artist_link, NULL) !=
-			SQLITE_OK ||
-		sqlite3_prepare_v2(db, "INSERT INTO ALBUM_ARTIST_LINK(path,album_artist) VALUES(?,?)", -1,
-						   &stmt_album_artist_link, NULL) != SQLITE_OK ||
-		sqlite3_prepare_v2(db, "INSERT INTO GENRE_LINK(path,genre) VALUES(?,?)", -1, &stmt_genre_link, NULL) !=
-			SQLITE_OK) {
+	if (sqlite3_prepare_v2(db, "INSERT INTO ARTIST_LINK(path,artist) VALUES(?,?)", -1, &stmt_artist_link, NULL) != SQLITE_OK || sqlite3_prepare_v2(db, "INSERT INTO ALBUM_ARTIST_LINK(path,album_artist) VALUES(?,?)", -1, &stmt_album_artist_link, NULL) != SQLITE_OK || sqlite3_prepare_v2(db, "INSERT INTO GENRE_LINK(path,genre) VALUES(?,?)", -1, &stmt_genre_link, NULL) != SQLITE_OK) {
 		return false;
 	}
 
@@ -5309,8 +5217,6 @@ static void run_lookup(sqlite3_stmt *stmt, const char *value) {
 	sqlite3_reset(stmt);
 }
 
-
-
 // A link row: the track at `path` is filed under `name` as well.
 static void link_insert(sqlite3_stmt *stmt, const char *path, const char *name) {
 	if (!stmt) {
@@ -5325,8 +5231,7 @@ static void link_insert(sqlite3_stmt *stmt, const char *path, const char *name) 
 
 // The lookup row for a tag, or for each name it splits into, with a link row
 // per name.
-static void lookup_names(sqlite3_stmt *lookup, sqlite3_stmt *link, const char *path, const char *value,
-						 unsigned separators, char *const *exceptions, int exception_count) {
+static void lookup_names(sqlite3_stmt *lookup, sqlite3_stmt *link, const char *path, const char *value, unsigned separators, char *const *exceptions, int exception_count) {
 	char names[SPLIT_MAX][SPLIT_NAME_MAX];
 	int count = split_names(value, separators, exceptions, exception_count, names, SPLIT_MAX);
 	if (count == 0) {
@@ -5366,9 +5271,7 @@ static void insert_track(const char *path, const char *filename, const song_meta
 	// whatever the interface language, and such a disc lands on the same
 	// shelf as one tagged by hand. The track's own artist stays as it is, so
 	// the artist pages still find each song under whoever sings it.
-	const char *album_artist = tags->album_artist[0] ? tags->album_artist
-							   : tags->compilation	 ? LIBRARY_VARIOUS_ARTISTS
-													 : tags->artist;
+	const char *album_artist = tags->album_artist[0] ? tags->album_artist : tags->compilation ? LIBRARY_VARIOUS_ARTISTS : tags->artist;
 
 	char character[16];
 	int group = 0;
@@ -5393,16 +5296,16 @@ static void insert_track(const char *path, const char *filename, const song_meta
 	sqlite3_bind_int(stmt_track, column++, tags->year);							 // year
 	sqlite3_bind_int(stmt_track, column++, tags->track_number);					 // dis_id: track number
 
-	sqlite3_bind_int(stmt_track, column++, (int)stream.duration_ms);			 // end_time: the length
-	sqlite3_bind_text(stmt_track, column++, character, -1, SQLITE_TRANSIENT);	 // character
-	sqlite3_bind_int64(stmt_track, column++, (sqlite3_int64)st->st_size);		 // size
+	sqlite3_bind_int(stmt_track, column++, (int)stream.duration_ms);		  // end_time: the length
+	sqlite3_bind_text(stmt_track, column++, character, -1, SQLITE_TRANSIENT); // character
+	sqlite3_bind_int64(stmt_track, column++, (sqlite3_int64)st->st_size);	  // size
 
-	sqlite3_bind_int(stmt_track, column++, stream.rate);										   // sample_rate
-	sqlite3_bind_int(stmt_track, column++, stream.bits);										   // bit
+	sqlite3_bind_int(stmt_track, column++, stream.rate);									 // sample_rate
+	sqlite3_bind_int(stmt_track, column++, stream.bits);									 // bit
 	sqlite3_bind_int(stmt_track, column++, stream.alac ? FORMAT_ALAC : format_of(filename)); // format
-	sqlite3_bind_text(stmt_track, column++, album_artist, -1, SQLITE_TRANSIENT); // album_artist
-	sqlite3_bind_int64(stmt_track, column++, (sqlite3_int64)st->st_ctime);		 // ctime
-	sqlite3_bind_int64(stmt_track, column++, (sqlite3_int64)st->st_mtime);		 // mtime
+	sqlite3_bind_text(stmt_track, column++, album_artist, -1, SQLITE_TRANSIENT);			 // album_artist
+	sqlite3_bind_int64(stmt_track, column++, (sqlite3_int64)st->st_ctime);					 // ctime
+	sqlite3_bind_int64(stmt_track, column++, (sqlite3_int64)st->st_mtime);					 // mtime
 
 	char key[LIBRARY_SORT_KEY_MAX];
 	library_sort_key(title, key, sizeof(key));
@@ -5430,11 +5333,9 @@ static void insert_track(const char *path, const char *filename, const song_meta
 	sqlite3_reset(stmt_track);
 
 	run_lookup(stmt_album, tags->album);
-	lookup_names(stmt_artist, stmt_artist_link, path, tags->artist, rules.artist_separators, rules.exceptions,
-				 rules.exception_count);
+	lookup_names(stmt_artist, stmt_artist_link, path, tags->artist, rules.artist_separators, rules.exceptions, rules.exception_count);
 	lookup_names(stmt_genre, stmt_genre_link, path, tags->genre, rules.genre_separators, NULL, 0);
-	lookup_names(stmt_album_artist, stmt_album_artist_link, path, album_artist, rules.album_artist_separators,
-				 rules.exceptions, rules.exception_count);
+	lookup_names(stmt_album_artist, stmt_album_artist_link, path, album_artist, rules.album_artist_separators, rules.exceptions, rules.exception_count);
 
 	// And the album as this player lists it: its name and whose it is.
 	if (stmt_album_group && tags->album[0]) {
@@ -5508,8 +5409,7 @@ static uint32_t join_folder_hash(const char *path) {
 // rows took a new key, -1 when memory ran out.
 static int album_join_one(const char *album) {
 	sqlite3_stmt *read = NULL;
-	if (sqlite3_prepare_v2(db, "SELECT rowid, album_artist, path, album_key FROM MEDIA_TABLE WHERE album = ?1", -1,
-						   &read, NULL) != SQLITE_OK) {
+	if (sqlite3_prepare_v2(db, "SELECT rowid, album_artist, path, album_key FROM MEDIA_TABLE WHERE album = ?1", -1, &read, NULL) != SQLITE_OK) {
 		return 0;
 	}
 	sqlite3_bind_text(read, 1, album, -1, SQLITE_TRANSIENT);
@@ -5590,8 +5490,7 @@ static int album_join_one(const char *album) {
 				for (int i = 0; i < node_count; i++) {
 					int root = join_find(nodes, i);
 					int b = best[root];
-					if (b < 0 || nodes[i].tracks > nodes[b].tracks ||
-						(nodes[i].tracks == nodes[b].tracks && strcmp(nodes[i].key, nodes[b].key) < 0)) {
+					if (b < 0 || nodes[i].tracks > nodes[b].tracks || (nodes[i].tracks == nodes[b].tracks && strcmp(nodes[i].key, nodes[b].key) < 0)) {
 						best[root] = i;
 					}
 				}
@@ -5603,8 +5502,7 @@ static int album_join_one(const char *album) {
 		}
 
 		sqlite3_stmt *write = NULL;
-		if (sqlite3_prepare_v2(db, "UPDATE MEDIA_TABLE SET album_key = ?1 WHERE rowid = ?2", -1, &write, NULL) ==
-			SQLITE_OK) {
+		if (sqlite3_prepare_v2(db, "UPDATE MEDIA_TABLE SET album_key = ?1 WHERE rowid = ?2", -1, &write, NULL) == SQLITE_OK) {
 			for (int i = 0; i < row_count; i++) {
 				const char *key = nodes[rows[i].node].key;
 				if (strcmp(key, rows[i].current) == 0) {
@@ -5622,8 +5520,7 @@ static int album_join_one(const char *album) {
 		// The records of this name, as they are now.
 		if (changed > 0) {
 			sqlite3_stmt *stmt = NULL;
-			if (sqlite3_prepare_v2(db, "DELETE FROM ALBUM_GROUP_TABLE WHERE album = ?1", -1, &stmt, NULL) ==
-				SQLITE_OK) {
+			if (sqlite3_prepare_v2(db, "DELETE FROM ALBUM_GROUP_TABLE WHERE album = ?1", -1, &stmt, NULL) == SQLITE_OK) {
 				sqlite3_bind_text(stmt, 1, album, -1, SQLITE_TRANSIENT);
 				sqlite3_step(stmt);
 				sqlite3_finalize(stmt);
@@ -5866,8 +5763,7 @@ static void folder_sig_add(folder_sig_t *sig, const char *name, bool is_dir) {
 // With db_lock held.
 static void folder_mark(const char *path, time_t mtime, const folder_sig_t *sig) {
 	sqlite3_stmt *stmt = NULL;
-	if (db && sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO FOLDER_TABLE(path, mtime, files, names) VALUES(?1, ?2, ?3, ?4)",
-								 -1, &stmt, NULL) == SQLITE_OK) {
+	if (db && sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO FOLDER_TABLE(path, mtime, files, names) VALUES(?1, ?2, ?3, ?4)", -1, &stmt, NULL) == SQLITE_OK) {
 		sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT);
 		sqlite3_bind_int64(stmt, 2, (sqlite3_int64)mtime);
 		sqlite3_bind_int(stmt, 3, sig->entries);
@@ -5885,8 +5781,7 @@ static bool folder_unchanged(const char *path, const folder_sig_t *sig) {
 	pthread_mutex_lock(&db_lock);
 	sqlite3_stmt *stmt = NULL;
 	bool same = false;
-	if (db && sqlite3_prepare_v2(db, "SELECT files, names FROM FOLDER_TABLE WHERE path = ?1", -1, &stmt, NULL) ==
-				  SQLITE_OK) {
+	if (db && sqlite3_prepare_v2(db, "SELECT files, names FROM FOLDER_TABLE WHERE path = ?1", -1, &stmt, NULL) == SQLITE_OK) {
 		sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT);
 		if (sqlite3_step(stmt) == SQLITE_ROW) {
 			same = sqlite3_column_int(stmt, 0) == sig->entries && (uint64_t)sqlite3_column_int64(stmt, 1) == sig->names;
@@ -6465,8 +6360,7 @@ static void full_scan_run(void) {
 		sortkeys_ready = true;
 	}
 
-	printf("library: scan finished, %d tracks%s\n", scan_found,
-		   scan_db_failed ? " (database error)" : scan_cancel ? " (stopped early)" : "");
+	printf("library: scan finished, %d tracks%s\n", scan_found, scan_db_failed ? " (database error)" : scan_cancel ? " (stopped early)" : "");
 }
 
 // ---------------------------------------------------------------------------
@@ -6581,10 +6475,7 @@ static void finalize_known(void) {
 // are read, which that index holds without going to the table.
 static bool prepare_known(void) {
 	finalize_known();
-	return sqlite3_prepare_v2(db, "SELECT rowid, path FROM MEDIA_TABLE WHERE path >= ?1 AND path < ?2", -1,
-							  &stmt_under_media, NULL) == SQLITE_OK &&
-		   sqlite3_prepare_v2(db, "SELECT path FROM FOLDER_TABLE WHERE path >= ?1 AND path < ?2", -1, &stmt_under_folders,
-							  NULL) == SQLITE_OK;
+	return sqlite3_prepare_v2(db, "SELECT rowid, path FROM MEDIA_TABLE WHERE path >= ?1 AND path < ?2", -1, &stmt_under_media, NULL) == SQLITE_OK && sqlite3_prepare_v2(db, "SELECT path FROM FOLDER_TABLE WHERE path >= ?1 AND path < ?2", -1, &stmt_under_folders, NULL) == SQLITE_OK;
 }
 
 static void bind_under(sqlite3_stmt *stmt, const char *folder) {
@@ -6607,14 +6498,10 @@ static bool namelist_has(const namelist_t *l, const char *name) {
 	return false;
 }
 
-static int name_cmp(const void *a, const void *b) {
-	return strcasecmp(*(const char *const *)a, *(const char *const *)b);
-}
+static int name_cmp(const void *a, const void *b) { return strcasecmp(*(const char *const *)a, *(const char *const *)b); }
 
 // Whether `name` is in `names`, sorted by name_cmp.
-static bool sorted_has(char *const *names, int count, const char *name) {
-	return count > 0 && bsearch(&name, names, (size_t)count, sizeof(*names), name_cmp) != NULL;
-}
+static bool sorted_has(char *const *names, int count, const char *name) { return count > 0 && bsearch(&name, names, (size_t)count, sizeof(*names), name_cmp) != NULL; }
 
 // A row directly in the folder being compared: the file it comes from, which
 // for a sheet's track is the sheet ("x.cue?track=3" comes from "x.cue").
@@ -6624,9 +6511,7 @@ typedef struct {
 	bool seen;
 } folder_row_t;
 
-static int folder_row_cmp(const void *a, const void *b) {
-	return strcasecmp(((const folder_row_t *)a)->file, ((const folder_row_t *)b)->file);
-}
+static int folder_row_cmp(const void *a, const void *b) { return strcasecmp(((const folder_row_t *)a)->file, ((const folder_row_t *)b)->file); }
 
 // The first row of `file` in `rows`, sorted by folder_row_cmp; -1 when none.
 static int folder_row_find(folder_row_t *rows, int count, const char *file) {
@@ -6695,8 +6580,7 @@ static void sheet_audio(const char *sheet, char *audio, size_t size, bool *split
 // Returns whether the folder was compared in full. Memory running out, or a
 // subfolder name too long to hold, leaves part of it unjudged -- nothing is
 // taken out there, and the folder is looked into again next time.
-static bool update_compare(const char *path, bool own_files, const namelist_t *files, const namelist_t *dirs,
-						   bool dirs_listed, walk_t *w) {
+static bool update_compare(const char *path, bool own_files, const namelist_t *files, const namelist_t *dirs, bool dirs_listed, walk_t *w) {
 	size_t plen = strlen(path);
 	folder_row_t *rows = NULL;
 	int row_count = 0, row_cap = 0;
@@ -6738,8 +6622,7 @@ static bool update_compare(const char *path, bool own_files, const namelist_t *f
 				} else if (strncasecmp(last_dir, rest, n) != 0 || last_dir[n] != '\0') {
 					memcpy(last_dir, rest, n);
 					last_dir[n] = '\0';
-					if (dirs_complete && !sorted_has(sorted_dirs, dirs->count, last_dir) &&
-						!namelist_push(&missing_dirs, last_dir, INT_MAX)) {
+					if (dirs_complete && !sorted_has(sorted_dirs, dirs->count, last_dir) && !namelist_push(&missing_dirs, last_dir, INT_MAX)) {
 						dirs_complete = false;
 					}
 				}
@@ -6846,8 +6729,7 @@ static bool update_compare(const char *path, bool own_files, const namelist_t *f
 			while (sqlite3_step(stmt_under_folders) == SQLITE_ROW) {
 				const char *folder = (const char *)sqlite3_column_text(stmt_under_folders, 0);
 				const char *rest = folder && strlen(folder) > plen + 1 ? folder + plen + 1 : NULL;
-				if (rest && !strchr(rest, '/') && !sorted_has(sorted_dirs, dirs->count, rest) &&
-					!namelist_push(&missing_dirs, rest, INT_MAX)) {
+				if (rest && !strchr(rest, '/') && !sorted_has(sorted_dirs, dirs->count, rest) && !namelist_push(&missing_dirs, rest, INT_MAX)) {
 					dirs_complete = false;
 				}
 			}
@@ -6913,8 +6795,8 @@ static void update_folder(const char *path, int depth, walk_t *w) {
 	namelist_init(&dirs);
 	namelist_init(&files);
 	folder_sig_t sig = {0, 0};
-	bool overflow = false;		// more files than a list holds
-	bool dirs_listed = true;	// every subfolder in `dirs`
+	bool overflow = false;	   // more files than a list holds
+	bool dirs_listed = true;   // every subfolder in `dirs`
 	bool more_subdirs = false; // subfolders past the batch in `subdirs`
 	bool nomedia = false;	   // a .nomedia among the names, any spelling
 
@@ -7175,8 +7057,7 @@ static void update_retagged(walk_t *w) {
 		int n = 0;
 		pthread_mutex_lock(&db_lock);
 		sqlite3_stmt *stmt = NULL;
-		if (db && sqlite3_prepare_v2(db, "SELECT rowid, path, mtime FROM MEDIA_TABLE WHERE rowid > ?1 ORDER BY rowid LIMIT ?2",
-									 -1, &stmt, NULL) == SQLITE_OK) {
+		if (db && sqlite3_prepare_v2(db, "SELECT rowid, path, mtime FROM MEDIA_TABLE WHERE rowid > ?1 ORDER BY rowid LIMIT ?2", -1, &stmt, NULL) == SQLITE_OK) {
 			sqlite3_bind_int64(stmt, 1, after);
 			sqlite3_bind_int(stmt, 2, RETAG_SLICE);
 			while (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -7196,8 +7077,7 @@ static void update_retagged(walk_t *w) {
 
 		for (int i = 0; i < n && !scan_cancel && !w->full; i++) {
 			const char *path = slice[i].path;
-			if (!path[0] || !in_walked_folders(path) || under_folders(&w->gone_folders, path) ||
-				bsearch(&slice[i].rowid, w->gone.ids, (size_t)w->gone.count, sizeof(sqlite3_int64), id_cmp)) {
+			if (!path[0] || !in_walked_folders(path) || under_folders(&w->gone_folders, path) || bsearch(&slice[i].rowid, w->gone.ids, (size_t)w->gone.count, sizeof(sqlite3_int64), id_cmp)) {
 				continue;
 			}
 			// A sheet's tracks, and a WAV's marker tracks, are one file.
@@ -7231,9 +7111,7 @@ static void update_retagged(walk_t *w) {
 static int walk_gone_rows(const walk_t *w) {
 	int rows = w->gone.count;
 	sqlite3_stmt *stmt = NULL;
-	if (db && w->gone_folders.count > 0 &&
-		sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM MEDIA_TABLE WHERE path >= ?1 AND path < ?2", -1, &stmt, NULL) ==
-			SQLITE_OK) {
+	if (db && w->gone_folders.count > 0 && sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM MEDIA_TABLE WHERE path >= ?1 AND path < ?2", -1, &stmt, NULL) == SQLITE_OK) {
 		for (int i = 0; i < w->gone_folders.count; i++) {
 			bind_under(stmt, w->gone_folders.names[i]);
 			if (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -7290,9 +7168,8 @@ int library_forget_deleted(const char *const *paths, int count) {
 	// everything under a folder -- and of those, the ones whose file is gone.
 	// Asked of the card and not assumed: a delete that stopped halfway leaves
 	// some of a folder behind, and those stay.
-	static const char *const SELECT_SQL =
-		"SELECT rowid, path FROM MEDIA_TABLE WHERE path = ?1 OR (path >= ?1 || '?track=' AND path < ?1 || '?track>')"
-		" OR (path >= ?1 || '/' AND path < ?1 || '0')";
+	static const char *const SELECT_SQL = "SELECT rowid, path FROM MEDIA_TABLE WHERE path = ?1 OR (path >= ?1 || '?track=' AND path < ?1 || '?track>')"
+										  " OR (path >= ?1 || '/' AND path < ?1 || '0')";
 	int removed = 0, unfavoured = 0;
 	bool in_transaction = exec("BEGIN");
 	sqlite3_stmt *select = NULL, *del = NULL, *fav = NULL, *plays = NULL;
@@ -7367,8 +7244,7 @@ int library_forget_deleted(const char *const *paths, int count) {
 		prune_names();
 		exec("DELETE FROM COUNT_TABLE");
 		char sql[128];
-		snprintf(sql, sizeof(sql), "INSERT INTO COUNT_TABLE(cn) VALUES(%d)",
-				 count_rows("SELECT COUNT(*) FROM MEDIA_TABLE"));
+		snprintf(sql, sizeof(sql), "INSERT INTO COUNT_TABLE(cn) VALUES(%d)", count_rows("SELECT COUNT(*) FROM MEDIA_TABLE"));
 		exec(sql);
 	}
 	if (in_transaction && !exec("COMMIT")) {
@@ -7578,8 +7454,7 @@ static int update_index(const namelist_t *files, bool replace) {
 		if (replace && cue_is_sheet(path)) {
 			folder_forget(path);
 			struct stat audio_st;
-			if (claimed[0] && file_tracks(path) == 0 && file_tracks(claimed) == 0 && stat(claimed, &audio_st) == 0 &&
-				S_ISREG(audio_st.st_mode)) {
+			if (claimed[0] && file_tracks(path) == 0 && file_tracks(claimed) == 0 && stat(claimed, &audio_st) == 0 && S_ISREG(audio_st.st_mode)) {
 				const char *name = strrchr(claimed, '/');
 				cue_claimed_count = 0;
 				scan_one_file(claimed, name ? name + 1 : claimed, &audio_st);
@@ -7608,8 +7483,7 @@ static uint32_t cover_pass_budget(uint32_t run_ms) {
 
 static void update_run(void) {
 	uint32_t started_ms = now_ms();
-	printf("library: looking for changes in %s%s\n", scan_root,
-		   scan_folder_count > 0 ? " (the chosen folders)" : "");
+	printf("library: looking for changes in %s%s\n", scan_root, scan_folder_count > 0 ? " (the chosen folders)" : "");
 	pthread_mutex_lock(&db_lock);
 	if (!prepare_statements() || !prepare_known()) {
 		fprintf(stderr, "library: cannot look for changes, the database is not answering\n");
@@ -7715,8 +7589,7 @@ static void update_run(void) {
 		links_check();
 		exec("DELETE FROM COUNT_TABLE");
 		char sql[128];
-		snprintf(sql, sizeof(sql), "INSERT INTO COUNT_TABLE(cn) VALUES(%d)",
-				 count_rows("SELECT COUNT(*) FROM MEDIA_TABLE"));
+		snprintf(sql, sizeof(sql), "INSERT INTO COUNT_TABLE(cn) VALUES(%d)", count_rows("SELECT COUNT(*) FROM MEDIA_TABLE"));
 		exec(sql);
 		// The open lists hold the row ids they were built over: the new rows
 		// are not among them, and the removed ones still are.
@@ -7735,9 +7608,7 @@ static void update_run(void) {
 	if (added < 0) {
 		added = 0;
 	}
-	printf("library: %d new track(s), %d removed, %d read again, %d folder(s) noted, in %u ms%s\n", added, removed,
-		   replaced, folders_noted, now_ms() - started_ms,
-		   scan_db_failed ? " (database error)" : scan_cancel ? " (stopped early)" : "");
+	printf("library: %d new track(s), %d removed, %d read again, %d folder(s) noted, in %u ms%s\n", added, removed, replaced, folders_noted, now_ms() - started_ms, scan_db_failed ? " (database error)" : scan_cancel ? " (stopped early)" : "");
 	// Stopped with nothing done -- the card pulled again, a scan asked for --
 	// is not "no changes": nothing was looked at to the end.
 	bool stopped = (scan_cancel || scan_db_failed) && !changed;
@@ -7759,16 +7630,14 @@ static void update_run(void) {
 
 // Rebuilds one side: the names of `column` of MEDIA_TABLE through `lookup`,
 // and `link_table`.
-static void relink(const char *column, const char *link_table, sqlite3_stmt **lookup, unsigned separators,
-				   char *const *exceptions, int exception_count) {
+static void relink(const char *column, const char *link_table, sqlite3_stmt **lookup, unsigned separators, char *const *exceptions, int exception_count) {
 	char sql[200];
 	snprintf(sql, sizeof(sql), "SELECT DISTINCT %s FROM MEDIA_TABLE WHERE %s <> ''", column, column);
 	int count = 0;
 	char **values = album_names(sql, &count);
 
 	char insert_sql[200];
-	snprintf(insert_sql, sizeof(insert_sql), "INSERT INTO %s(path, %s) SELECT path, ?2 FROM MEDIA_TABLE WHERE %s = ?1",
-			 link_table, column, column);
+	snprintf(insert_sql, sizeof(insert_sql), "INSERT INTO %s(path, %s) SELECT path, ?2 FROM MEDIA_TABLE WHERE %s = ?1", link_table, column, column);
 
 	char names[SPLIT_MAX][SPLIT_NAME_MAX];
 	for (int i = 0; i < count && !scan_cancel; i += 50) {
@@ -7822,8 +7691,7 @@ static bool reorganize_run(void) {
 
 	if (ready) {
 		relink("artist", "ARTIST_LINK", &stmt_artist, rules.artist_separators, rules.exceptions, rules.exception_count);
-		relink("album_artist", "ALBUM_ARTIST_LINK", &stmt_album_artist, rules.album_artist_separators, rules.exceptions,
-			   rules.exception_count);
+		relink("album_artist", "ALBUM_ARTIST_LINK", &stmt_album_artist, rules.album_artist_separators, rules.exceptions, rules.exception_count);
 		relink("genre", "GENRE_LINK", &stmt_genre, rules.genre_separators, NULL, 0);
 
 		int count = 0;
@@ -7894,8 +7762,7 @@ static void *scan_thread_func(void *arg) {
 			// index from before the covers is the worker's, at idle priority,
 			// not this run's at nice 10 on every boot.
 			if (update_added + update_replaced > 0) {
-				covertone_scan_pass(update_id_base, cover_pass_budget(now_ms() - run_started_ms), &scan_cancel,
-									set_scan_folder);
+				covertone_scan_pass(update_id_base, cover_pass_budget(now_ms() - run_started_ms), &scan_cancel, set_scan_folder);
 			}
 			playlists_follow_library();
 		}
@@ -8157,8 +8024,7 @@ static void library_scan_stop_and_wait(void) {
 // Playback state: the single remembered track + position ("Ricorda traccia").
 // ---------------------------------------------------------------------------
 
-void library_queue_save_query(const library_index_spec_t *spec, int position, const char *const *extra,
-							  const int *extra_slots, int extra_count) {
+void library_queue_save_query(const library_index_spec_t *spec, int position, const char *const *extra, const int *extra_slots, int extra_count) {
 	pthread_mutex_lock(&db_lock);
 	if (db) {
 		// One transaction: this runs on every track change, and four separate
@@ -8193,9 +8059,7 @@ void library_queue_save_query(const library_index_spec_t *spec, int position, co
 		// beside the query, rather than the two hundred thousand the query
 		// stands for.
 		stmt = NULL;
-		if (extra && extra_count > 0 &&
-			sqlite3_prepare_v2(db, "INSERT INTO PLAYBACK_QUEUE(idx,path,slot) VALUES(?,?,?)", -1, &stmt, NULL) ==
-				SQLITE_OK) {
+		if (extra && extra_count > 0 && sqlite3_prepare_v2(db, "INSERT INTO PLAYBACK_QUEUE(idx,path,slot) VALUES(?,?,?)", -1, &stmt, NULL) == SQLITE_OK) {
 			for (int i = 0; i < extra_count; i++) {
 				if (!extra[i] || !extra[i][0]) {
 					continue;
@@ -8224,8 +8088,7 @@ bool library_queue_load_query(library_index_spec_t *spec, int *position_out) {
 	bool found = false;
 	pthread_mutex_lock(&db_lock);
 	sqlite3_stmt *stmt = NULL;
-	if (db && sqlite3_prepare_v2(db, "SELECT kind, filter, ord, desc, value, pos FROM PLAYBACK_QUEUE_QUERY WHERE id=0",
-								 -1, &stmt, NULL) == SQLITE_OK) {
+	if (db && sqlite3_prepare_v2(db, "SELECT kind, filter, ord, desc, value, pos FROM PLAYBACK_QUEUE_QUERY WHERE id=0", -1, &stmt, NULL) == SQLITE_OK) {
 		if (sqlite3_step(stmt) == SQLITE_ROW) {
 			spec->kind = (library_list_t)sqlite3_column_int(stmt, 0);
 			spec->filter = (library_filter_t)sqlite3_column_int(stmt, 1);
@@ -8282,8 +8145,7 @@ static void next_mount_serial(void) {
 	}
 	serial++;
 	stmt = NULL;
-	if (db && sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO MOUNT_SERIAL(id,serial) VALUES(0,?)", -1, &stmt, NULL) ==
-				  SQLITE_OK) {
+	if (db && sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO MOUNT_SERIAL(id,serial) VALUES(0,?)", -1, &stmt, NULL) == SQLITE_OK) {
 		sqlite3_bind_int64(stmt, 1, serial);
 		sqlite3_step(stmt);
 		sqlite3_finalize(stmt);
@@ -8291,7 +8153,6 @@ static void next_mount_serial(void) {
 	mount_serial = serial;
 	pthread_mutex_unlock(&db_lock);
 }
-
 
 // The statement a playlist's table is made with. `idx` orders the rows and is
 // what the user sees as the order of the list. `mount` is neither read nor
@@ -8471,11 +8332,7 @@ static bool playlist_append_locked(const char *quoted, const library_playlist_ro
 	if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
 		return false;
 	}
-	bool ok = sqlite3_bind_text(stmt, 1, row->path, -1, SQLITE_TRANSIENT) == SQLITE_OK &&
-			  sqlite3_bind_text(stmt, 2, row->title, -1, SQLITE_TRANSIENT) == SQLITE_OK &&
-			  sqlite3_bind_text(stmt, 3, row->artist, -1, SQLITE_TRANSIENT) == SQLITE_OK &&
-			  sqlite3_bind_int64(stmt, 4, row->seconds) == SQLITE_OK &&
-			  sqlite3_bind_int(stmt, 5, row->present ? 1 : 0) == SQLITE_OK && sqlite3_step(stmt) == SQLITE_DONE;
+	bool ok = sqlite3_bind_text(stmt, 1, row->path, -1, SQLITE_TRANSIENT) == SQLITE_OK && sqlite3_bind_text(stmt, 2, row->title, -1, SQLITE_TRANSIENT) == SQLITE_OK && sqlite3_bind_text(stmt, 3, row->artist, -1, SQLITE_TRANSIENT) == SQLITE_OK && sqlite3_bind_int64(stmt, 4, row->seconds) == SQLITE_OK && sqlite3_bind_int(stmt, 5, row->present ? 1 : 0) == SQLITE_OK && sqlite3_step(stmt) == SQLITE_DONE;
 	if (sqlite3_finalize(stmt) != SQLITE_OK)
 		ok = false;
 	return ok;
@@ -8700,14 +8557,9 @@ struct library_playlist_stage {
 	bool guard_namespace;
 };
 
-static bool playlist_stage_current(const library_playlist_stage_t *stage) {
-	return stage && stage->epoch == database_epoch && stage->serial == playlist_stage_active && db;
-}
+static bool playlist_stage_current(const library_playlist_stage_t *stage) { return stage && stage->epoch == database_epoch && stage->serial == playlist_stage_active && db; }
 
-static bool export_source_current_locked(const library_export_source_t *source) {
-	return !source || (source->spec.valid && source->database_epoch == database_epoch &&
-		source->generation == generation[domain_of(source->spec.kind)]);
-}
+static bool export_source_current_locked(const library_export_source_t *source) { return !source || (source->spec.valid && source->database_epoch == database_epoch && source->generation == generation[domain_of(source->spec.kind)]); }
 
 static library_playlist_stage_t *playlist_stage_begin(unsigned epoch, const library_export_source_t *source, bool guard_namespace, unsigned namespace_revision) {
 	library_playlist_stage_t *stage = calloc(1, sizeof(*stage));
@@ -8716,8 +8568,7 @@ static library_playlist_stage_t *playlist_stage_begin(unsigned epoch, const libr
 	pthread_mutex_lock(&db_lock);
 	bool ok = epoch == database_epoch && export_source_current_locked(source) && !playlist_stage_active && db && sqlite3_get_autocommit(db) && (!guard_namespace || namespace_revision == generation[GEN_PLAYLISTS]);
 	if (ok)
-		ok = exec_quiet("DROP TABLE IF EXISTS " PLAYLIST_STAGE_TABLE) &&
-			 exec_quiet("CREATE TABLE " PLAYLIST_STAGE_TABLE "(idx INTEGER PRIMARY KEY,path TEXT,title TEXT,artist TEXT,seconds INT,present INT,mount INT)");
+		ok = exec_quiet("DROP TABLE IF EXISTS " PLAYLIST_STAGE_TABLE) && exec_quiet("CREATE TABLE " PLAYLIST_STAGE_TABLE "(idx INTEGER PRIMARY KEY,path TEXT,title TEXT,artist TEXT,seconds INT,present INT,mount INT)");
 	if (ok) {
 		if (++playlist_stage_serial == 0)
 			playlist_stage_serial++;
@@ -8776,12 +8627,7 @@ static bool playlist_stage_rows(library_playlist_stage_t *stage, const library_p
 			ok = false;
 			break;
 		}
-		ok = sqlite3_reset(stmt) == SQLITE_OK &&
-			 sqlite3_bind_text(stmt, 1, rows[i].path, -1, SQLITE_TRANSIENT) == SQLITE_OK &&
-			 sqlite3_bind_text(stmt, 2, rows[i].title, -1, SQLITE_TRANSIENT) == SQLITE_OK &&
-			 sqlite3_bind_text(stmt, 3, rows[i].artist, -1, SQLITE_TRANSIENT) == SQLITE_OK &&
-			 sqlite3_bind_int64(stmt, 4, rows[i].seconds) == SQLITE_OK &&
-			 sqlite3_bind_int(stmt, 5, rows[i].present ? 1 : 0) == SQLITE_OK;
+		ok = sqlite3_reset(stmt) == SQLITE_OK && sqlite3_bind_text(stmt, 1, rows[i].path, -1, SQLITE_TRANSIENT) == SQLITE_OK && sqlite3_bind_text(stmt, 2, rows[i].title, -1, SQLITE_TRANSIENT) == SQLITE_OK && sqlite3_bind_text(stmt, 3, rows[i].artist, -1, SQLITE_TRANSIENT) == SQLITE_OK && sqlite3_bind_int64(stmt, 4, rows[i].seconds) == SQLITE_OK && sqlite3_bind_int(stmt, 5, rows[i].present ? 1 : 0) == SQLITE_OK;
 		if (ok)
 			ok = sqlite3_step(stmt) == SQLITE_DONE;
 	}
@@ -8802,8 +8648,7 @@ bool library_playlist_stage_publish_receipt(library_playlist_stage_t *stage, con
 	if (receipt)
 		memset(receipt, 0, sizeof(*receipt));
 	char quoted[PLAYLIST_TABLE_MAX], sql[PLAYLIST_TABLE_MAX + 256];
-	if (!stage || stage->rows < 0 || (stage->rows == 0 && (!stage->guard_namespace || mode != LIBRARY_PLAYLIST_CREATE)) || !playlist_table(name, quoted, sizeof(quoted)) ||
-		(mode != LIBRARY_PLAYLIST_APPEND && mode != LIBRARY_PLAYLIST_CREATE && mode != LIBRARY_PLAYLIST_REPLACE))
+	if (!stage || stage->rows < 0 || (stage->rows == 0 && (!stage->guard_namespace || mode != LIBRARY_PLAYLIST_CREATE)) || !playlist_table(name, quoted, sizeof(quoted)) || (mode != LIBRARY_PLAYLIST_APPEND && mode != LIBRARY_PLAYLIST_CREATE && mode != LIBRARY_PLAYLIST_REPLACE))
 		return false;
 	pthread_mutex_lock(&db_lock);
 	char source_table[PLAYLIST_TABLE_MAX];
@@ -8847,9 +8692,7 @@ bool library_playlist_stage_publish_receipt(library_playlist_stage_t *stage, con
 	return ok;
 }
 
-bool library_playlist_stage_publish(library_playlist_stage_t *stage, const char *name, library_playlist_publish_t mode, const library_export_source_t *source) {
-	return library_playlist_stage_publish_receipt(stage, name, mode, source, NULL);
-}
+bool library_playlist_stage_publish(library_playlist_stage_t *stage, const char *name, library_playlist_publish_t mode, const library_export_source_t *source) { return library_playlist_stage_publish_receipt(stage, name, mode, source, NULL); }
 
 void library_playlist_stage_discard(library_playlist_stage_t *stage) {
 	if (!stage)
@@ -9166,8 +9009,7 @@ int library_playlist_count_get(const char *path, long mtime, long size) {
 	int tracks = -1;
 	pthread_mutex_lock(&db_lock);
 	sqlite3_stmt *stmt = NULL;
-	if (db && sqlite3_prepare_v2(db, "SELECT tracks FROM PLAYLIST_COUNTS WHERE path=? AND mtime=? AND size=?", -1,
-								 &stmt, NULL) == SQLITE_OK) {
+	if (db && sqlite3_prepare_v2(db, "SELECT tracks FROM PLAYLIST_COUNTS WHERE path=? AND mtime=? AND size=?", -1, &stmt, NULL) == SQLITE_OK) {
 		sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT);
 		sqlite3_bind_int64(stmt, 2, mtime);
 		sqlite3_bind_int64(stmt, 3, size);
@@ -9187,8 +9029,7 @@ bool library_playlist_count_is_verified(const char *path, long mtime, long size)
 	bool verified = false;
 	pthread_mutex_lock(&db_lock);
 	sqlite3_stmt *stmt = NULL;
-	if (db && sqlite3_prepare_v2(db, "SELECT 1 FROM PLAYLIST_COUNTS WHERE path=? AND mtime=? AND size=? AND mount=?",
-								 -1, &stmt, NULL) == SQLITE_OK) {
+	if (db && sqlite3_prepare_v2(db, "SELECT 1 FROM PLAYLIST_COUNTS WHERE path=? AND mtime=? AND size=? AND mount=?", -1, &stmt, NULL) == SQLITE_OK) {
 		sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT);
 		sqlite3_bind_int64(stmt, 2, mtime);
 		sqlite3_bind_int64(stmt, 3, size);
@@ -9206,9 +9047,7 @@ void library_playlist_count_save(const char *path, long mtime, long size, int tr
 	}
 	pthread_mutex_lock(&db_lock);
 	sqlite3_stmt *stmt = NULL;
-	if (db &&
-		sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO PLAYLIST_COUNTS(path,mtime,size,tracks,mount) VALUES(?,?,?,?,?)",
-						   -1, &stmt, NULL) == SQLITE_OK) {
+	if (db && sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO PLAYLIST_COUNTS(path,mtime,size,tracks,mount) VALUES(?,?,?,?,?)", -1, &stmt, NULL) == SQLITE_OK) {
 		sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT);
 		sqlite3_bind_int64(stmt, 2, mtime);
 		sqlite3_bind_int64(stmt, 3, size);
@@ -9242,8 +9081,7 @@ bool library_playback_state_load(char *path_out, size_t path_size, double *posit
 	bool found = false;
 	pthread_mutex_lock(&db_lock);
 	sqlite3_stmt *stmt = NULL;
-	if (db && sqlite3_prepare_v2(db, "SELECT path, position FROM PLAYBACK_STATE WHERE id=0", -1, &stmt,
-								 NULL) == SQLITE_OK) {
+	if (db && sqlite3_prepare_v2(db, "SELECT path, position FROM PLAYBACK_STATE WHERE id=0", -1, &stmt, NULL) == SQLITE_OK) {
 		if (sqlite3_step(stmt) == SQLITE_ROW) {
 			const unsigned char *path = sqlite3_column_text(stmt, 0);
 			if (path && path[0] && path_out) {
@@ -9281,8 +9119,7 @@ void library_queue_save(const char *const *paths, int count, int current_index, 
 	sqlite3_exec(db, "DELETE FROM PLAYBACK_QUEUE_QUERY", NULL, NULL, NULL);
 
 	sqlite3_stmt *stmt = NULL;
-	if (paths && count > 0 &&
-		sqlite3_prepare_v2(db, "INSERT INTO PLAYBACK_QUEUE(idx,path) VALUES(?,?)", -1, &stmt, NULL) == SQLITE_OK) {
+	if (paths && count > 0 && sqlite3_prepare_v2(db, "INSERT INTO PLAYBACK_QUEUE(idx,path) VALUES(?,?)", -1, &stmt, NULL) == SQLITE_OK) {
 		for (int i = 0; i < count; i++) {
 			if (!paths[i] || !paths[i][0]) {
 				continue;
@@ -9318,8 +9155,7 @@ void library_queue_save_album(const char *album) {
 	if (db) {
 		if (album && album[0]) {
 			sqlite3_stmt *stmt = NULL;
-			if (sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO PLAYBACK_QUEUE_ALBUM(id,album) VALUES(0,?)", -1, &stmt,
-								   NULL) == SQLITE_OK) {
+			if (sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO PLAYBACK_QUEUE_ALBUM(id,album) VALUES(0,?)", -1, &stmt, NULL) == SQLITE_OK) {
 				sqlite3_bind_text(stmt, 1, album, -1, SQLITE_TRANSIENT);
 				sqlite3_step(stmt);
 				sqlite3_finalize(stmt);
@@ -9339,8 +9175,7 @@ bool library_queue_load_album(char *out, int size) {
 
 	pthread_mutex_lock(&db_lock);
 	sqlite3_stmt *stmt = NULL;
-	if (db && sqlite3_prepare_v2(db, "SELECT album FROM PLAYBACK_QUEUE_ALBUM WHERE id=0", -1, &stmt, NULL) ==
-				  SQLITE_OK) {
+	if (db && sqlite3_prepare_v2(db, "SELECT album FROM PLAYBACK_QUEUE_ALBUM WHERE id=0", -1, &stmt, NULL) == SQLITE_OK) {
 		if (sqlite3_step(stmt) == SQLITE_ROW) {
 			const unsigned char *text = sqlite3_column_text(stmt, 0);
 			if (text) {
@@ -9356,8 +9191,7 @@ bool library_queue_load_album(char *out, int size) {
 void library_queue_save_index(int current_index) {
 	pthread_mutex_lock(&db_lock);
 	sqlite3_stmt *stmt = NULL;
-	if (db && sqlite3_prepare_v2(db, "UPDATE PLAYBACK_QUEUE_STATE SET pos=?, updated_at=strftime('%s','now') WHERE id=0",
-								 -1, &stmt, NULL) == SQLITE_OK) {
+	if (db && sqlite3_prepare_v2(db, "UPDATE PLAYBACK_QUEUE_STATE SET pos=?, updated_at=strftime('%s','now') WHERE id=0", -1, &stmt, NULL) == SQLITE_OK) {
 		sqlite3_bind_int(stmt, 1, current_index);
 		sqlite3_step(stmt);
 		sqlite3_finalize(stmt);
@@ -9418,8 +9252,7 @@ int library_queue_load(char ***paths_out, int *index_out, bool *custom_out) {
 	}
 
 	stmt = NULL;
-	if (sqlite3_prepare_v2(db, "SELECT pos, custom FROM PLAYBACK_QUEUE_STATE WHERE id=0", -1, &stmt, NULL) ==
-		SQLITE_OK) {
+	if (sqlite3_prepare_v2(db, "SELECT pos, custom FROM PLAYBACK_QUEUE_STATE WHERE id=0", -1, &stmt, NULL) == SQLITE_OK) {
 		if (sqlite3_step(stmt) == SQLITE_ROW) {
 			if (index_out) {
 				*index_out = sqlite3_column_int(stmt, 0);
@@ -9576,10 +9409,9 @@ int library_search(const char *query, int per_category, library_search_cb_t cb, 
 		// The album's first track rides along as the `path`, so the search page
 		// can load its artwork the same way the album list does.
 		if (sqlite3_prepare_v2(db,
-							   "SELECT " ALBUM_GROUP_VALUE ", " ALBUM_GROUP_FIRST("m.path")
-							   " FROM ALBUM_GROUP_TABLE g WHERE (album, album_key) IN (SELECT album, album_key FROM MEDIA_TABLE"
-							   " WHERE searchmatch(COALESCE(searchkey, searchkey(name, artist, album, album_artist)), ?1, 1))"
-							   " ORDER BY album LIMIT ?2",
+							   "SELECT " ALBUM_GROUP_VALUE ", " ALBUM_GROUP_FIRST("m.path") " FROM ALBUM_GROUP_TABLE g WHERE (album, album_key) IN (SELECT album, album_key FROM MEDIA_TABLE"
+																							" WHERE searchmatch(COALESCE(searchkey, searchkey(name, artist, album, album_artist)), ?1, 1))"
+																							" ORDER BY album LIMIT ?2",
 							   -1, &stmt, NULL) == SQLITE_OK) {
 			sqlite3_bind_text(stmt, 1, like, -1, SQLITE_TRANSIENT);
 			sqlite3_bind_int(stmt, 2, per_category);

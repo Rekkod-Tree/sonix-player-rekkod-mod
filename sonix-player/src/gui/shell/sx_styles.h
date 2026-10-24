@@ -15,30 +15,30 @@
 // every palette change (sx_styles_apply). UI thread only.
 // ---------------------------------------------------------------------------
 
-extern lv_style_t sx_style_page;	   // bg: the page
-extern lv_style_t sx_style_surface;	   // bg: a card, the sheet, the playing row
-extern lv_style_t sx_style_press;	   // bg: under a finger (add with LV_STATE_PRESSED)
-extern lv_style_t sx_style_active;	   // bg: 16 % accent in surface, "on now"
-extern lv_style_t sx_style_text;	   // text: primary
-extern lv_style_t sx_style_text2;	   // text: secondary
+extern lv_style_t sx_style_page;	// bg: the page
+extern lv_style_t sx_style_surface; // bg: a card, the sheet, the playing row
+extern lv_style_t sx_style_press;	// bg: under a finger (add with LV_STATE_PRESSED)
+extern lv_style_t sx_style_active;	// bg: 16 % accent in surface, "on now"
+extern lv_style_t sx_style_text;	// text: primary
+extern lv_style_t sx_style_text2;	// text: secondary
 // Streaming search hints; the original family keeps the LVGL default.
 extern lv_style_t sx_style_search_placeholder;
 extern lv_style_t sx_style_album_text; // theme text, or white on the optional album tint
 extern lv_style_t sx_style_album_icon;
 extern lv_style_t sx_style_text_accent; // text: the accent
-extern lv_style_t sx_style_accent;	   // bg accent, text and glyphs in on_accent
+extern lv_style_t sx_style_accent;		// bg accent, text and glyphs in on_accent
 extern lv_style_t sx_style_accent_press;
-extern lv_style_t sx_style_icon;	   // image recolour: primary text
-extern lv_style_t sx_style_icon2;	   // image recolour: secondary text
-extern lv_style_t sx_style_icon_accent; // image recolour: the accent
+extern lv_style_t sx_style_icon;		   // image recolour: primary text
+extern lv_style_t sx_style_icon2;		   // image recolour: secondary text
+extern lv_style_t sx_style_icon_accent;	   // image recolour: the accent
 extern lv_style_t sx_style_icon_on_accent; // image recolour: the ink on an accent fill (dark on a pale accent)
-extern lv_style_t sx_style_hairline;   // bg: the 1 px line over a sheet or the mini player
-extern lv_style_t sx_style_swipe_end;  // bg + text: the underlay of a row pulled left
-extern lv_style_t sx_style_cover_tone; // bg: the plaque before a thumbnail, page hue
-extern lv_style_t sx_style_mini;	   // bg mini_bg, text white: the mini player
-extern lv_style_t sx_style_mini_tone;  // bg: the mini player's cover plaque
-extern lv_style_t sx_style_np_accent;  // bg: the accent of the always-dark surfaces
-extern lv_style_t sx_style_star_on;	   // image recolour: a set star
+extern lv_style_t sx_style_hairline;	   // bg: a flat divider or drag handle
+extern lv_style_t sx_style_swipe_end;	   // bg + text: the underlay of a row pulled left
+extern lv_style_t sx_style_cover_tone;	   // bg: the plaque before a thumbnail, page hue
+extern lv_style_t sx_style_mini;		   // bg mini_bg, text white: the mini player
+extern lv_style_t sx_style_mini_tone;	   // bg: the mini player's cover plaque
+extern lv_style_t sx_style_np_accent;	   // bg: the accent of the always-dark surfaces
+extern lv_style_t sx_style_star_on;		   // image recolour: a set star
 
 // No border, no shadow, no padding, no radius, transparent, no scrollbar: the
 // starting point for every plain container a component builds.

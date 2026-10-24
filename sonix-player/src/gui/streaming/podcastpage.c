@@ -4111,3 +4111,14 @@ void podcastpage_init(gui_config_t *cfg) {
 
 	lv_obj_add_event_cb(podcast_screen, page_loaded_cb, LV_EVENT_SCREEN_LOADED, NULL);
 }
+
+
+void podcastpage_search_results_kind(const char *query, int kind) {
+	(void)kind;
+	gui_init_rest();
+	if (!podcast_configured() || !query || !query[0])
+		return;
+	job_t job = {.kind = JOB_SEARCH};
+	snprintf(job.text, sizeof(job.text), "%s", query);
+	run(&job);
+}

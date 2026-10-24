@@ -89,8 +89,7 @@ static void oklch_to_srgb(float L, float C, float h_deg, float rgb[3]) {
 uint16_t sx_oklch_to_565(float L, float C, float h_deg) {
 	float rgb[3];
 	oklch_to_srgb(L, C, h_deg, rgb);
-	return (uint16_t)(((uint16_t)(rgb[0] * 31.0f + 0.5f) << 11) | ((uint16_t)(rgb[1] * 63.0f + 0.5f) << 5) |
-					  (uint16_t)(rgb[2] * 31.0f + 0.5f));
+	return (uint16_t)(((uint16_t)(rgb[0] * 31.0f + 0.5f) << 11) | ((uint16_t)(rgb[1] * 63.0f + 0.5f) << 5) | (uint16_t)(rgb[2] * 31.0f + 0.5f));
 }
 
 // Widened from RGB565 rather than rounded from the float: what is on screen is
@@ -99,17 +98,14 @@ uint16_t sx_oklch_to_565(float L, float C, float h_deg) {
 lv_color_t sx_oklch(float L, float C, float h_deg) {
 	uint16_t c = sx_oklch_to_565(L, C, h_deg);
 	uint8_t r5 = (uint8_t)(c >> 11), g6 = (uint8_t)((c >> 5) & 0x3f), b5 = (uint8_t)(c & 0x1f);
-	return lv_color_make((uint8_t)((r5 << 3) | (r5 >> 2)), (uint8_t)((g6 << 2) | (g6 >> 4)),
-						 (uint8_t)((b5 << 3) | (b5 >> 2)));
+	return lv_color_make((uint8_t)((r5 << 3) | (r5 >> 2)), (uint8_t)((g6 << 2) | (g6 >> 4)), (uint8_t)((b5 << 3) | (b5 >> 2)));
 }
 
 lv_color_t sx_tone(sx_lc_t lc, float h_deg) { return sx_oklch(lc.L, lc.C * chroma_scale, h_deg); }
 
 lv_color_t sx_palette_cover_accent(void) { return sx_tone(cfg_dark ? SX_T_D_ACCENT : SX_T_L_ACCENT, pal.hue); }
 
-lv_color_t sx_palette_cover_on_accent(void) {
-	return cfg_dark ? sx_tone(SX_T_D_ON_ACC, pal.hue) : lv_color_white();
-}
+lv_color_t sx_palette_cover_on_accent(void) { return cfg_dark ? sx_tone(SX_T_D_ON_ACC, pal.hue) : lv_color_white(); }
 
 lv_color_t sx_mix(lv_color_t a, lv_color_t b, uint8_t pct) {
 	if (pct > 100) {
@@ -341,6 +337,8 @@ static void family_recompute(void) {
 	pal.np_accent = family_readable(family_primary(play_hue, play_chroma), playing, 2, 4.6f);
 	lv_color_t white = lv_color_white();
 	pal.np_ink = family_readable(family_primary(play_hue, play_chroma), &white, 1, 4.6f);
+	pal.mini_action = family_primary(play_hue, play_chroma);
+	pal.mini_on_action = family_ink(pal.mini_action);
 	pal.album_text = pal.text;
 	float placeholder_hue = play_placeholder_known ? play_placeholder_hue : DEFAULT_HUE;
 	pal.mini_cover_tone = cfg_force_color ? placeholder_legacy(placeholder_hue) : family_placeholder_for(placeholder_hue, play_hue);
@@ -379,9 +377,39 @@ static lv_color_t family_placeholder_for(float hue, float context_hue) {
 }
 static lv_color_t family_placeholder(float hue) { return family_placeholder_for(hue, pal.hue); }
 
+static void chrome_edges(void) {
+	pal.edge_frame = cfg_family == 4 || cfg_family == 5;
+	pal.surface_edge = pal.hairline;
+	pal.surface_edge_opa = pal.hairline_opa;
+	pal.playback_edge = pal.mini_ink;
+	lv_opa_t playback_opa = cfg_family ? LV_OPA_20 : pal.hairline_opa;
+	if (pal.edge_frame) {
+		pal.surface_edge = sx_mix(pal.panel_text2, pal.panel, 60);
+		pal.playback_edge = sx_mix(pal.mini_text2, pal.mini_bg, 60);
+		pal.surface_edge_opa = playback_opa = LV_OPA_COVER;
+	} else if (cfg_family && cfg_family != 3) {
+		// Keep a quiet edge only where adjacent fills are hard to distinguish.
+		// This is a layer-separation choice, not a text contrast requirement.
+		if (contrast(pal.surface, pal.bg) >= 1.25f)
+			pal.surface_edge_opa = LV_OPA_TRANSP;
+		if (contrast(pal.mini_bg, pal.bg) >= 1.25f)
+			playback_opa = LV_OPA_TRANSP;
+	}
+	pal.mini_edge_opa = pal.shade_edge_opa = pal.floating_edge_opa = playback_opa;
+	if (cfg_family == 3) {
+		// LCD mini/floating pills already separate by fill. A drawer can lie
+		// over same-colored cards, so its outer boundary remains distinct.
+		pal.mini_edge_opa = pal.floating_edge_opa = LV_OPA_TRANSP;
+	} else if (!cfg_family) {
+		// The large Graphite shade needs a softer edge than the small mini.
+		pal.shade_edge_opa = (playback_opa + 1) / 2;
+	}
+}
+
 static void recompute(void) {
 	if (cfg_family) {
 		family_recompute();
+		chrome_edges();
 		return;
 	}
 	float hue = pushed ? pushed_hue : play_hue;
@@ -474,8 +502,16 @@ static void recompute(void) {
 	pal.panel_action = pal.accent_text;
 	pal.album_text = pal.tinted ? lv_color_white() : pal.text;
 	pal.mini_text2 = sx_mix(pal.mini_ink, pal.mini_bg, 85);
+	// Keep the chosen primary vivid; playback chrome shares a quiet surface.
+	// These roles stay bound to playback, even while browsing another album.
+	pal.mini_action = pal.mini_bg;
+	pal.mini_on_action = pal.mini_ink;
+	pal.mini_bg = cfg_tint && cfg_dark ? sx_tone(SX_T_D_SURFACE, play_hue) : pal.surface;
+	pal.mini_ink = pal.text;
+	pal.mini_text2 = pal.np_text2;
 	// sx_tone() as called from outside works at the page's scale.
 	chroma_scale = page_scale;
+	chrome_edges();
 }
 
 void sx_palette_configure(bool dark, int accent, lv_color_t preset, bool tint) {
@@ -688,8 +724,7 @@ void sx_gradient_destroy(lv_draw_buf_t *strip) {
 // clips (the masked path), and blends whole tiles up to the clip and no
 // further (the plain one), so either alone would draw too much -- the second
 // would paint the strip square over the corners.
-static void gradient_draw_part(lv_layer_t *layer, const lv_draw_buf_t *strip, const lv_area_t *obj_area,
-							   const lv_area_t *part, int32_t radius, lv_opa_t opa) {
+static void gradient_draw_part(lv_layer_t *layer, const lv_draw_buf_t *strip, const lv_area_t *obj_area, const lv_area_t *part, int32_t radius, lv_opa_t opa) {
 	lv_area_t clipped;
 	if (!lv_area_intersect(&clipped, part, &layer->_clip_area)) {
 		return;
@@ -705,6 +740,57 @@ static void gradient_draw_part(lv_layer_t *layer, const lv_draw_buf_t *strip, co
 	layer->_clip_area = clipped;
 	lv_draw_image(layer, &dsc, &clipped);
 	layer->_clip_area = saved_clip;
+}
+
+static void chrome_edge_draw(lv_event_t *e) {
+	sx_chrome_edge_t edge = (sx_chrome_edge_t)(intptr_t)lv_event_get_user_data(e);
+	lv_obj_t *obj = lv_event_get_current_target_obj(e);
+	lv_color_t color = edge == SX_CHROME_SHEET ? pal.surface_edge : pal.playback_edge;
+	lv_opa_t opa = edge == SX_CHROME_SHEET ? pal.surface_edge_opa : edge == SX_CHROME_MINI ? pal.mini_edge_opa : edge == SX_CHROME_SHADE ? pal.shade_edge_opa : pal.floating_edge_opa;
+	if (edge == SX_CHROME_TOAST) {
+		if (!pal.edge_frame)
+			return; // The ordinary contrasting notice already has its own boundary.
+		color = sx_mix(lv_obj_get_style_text_color(obj, 0), lv_obj_get_style_bg_color(obj, 0), 60);
+		opa = LV_OPA_COVER;
+	}
+	opa = LV_OPA_MIX2(opa, lv_obj_get_style_opa_recursive(obj, LV_PART_MAIN));
+	if (opa <= LV_OPA_MIN)
+		return;
+	lv_area_t area;
+	lv_obj_get_coords(obj, &area);
+	int32_t r = lv_obj_get_style_radius(obj, LV_PART_MAIN);
+	r = LV_MIN(r, LV_MIN(lv_area_get_width(&area), lv_area_get_height(&area)) / 2);
+	lv_area_t band = area;
+	if (!pal.edge_frame && edge != SX_CHROME_FLOATING) {
+		if (edge == SX_CHROME_SHADE)
+			band.y1 = area.y2 - r;
+		else
+			band.y2 = area.y1 + r;
+	}
+	lv_layer_t *layer = lv_event_get_layer(e);
+	lv_area_t clipped;
+	if (!lv_area_intersect(&clipped, &band, &layer->_clip_area))
+		return;
+	lv_draw_rect_dsc_t dsc;
+	lv_draw_rect_dsc_init(&dsc);
+	dsc.bg_opa = LV_OPA_TRANSP;
+	dsc.border_width = 1;
+	dsc.border_color = color;
+	dsc.border_opa = opa;
+	dsc.radius = r;
+	// A top-only LVGL border does not trace the complete quarter circles.
+	// Reuse the rounded-border renderer, clipped to the actual edge band.
+	lv_area_t saved_clip = layer->_clip_area;
+	layer->_clip_area = clipped;
+	lv_draw_rect(layer, &dsc, &area);
+	layer->_clip_area = saved_clip;
+}
+
+void sx_chrome_edge(lv_obj_t *obj, sx_chrome_edge_t edge) {
+	if (!obj)
+		return;
+	lv_obj_remove_event_cb(obj, chrome_edge_draw);
+	lv_obj_add_event_cb(obj, chrome_edge_draw, LV_EVENT_DRAW_POST, (void *)(intptr_t)edge);
 }
 
 static void gradient_paint_cb(lv_event_t *e) {

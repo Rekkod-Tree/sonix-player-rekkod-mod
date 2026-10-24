@@ -53,8 +53,11 @@ typedef struct {
 	lv_color_t swipe_end;  // the underlay of a row pulled left ("add to the end")
 	lv_color_t cover_tone; // the plaque a row draws until its thumbnail exists, at the page hue
 	lv_color_t star_on;	   // a set star on this theme
-	lv_color_t hairline;   // the 1 px line over a sheet or the mini player...
-	lv_opa_t hairline_opa; // ...and how strong
+	lv_color_t hairline;   // Flat separators and handles.
+	lv_opa_t hairline_opa;
+	lv_color_t surface_edge, playback_edge;
+	lv_opa_t surface_edge_opa, mini_edge_opa, shade_edge_opa, floating_edge_opa;
+	bool edge_frame; // Terminal families use complete frames instead of highlights.
 
 	// Always dark, whatever the theme, at the playing track's hue: the player,
 	// the mini player.
@@ -65,6 +68,7 @@ typedef struct {
 	lv_color_t mini_bg;
 	lv_color_t mini_ink;
 	lv_color_t mini_text2;
+	lv_color_t mini_action, mini_on_action;
 	lv_color_t mini_cover_tone;
 
 	// Foregrounds belong to the panel when its polarity differs from the page.
@@ -185,6 +189,13 @@ void sx_gradient_destroy(lv_draw_buf_t *strip);
 // nothing, and so does a transparent bg_opa or bg_image_opa. Set the object's
 // bg_color as usual (what the strip is drawn on). UI thread only.
 void sx_gradient_paint(lv_obj_t *obj, lv_draw_buf_t *const *slot);
+
+// Palette-aware outer edges, painted without changing layout or hit targets.
+// LCD keeps mini/floating chrome plain; overlays retain a quiet boundary.
+// Graphite highlights the curved edge; terminals use complete frames.
+// Other families omit edges on contrasting surfaces.
+typedef enum { SX_CHROME_SHEET, SX_CHROME_MINI, SX_CHROME_SHADE, SX_CHROME_FLOATING, SX_CHROME_TOAST } sx_chrome_edge_t;
+void sx_chrome_edge(lv_obj_t *obj, sx_chrome_edge_t edge);
 
 // ---------------------------------------------------------------------------
 // For theme.c only

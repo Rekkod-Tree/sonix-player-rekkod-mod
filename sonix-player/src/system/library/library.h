@@ -42,7 +42,7 @@ int library_track_count(void);
 // own account; the Music page offers it. 0 when the index has them all, and
 // with no index open.
 #define LIBRARY_INDEX_COMPILATIONS (1u << 0) // compilations without an album artist kept together
-#define LIBRARY_INDEX_DURATIONS (1u << 1)	  // track lengths
+#define LIBRARY_INDEX_DURATIONS (1u << 1)	 // track lengths
 // Every album's colour and thumbnails (covertone.h). Unlike the two above it
 // does not wait for a scan: the background job makes them on an index that
 // lacks them, and the bit is written when it has been through every album,
@@ -346,8 +346,7 @@ typedef enum {
 							   // tracks: by the track's artist, then record
 							   // by name, then disc order
 } library_order_t;
-int library_for_each_ordered(library_list_t kind, library_filter_t filter, const char *value, library_order_t order,
-							 library_row_cb cb, void *user);
+int library_for_each_ordered(library_list_t kind, library_filter_t filter, const char *value, library_order_t order, library_row_cb cb, void *user);
 
 // Looks a track's display title up by its file path (the scan stored it).
 // False when the file is not in the index; `out` untouched then.
@@ -436,8 +435,8 @@ typedef struct {
 	char artist[256];
 	char genre[128];
 	int year;
-	int tracks;			// how many tracks the album has
-	uint64_t length_ms; // their lengths added up; 0 when none of them is known
+	int tracks;			 // how many tracks the album has
+	uint64_t length_ms;	 // their lengths added up; 0 when none of them is known
 	bool length_partial; // some track has no length on record: the sum is short
 } library_album_info_t;
 bool library_album_info(const char *album, library_album_info_t *out);
@@ -487,8 +486,7 @@ bool library_fav_toggle(const char *path, const char *name, const char *artist);
 // play has gone on long enough to count (playcount.h).
 void library_note_play(const char *path);
 
-// The history of what the queue has played: one entry each time a track was
-// left, finished or skipped (playhistory.h), oldest first. Only the latest
+// Confirmed listening events (playhistory.h), oldest first. Only the latest
 // LIBRARY_HISTORY_MAX are kept.
 #define LIBRARY_HISTORY_MAX 1000
 
@@ -499,16 +497,27 @@ typedef struct {
 
 // Adds an entry at the end, with the title and artist it is to be shown by.
 void library_history_add(const char *path, const char *name, const char *artist, long long played_at);
+// >0 stored id, -1 foreign transaction (defer), 0 stale/offline/write failure.
+long long library_history_record_at(unsigned epoch, const char *path, const char *name, const char *artist, long long played_at);
+// 1 updated, -1 defer, 0 stale/offline/write failure. Never joins a transaction.
+int library_history_update_at(unsigned epoch, long long id, const char *path, const char *name, const char *artist);
 
 // Every entry, oldest first, in an array the caller frees. Returns how many.
 int library_history_items(library_history_item_t **out);
 
 // One entry's file and title. False when it is not there.
 bool library_history_entry(long long id, char *path, size_t path_size, char *name, size_t name_size, char *artist, size_t artist_size);
+bool library_history_entry_at(unsigned epoch, long long id, char *path, size_t path_size, char *name, size_t name_size, char *artist, size_t artist_size);
 
 // The id of the newest entry, 0 while there is none: it only grows, so it
 // changes whenever an entry is added.
 long long library_history_revision(void);
+
+// Small versioned GUI playback routes, scoped to this card's database.
+// Only the fixed service names are accepted, at most one 2048-byte row each.
+// store: 1 saved, -1 foreign transaction (defer), 0 stale/offline/failure.
+int library_place_store_at(unsigned epoch, const char *source, const void *route, size_t size);
+bool library_place_read_at(unsigned epoch, const char *source, void *route, size_t size);
 
 bool library_fav_contains(const char *path);
 
@@ -605,10 +614,8 @@ typedef struct library_index library_index_t;
 // Builds a handle over the same list library_for_each_ordered() would stream.
 // `desc` reads the list backwards without asking the database for a second
 // sort. NULL when the list cannot be built.
-library_index_t *library_index_open(library_list_t kind, library_filter_t filter, const char *value,
-									library_order_t order, bool desc);
+library_index_t *library_index_open(library_list_t kind, library_filter_t filter, const char *value, library_order_t order, bool desc);
 void library_index_close(library_index_t *ix);
-
 
 int library_index_count(const library_index_t *ix);
 
@@ -891,8 +898,7 @@ bool library_queue_load_album(char *out, int size);
 // `extra_slots[i]` is where extra[i] sits in the playing order, which is what
 // puts it back where it was rather than in front of playback. Pass NULL to
 // store no slots.
-void library_queue_save_query(const library_index_spec_t *spec, int position, const char *const *extra,
-							  const int *extra_slots, int extra_count);
+void library_queue_save_query(const library_index_spec_t *spec, int position, const char *const *extra, const int *extra_slots, int extra_count);
 bool library_queue_load_query(library_index_spec_t *spec, int *position_out);
 
 // The rows beside a saved query -- what "add to queue" put into a library list

@@ -98,9 +98,9 @@ void player_key_next(void);
 void player_key_prev(void);
 // The side buttons' remappable extras (keymap.h). Each says what it did in a
 // toast, since the player is usually in a pocket when they are pressed.
-void player_key_favourite(void);   // the star, add only: never takes one off
-void player_key_next_album(void);  // device_state_next_album()
-void player_key_cycle_mode(void);  // the repeat/shuffle button
+void player_key_favourite(void);  // the star, add only: never takes one off
+void player_key_next_album(void); // device_state_next_album()
+void player_key_cycle_mode(void); // the repeat/shuffle button
 
 // What the player's on-screen prev/next buttons do: seconds-sized skips on an
 // audiobook or podcast, previous/next track otherwise. The control centre
@@ -132,13 +132,11 @@ void player_restore_track(const char *filepath, double position);
 // The boot-time restore of a queue that was a library list: the handle takes
 // the place of the list of paths, so next/prev work from the first press
 // instead of landing back on the remembered track. Takes ownership of `ix`.
-void player_restore_index(library_index_t *ix, int start_index, const char *const *extra, const int *extra_slots,
-						  int extra_count, const char *filepath, double position);
+void player_restore_index(library_index_t *ix, int start_index, const char *const *extra, const int *extra_slots, int extra_count, const char *filepath, double position);
 
 // The same for a queue saved as a plain list of paths. `custom` restores the
 // queue's own custom flag, which the list of paths on its own cannot carry.
-void player_restore_list(const char *const *list, int count, int start_index, bool custom, const char *filepath,
-						 double position);
+void player_restore_list(const char *const *list, int count, int start_index, bool custom, const char *filepath, double position);
 
 // The loaded track's artwork, already decoded and scaled by the player: the
 // cover itself, and the blurred copy the controls are drawn on. NULL when the
@@ -182,6 +180,16 @@ bool player_statusbar_always(void);
 void player_queue_changed(void);
 // Refresh only mini-specific artwork demand after its display mode changes.
 void player_mini_mode_changed(void);
+
+// A preview owns a fixed track/chapter range, not the decoder or its position.
+// Only commit seeks; an invalidated preview never acts on a replacement track.
+typedef struct {
+	double position, start, length, total;
+	unsigned revision;
+} player_mini_seek_t;
+bool player_mini_seek_begin(player_mini_seek_t *preview);
+bool player_mini_seek_valid(const player_mini_seek_t *preview);
+bool player_mini_seek_commit(const player_mini_seek_t *preview, double position);
 
 // What plays outside the queue (the handoff's `ext`): a station, a book, a
 // phone over AirPlay, DLNA or the Bluetooth receiver. True with its title in

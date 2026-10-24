@@ -2,10 +2,16 @@
 #include "bookresume.h"
 #include "icons.h"
 #include "morepage.h"
+#include "playbackplace.h"
+#include "settingsrow.h"
 #include "src/gui/library/audiobooks.h"
+#include "src/gui/library/browser.h"
 #include "src/gui/library/filespage.h"
+#include "src/gui/library/medialist.h"
 #include "src/gui/library/music.h"
 #include "src/gui/library/search.h"
+#include "src/gui/library/searchall.h"
+#include "src/gui/library/searchsource.h"
 #include "src/gui/library/shufflecard.h"
 #include "src/gui/nowplaying/coverflow.h"
 #include "src/gui/nowplaying/player.h"
@@ -15,10 +21,9 @@
 #include "src/gui/streaming/yandexpage.h"
 #include "switcher.h"
 #include "sx_sheet.h"
-#include "settingsrow.h"
 #include "sx_styles.h"
-#include "touch.h"
 #include "toast.h"
+#include "touch.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -47,7 +52,10 @@ static int last_search_scope = -1;
 static struct {
 	home_item_t source;
 	lv_obj_t *screen;
-} search_inputs[3];
+	lv_obj_t *field;
+	lv_obj_t *title;
+} search_inputs[SEARCH_SOURCE_MAX + 2];
+static char shared_search_query[256];
 static int search_input_count;
 static const char *ids[] = {"music", "streaming", "networks", "audiobooks", "settings", "continue_book", "tidal", "qobuz", "radio", "podcasts", "subsonic", "yandex", "zvuk", "music_all", "music_albums", "music_artists", "music_album_artists", "music_genres", "music_years", "music_favourites", "music_most_played", "music_recent_added", "music_recent_played", "music_playlists", "music_browse", "search", "files", "yandex_wave", "yandex_liked", "spotify"};
 static const char *tags[] = {"music", "streaming", "wireless", "audiobooks", "settings", "home_resume_book", "tidal", "qobuz", "radio", "podcasts", "subsonic", "yandex", "zvuk", "music_all_tracks", "albums", "artists", "music_album_artists", "music_genres", "music_year", "favourites", "music_most_played", "music_recently_added", "music_recently_played", "playlists", "music_browse", "home_search", "file_explorer", "yandex_my_wave", "yandex_liked", "spotify"};
@@ -131,6 +139,17 @@ static void music_description(char *text, size_t size) {
 		snprintf(text, size, "%s", tr("home_card_unavailable"));
 	else
 		shufflecard_tracks_description(text, size);
+	if (gui_card_available() && !switcher_browse_description("music", text, size))
+		playbackplace_description("music", text, size);
+}
+
+static void open_music_place(void) {
+	if (switcher_browse_open("music"))
+		return;
+	// Keep the ordinary Music section one visible Back away from its source.
+	switch_screen(music_screen);
+	if (!browser_open_playback_place())
+		medialist_open_playback_place();
 }
 static void books_description(char *text, size_t size) {
 	if (!gui_card_available())
@@ -139,6 +158,7 @@ static void books_description(char *text, size_t size) {
 		snprintf(text, size, tr("home_books_n"), audiobookdb_count());
 }
 static int drawn_network_state = -1;
+static unsigned drawn_place_revision;
 static int network_state(void) {
 	wifi_status_t wifi;
 	wifi_get_status(&wifi);
@@ -155,10 +175,12 @@ void main_menu_poll_network(void) {
 	if (!screen || (screen != main_menu_screen && screen != morepage_screen))
 		return;
 	int current = network_state();
-	if (current == drawn_network_state)
+	unsigned place_revision = playbackplace_revision();
+	if (current == drawn_network_state && place_revision == drawn_place_revision)
 		return;
 	// Update even if this particular grid does not contain the network tile.
 	drawn_network_state = current;
+	drawn_place_revision = place_revision;
 	lv_obj_send_event(screen, LV_EVENT_REFRESH, NULL);
 }
 static void yandex_description(char *text, size_t size) { snprintf(text, size, "%s", tr("yandex")); }
@@ -184,7 +206,7 @@ bool main_menu_get_entry(home_item_t item, grid_entry_t *out) {
 	*out = (grid_entry_t){tags[item], icons[item], NULL, NULL, NULL};
 	switch (item) {
 	case HOME_MUSIC:
-		out->target = &music_screen;
+		out->action = open_music_place;
 		out->subtitle = music_description;
 		break;
 	case HOME_STREAMING:
@@ -370,58 +392,57 @@ static bool search_scope_is_input(lv_obj_t *screen) {
 
 static void search_scope_action(void *user) {
 	home_item_t source = (home_item_t)(intptr_t)user;
-	if (source != HOME_MUSIC && source != HOME_YANDEX && source != HOME_ZVUK)
+	const search_source_t *delegate = search_source_home(source);
+	if (source != HOME_SEARCH && source != HOME_MUSIC && (!delegate || !delegate->ready()))
 		return;
-	if (source != HOME_MUSIC && !main_menu_available(source))
-		return;
-	lv_obj_t *target = search_scope_screen(source);
-	bool ready = source == HOME_MUSIC || (source == HOME_YANDEX && yandex_logged_in());
-#ifdef SONIX_ZVUK
-	ready = ready || (source == HOME_ZVUK && zvuk_logged_in());
-#endif
-	if (target && ready && search_scope_is_input(lv_screen_active())) {
-		// Sources are alternatives within one search, not steps in its back-stack.
-		// Keep the original opener and each source's own query/caret untouched.
-		last_search_scope = source;
-		if (target != lv_screen_active())
-			switch_screen_no_history(target);
-		return;
-	}
+	bool replace = search_scope_is_input(lv_screen_active());
 	last_search_scope = source;
-	if (source == HOME_YANDEX)
-		yandexpage_search_open();
-#ifdef SONIX_ZVUK
-	else if (source == HOME_ZVUK)
-		zvukpage_search_open();
-#endif
-	else
-		search_open();
+	if (source == HOME_MUSIC) {
+		lv_obj_t *target = search_scope_screen(source);
+		if (target && replace)
+			switch_screen_no_history(target);
+		else
+			search_open();
+	} else
+		searchall_open_source(page_cfg, source, replace);
 }
 static void search_scope_choose(void) {
 	gui_init_rest();
-	sx_sheet_item_t items[3] = {{.label = tr("home_search_card"), .icon = &icon_menu_music, .action = search_scope_action, .user = (void *)(intptr_t)HOME_MUSIC}};
-	int n = 1;
-	if (main_menu_available(HOME_YANDEX))
-		items[n++] = (sx_sheet_item_t){.label = tr("yandex"), .icon = main_menu_icon(HOME_YANDEX), .action = search_scope_action, .user = (void *)(intptr_t)HOME_YANDEX};
-#ifdef SONIX_ZVUK
-	if (main_menu_available(HOME_ZVUK))
-		items[n++] = (sx_sheet_item_t){.label = tr("zvuk"), .icon = main_menu_icon(HOME_ZVUK), .action = search_scope_action, .user = (void *)(intptr_t)HOME_ZVUK};
-#endif
+	sx_sheet_item_t items[SEARCH_SOURCE_MAX + 2] = {{.label = tr("search_everywhere"), .icon = &icon_search, .action = search_scope_action, .user = (void *)(intptr_t)HOME_SEARCH}, {.label = tr("home_search_card"), .icon = &icon_menu_music, .action = search_scope_action, .user = (void *)(intptr_t)HOME_MUSIC}};
+	int n = 2;
+	for (int i = 0; i < search_source_count(); i++) {
+		const search_source_t *source = search_source_at(i);
+		if (source->ready())
+			items[n++] = (sx_sheet_item_t){.label = tr(source->name), .icon = main_menu_icon(source->home), .action = search_scope_action, .user = (void *)(intptr_t)source->home};
+	}
 	sx_sheet_menu(tr("home_search"), NULL, items, n);
 }
 
 void main_menu_open_search(void) {
 	gui_init_rest();
-	if (last_search_scope == HOME_MUSIC ||
-		(last_search_scope >= 0 && main_menu_available((home_item_t)last_search_scope))) {
+	if (last_search_scope == HOME_SEARCH || last_search_scope == HOME_MUSIC || (search_source_home((home_item_t)last_search_scope) && search_source_home((home_item_t)last_search_scope)->ready())) {
 		search_scope_action((void *)(intptr_t)last_search_scope);
 		return;
 	}
-	search_scope_choose();
+	search_scope_action((void *)(intptr_t)HOME_SEARCH);
 }
 
 static const char *search_scope_tag(home_item_t source) {
-	return source == HOME_YANDEX ? "yandex" : source == HOME_ZVUK ? "zvuk" : "home_search_card";
+	const search_source_t *delegate = search_source_home(source);
+	return source == HOME_SEARCH ? "search_everywhere" : delegate ? delegate->name : "home_search_card";
+}
+void main_menu_search_scope_set(lv_obj_t *screen, home_item_t source) {
+	for (int i = 0; i < search_input_count; i++)
+		if (search_inputs[i].screen == screen) {
+			search_inputs[i].source = source;
+			lv_obj_t *title = search_inputs[i].title;
+			if (title) {
+				lv_obj_set_user_data(title, (void *)(intptr_t)source);
+				lv_label_set_text(title, tr(search_scope_tag(source)));
+				lv_obj_send_event(title, LV_EVENT_SIZE_CHANGED, NULL);
+			}
+			last_search_scope = source;
+		}
 }
 
 static void search_scope_header_click(lv_event_t *e) {
@@ -434,20 +455,22 @@ static void search_scope_chevron_place(lv_event_t *e) {
 	lv_obj_t *title = lv_event_get_target(e);
 	lv_obj_t *arrow = lv_event_get_user_data(e);
 	lv_point_t text_size;
-	lv_text_get_size(&text_size, lv_label_get_text(title), lv_obj_get_style_text_font(title, 0),
-		lv_obj_get_style_text_letter_space(title, 0), 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+	lv_text_get_size(&text_size, lv_label_get_text(title), lv_obj_get_style_text_font(title, 0), lv_obj_get_style_text_letter_space(title, 0), 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
 	int max_x = lv_obj_get_width(title) - (int)icon_chevron_down.header.w;
 	int x = text_size.x + 8;
 	if (x > max_x)
 		x = max_x;
-	lv_obj_set_pos(arrow, x > 0 ? x : 0,
-		(lv_obj_get_height(title) - (int)icon_chevron_down.header.h) / 2);
+	lv_obj_set_pos(arrow, x > 0 ? x : 0, (lv_obj_get_height(title) - (int)icon_chevron_down.header.h) / 2);
 }
 
 static void search_scope_loaded(lv_event_t *e) {
 	lv_obj_t *title = lv_event_get_user_data(e);
 	home_item_t source = (home_item_t)(intptr_t)lv_obj_get_user_data(title);
 	last_search_scope = source;
+	for (int i = 0; i < search_input_count; i++) {
+		if (search_inputs[i].source == source && search_inputs[i].field && strcmp(lv_textarea_get_text(search_inputs[i].field), shared_search_query))
+			lv_textarea_set_text(search_inputs[i].field, shared_search_query);
+	}
 	lv_label_set_text(title, tr(search_scope_tag(source)));
 	lv_obj_send_event(title, LV_EVENT_SIZE_CHANGED, NULL);
 }
@@ -455,6 +478,9 @@ static void search_scope_loaded(lv_event_t *e) {
 void main_menu_search_header(lv_obj_t *screen, gui_config_t *cfg, home_item_t source) {
 	search_scope_register(screen, source);
 	lv_obj_t *title = settingsrow_title(screen, cfg, search_scope_tag(source));
+	for (int i = 0; i < search_input_count; i++)
+		if (search_inputs[i].screen == screen)
+			search_inputs[i].title = title;
 	lv_obj_set_user_data(title, (void *)(intptr_t)source);
 	lv_obj_set_style_pad_right(title, 36, 0);
 	lv_obj_set_clickable(title, true);
@@ -468,3 +494,28 @@ void main_menu_search_header(lv_obj_t *screen, gui_config_t *cfg, home_item_t so
 	lv_obj_add_event_cb(title, search_scope_chevron_place, LV_EVENT_STYLE_CHANGED, arrow);
 	lv_obj_add_event_cb(screen, search_scope_loaded, LV_EVENT_SCREEN_LOADED, title);
 }
+
+static void shared_query_changed(lv_event_t *e) {
+	lv_obj_t *field = lv_event_get_target(e);
+	const char *text = lv_textarea_get_text(field);
+	size_t n = strlen(text);
+	if (n >= sizeof(shared_search_query)) {
+		n = sizeof(shared_search_query) - 1;
+		while (n && ((unsigned char)text[n] & 0xc0) == 0x80)
+			n--;
+	}
+	memcpy(shared_search_query, text, n);
+	shared_search_query[n] = 0;
+}
+
+void main_menu_search_bind(lv_obj_t *screen, lv_obj_t *field) {
+	for (int i = 0; i < search_input_count; i++) {
+		if (search_inputs[i].screen == screen) {
+			search_inputs[i].field = field;
+			lv_obj_add_event_cb(field, shared_query_changed, LV_EVENT_VALUE_CHANGED, NULL);
+			return;
+		}
+	}
+}
+
+const char *main_menu_search_query(void) { return shared_search_query; }

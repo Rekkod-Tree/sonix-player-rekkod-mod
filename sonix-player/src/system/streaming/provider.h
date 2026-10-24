@@ -60,6 +60,9 @@ typedef struct {
 	// returns the screen that back should lead to (an lv_obj_t *), or NULL when
 	// it could not (not logged in, missing id).
 	void *(*open_album)(const char *album_id, const char *title);
+	// Home/streaming tile: return to the confirmed playback source, without play.
+	// False leaves ordinary section navigation in charge.
+	bool (*open_playback_place)(void);
 } stream_provider_gui_t;
 
 typedef struct stream_provider {

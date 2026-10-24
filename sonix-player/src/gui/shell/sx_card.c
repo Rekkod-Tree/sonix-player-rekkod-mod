@@ -43,8 +43,8 @@ static void frame_draw_cb(lv_event_t *e) {
 	lv_draw_rect_dsc_init(&dsc);
 	dsc.bg_opa = LV_OPA_TRANSP;
 	dsc.border_width = 1;
-	dsc.border_color = sx_mix(p->panel_text2, p->panel, 60);
-	dsc.border_opa = lv_obj_get_style_opa_recursive(obj, LV_PART_MAIN);
+	dsc.border_color = p->surface_edge;
+	dsc.border_opa = LV_OPA_MIX2(p->surface_edge_opa, lv_obj_get_style_opa_recursive(obj, LV_PART_MAIN));
 	dsc.radius = lv_obj_get_style_radius(obj, LV_PART_MAIN);
 	lv_area_t area;
 	lv_obj_get_coords(obj, &area);

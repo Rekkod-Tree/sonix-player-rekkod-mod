@@ -21,6 +21,8 @@ void trackmenu_open(lv_obj_t *anchor);
 // a podcast playing: there the button is the episodes button, and the episodes
 // are the queue.
 void trackmenu_open_queue(void);
+// Shared header shortcut, with the same slot geometry as the section search.
+lv_obj_t *trackmenu_queue_button(lv_obj_t *parent, gui_config_t *cfg, int slot);
 
 // Opens the details page for a specific file (from a library list's menu).
 void trackmenu_details_open(const char *path);

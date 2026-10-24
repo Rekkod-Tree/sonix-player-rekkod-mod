@@ -1,8 +1,8 @@
 #ifndef YANDEXPLAY_H
 #define YANDEXPLAY_H
 
-#include <stdbool.h>
 #include "src/system/library/metadata.h"
+#include <stdbool.h>
 
 #include "src/system/playback/playlist.h"
 #include "src/system/streaming/yandex.h"
@@ -58,6 +58,8 @@ bool yandexplay_current(yandex_track_t *out);
 
 // Whether the queue playing is My Wave.
 bool yandexplay_is_wave(void);
+// Shared read-only list view of the active queue. Caller drops its reference.
+yandexlist_t *yandexplay_queue_view(void);
 
 // Signed out: the wave stops asking, the claims on saved files go.
 void yandexplay_signed_out(void);

@@ -19,10 +19,14 @@ static void search_scope_states(void) {
 		main_menu_open_search();
 		break;
 	case 2:
+		assert(lv_screen_active() != search_screen);
+		qe_click(find_label(lv_screen_active(), tr("search_everywhere")));
+		break;
+	case 3:
 		assert(sx_sheet_is_open());
 		qe_click(find_label(lv_layer_top(), tr("home_search_card")));
 		break;
-	case 3:
+	case 4:
 		assert(lv_screen_active() == search_screen);
 		field = find_field(search_screen);
 		assert(field);
@@ -31,23 +35,23 @@ static void search_scope_states(void) {
 		capture(image_name);
 		switch_screen_no_history(main_menu_screen);
 		break;
-	case 4:
+	case 5:
 		main_menu_open_search();
 		break;
-	case 5:
+	case 6:
 		assert(lv_screen_active() == search_screen && !sx_sheet_is_open());
 		assert(!strcmp(lv_textarea_get_text(field), "scope retained"));
 		saved_cursor = lv_textarea_get_cursor_pos(field);
 		saved_focus = lv_obj_has_state(field, LV_STATE_FOCUSED);
 		qe_click(find_label(search_screen, tr("home_search_card")));
 		break;
-	case 6:
+	case 7:
 		assert(sx_sheet_is_open());
 		snprintf(image_name, sizeof(image_name), "search-scope-%s-choose", dark ? "dark" : "light");
 		capture(image_name);
 		sx_sheet_close();
 		break;
-	case 7:
+	case 8:
 		assert(!sx_sheet_is_open() && lv_screen_active() == search_screen);
 		assert(lv_textarea_get_cursor_pos(field) == saved_cursor);
 		assert(lv_obj_has_state(field, LV_STATE_FOCUSED) == saved_focus);
@@ -56,7 +60,7 @@ static void search_scope_states(void) {
 		if (!dark) {
 			dark = true;
 			theme_set_dark(true);
-			step = 3;
+			step = 4;
 		} else {
 			fflush(stdout);
 			exit(0);

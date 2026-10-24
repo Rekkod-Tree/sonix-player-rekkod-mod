@@ -47,6 +47,7 @@ headers = ('src/gui/fonts/fonts.h', 'src/gui/shell/sx_mini.h', 'src/gui/shell/sx
            'src/system/playback/device_state.h', 'lv_conf.h')
 source_files = [(O / p if (O / p).is_file() else ROOT / p) for p in (*support, *headers, 'src/gui/shell/sx_mini.c')]
 source_files += [args.font_dir.resolve() / name for name in ('ui-regular.ttf', 'ui-semibold.ttf')]
+source_files.append(ROOT / 'src/system/core/utils.c')
 if args.baseline:
     if args.baseline_mini is None: parser.error('--baseline requires --baseline-mini')
     source_files.append(args.baseline_mini.resolve())
@@ -58,6 +59,10 @@ with tempfile.TemporaryDirectory(prefix='sonix-mini67-') as tmp:
     mini_source = args.baseline_mini.resolve() if args.baseline else O / 'src/gui/shell/sx_mini.c'
     compiled_mini_pin = digest(mini_source)
     (tmp / 'actual_mini.c').write_bytes(mini_source.read_bytes())
+    utils = (ROOT / 'src/system/core/utils.c').read_text(encoding='utf-8')
+    time_start = utils.index('int formatDoubleSeconds(')
+    time_end = utils.index('\n}\n', time_start) + 3
+    (tmp / 'actual_time_format.inc').write_text(utils[time_start:time_end], encoding='utf-8')
     fonts = re.findall(r'extern lv_font_t (font_ui_\w+);', (ROOT / 'src/gui/fonts/fonts.h').read_text(encoding='utf-8'))
     (tmp / 'actual_fonts.inc').write_text('lv_font_t ' + ','.join(fonts) + ';\n', encoding='utf-8', newline='\n')
     definitions = []

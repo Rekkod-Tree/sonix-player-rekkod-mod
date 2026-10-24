@@ -250,6 +250,11 @@ class Handler(BaseHTTPRequestHandler):
         if m == "500":
             self.send(500, {"error": "server"})
             return None
+        if m == "offline":
+            self.close_connection = True
+            return None
+        if m == "slow-api":
+            time.sleep(5)
         if token not in (T_SUB, T_FREE, T_ANON) or m == "401":
             self.say("401 for token of %d characters" % len(token))
             self.send(401, {"detail": "Unauthorized"})

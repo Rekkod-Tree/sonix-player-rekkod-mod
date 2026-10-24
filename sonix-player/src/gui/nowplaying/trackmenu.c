@@ -1,6 +1,7 @@
-#include "src/gui/shell/artview.h"
 #include "trackmenu.h"
 #include "src/gui/nowplaying/historypage.h"
+#include "src/gui/shell/artview.h"
+#include "src/gui/streaming/svcui.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -9,6 +10,7 @@
 #include <sys/stat.h>
 
 #include "src/gui/fonts/fonts.h"
+#include "src/gui/library/browser.h"
 #include "src/gui/library/listacts.h"
 #include "src/gui/library/medialist.h"
 #include "src/gui/library/playlistpage.h"
@@ -20,6 +22,7 @@
 #include "src/gui/settings/musicsettings.h"
 #include "src/gui/shell/confirm.h"
 #include "src/gui/shell/icons.h"
+#include "src/gui/shell/playbackplace.h"
 #include "src/gui/shell/popover.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
@@ -104,10 +107,10 @@ typedef enum {
 
 typedef struct {
 	lv_obj_t *row;
-	int index;		// the entry bound, -1 for none
-	int64_t album;	// the album whose thumbnail is in `buf`, 0 for none
+	int index;	   // the entry bound, -1 for none
+	int64_t album; // the album whose thumbnail is in `buf`, 0 for none
 	uint32_t display_generation;
-	uint8_t *buf;	// COVERTONE_THUMB_BYTES(56), on first use
+	uint8_t *buf; // COVERTONE_THUMB_BYTES(56), on first use
 	lv_image_dsc_t dsc;
 } queue_row_t;
 
@@ -123,12 +126,12 @@ static queue_row_t queue_rows[QUEUE_POOL];
 
 // The layout, as queue_layout() last worked it out.
 static queue_mode_t queue_mode;
-static int queue_total;		  // entries of the list shown
-static int queue_cur;		  // the entry shown as playing; -1 when none is
-static int queue_next_first;  // the first entry of the "Up next" run
+static int queue_total;		 // entries of the list shown
+static int queue_cur;		 // the entry shown as playing; -1 when none is
+static int queue_next_first; // the first entry of the "Up next" run
 static int queue_next_count;
 static int queue_played_count; // entries 0 .. queue_played_count - 1
-static int queue_pitch;		  // a row and the gap under it
+static int queue_pitch;		   // a row and the gap under it
 static int32_t queue_y_cur, queue_y_next, queue_y_played;
 // What the layout was worked out for, so the poll's look (trackmenu_queue_
 // poll) costs nothing when nothing moved -- a layout binds every row in view
@@ -219,10 +222,7 @@ static int queue_user_index(void *user) { return (int)(intptr_t)user - 1; }
 
 // Whether entry `index` may be taken out: never the playing track, and
 // nothing of a parked queue (it is not the queue now).
-static bool queue_removable(int index) {
-	return (queue_mode == QUEUE_MODE_QUEUE || queue_mode == QUEUE_MODE_BESIDE) &&
-		   index != playlist_current_index();
-}
+static bool queue_removable(int index) { return (queue_mode == QUEUE_MODE_QUEUE || queue_mode == QUEUE_MODE_BESIDE) && index != playlist_current_index(); }
 
 // The album's 56 px thumbnail on the row, or its tone plaque until there is
 // one (covertone.h, "List rows").
@@ -234,14 +234,14 @@ static void queue_row_cover(queue_row_t *q, const char *path, const char *fallba
 		id = covertone_album_id(album);
 		library_album_title(album, shown, sizeof(shown));
 	}
-	float hue=sx_placeholder_file_hue(path,shown[0]?shown:fallback_album);
+	float hue = sx_placeholder_file_hue(path, shown[0] ? shown : fallback_album);
 	lv_color_t tone = sx_placeholder_tone(hue);
 	if (id && id == q->album) {
 		return; // that thumbnail is up already
 	}
 	// Off the buffer before it is written to.
 	sx_row_set_thumb(q->row, NULL, tone);
-	sx_row_set_content(q->row,hue,false,false,0);
+	sx_row_set_content(q->row, hue, false, false, 0);
 	q->album = 0;
 	if (!id) {
 		return;
@@ -254,9 +254,9 @@ static void queue_row_cover(queue_row_t *q, const char *path, const char *fallba
 	}
 	if (covertone_thumb(id, COVERTONE_THUMB_SMALL, &q->dsc, q->buf, COVERTONE_THUMB_BYTES(COVERTONE_THUMB_SMALL))) {
 		q->album = id;
-		q->display_generation=cover_new_display_generation();
+		q->display_generation = cover_new_display_generation();
 		sx_row_set_thumb(q->row, &q->dsc, tone);
-		sx_row_set_content(q->row,hue,false,true,q->display_generation);
+		sx_row_set_content(q->row, hue, false, true, q->display_generation);
 	} else {
 		covertone_request(id); // the listener brings it (queue_covertone_changed)
 	}
@@ -287,7 +287,9 @@ static void queue_row_bind(queue_row_t *q, int index) {
 	// A "play next" still to come says so: why it is where it is, and that a
 	// change of shuffle will not move it (1.2.5).
 	bool queued = queue_mode == QUEUE_MODE_QUEUE && playlist_is_queued_next(index);
-	sx_row_set_subtitle(q->row, artist, queued ? tr("queue_badge_next") : NULL, length[0] ? length : NULL);
+	char subtitle[384];
+	svcui_track_caption(path, artist, subtitle, sizeof(subtitle));
+	sx_row_set_subtitle(q->row, subtitle, queued ? tr("queue_badge_next") : NULL, length[0] ? length : NULL);
 	sx_row_set_playing(q->row, index == queue_cur);
 	sx_row_set_trail(q->row, queue_edit_mode == 1 && queue_removable(index) ? (queue_selected[index] ? SX_ROW_TRAIL_CHECK : SX_ROW_TRAIL_BLANK) : queue_edit_mode == 2 && index > queue_cur ? SX_ROW_TRAIL_GRIP : SX_ROW_TRAIL_NONE);
 	sx_row_set_swipes(q->row, false, !queue_edit_mode && queue_removable(index));
@@ -316,8 +318,7 @@ static int32_t queue_row_y(int index) {
 
 // The entries of a run of `count` rows starting at `y0` that are within
 // [top, bottom], into `want`.
-static int queue_run_visible(int32_t y0, int first, int count, int32_t top, int32_t bottom, int *want, int n,
-							 int max) {
+static int queue_run_visible(int32_t y0, int first, int count, int32_t top, int32_t bottom, int *want, int n, int max) {
 	if (count <= 0 || y0 + (int32_t)count * queue_pitch < top || y0 > bottom) {
 		return n;
 	}
@@ -564,8 +565,7 @@ void trackmenu_queue_poll(void) {
 		queue_layout();
 		return;
 	}
-	if (playlist_revision() != queue_seen_revision || playlist_current_index() != queue_seen_current ||
-		queue_mode_for_outside(has_outside) != queue_seen_mode) {
+	if (playlist_revision() != queue_seen_revision || playlist_current_index() != queue_seen_current || queue_mode_for_outside(has_outside) != queue_seen_mode) {
 		queue_layout();
 	} else if (device_state_metadata_revision() != queue_seen_metadata_revision) {
 		// Do not rebind the row beneath a finger during a queue gesture.
@@ -704,8 +704,7 @@ static void queue_sheet_album(void *user) {
 	(void)user;
 	char path[512];
 	char album[512];
-	if (!queue_path_at(queue_sheet_index, path, sizeof(path)) ||
-		!library_track_album_value(path, album, sizeof(album)) || !album[0]) {
+	if (!queue_path_at(queue_sheet_index, path, sizeof(path)) || !library_track_album_value(path, album, sizeof(album)) || !album[0]) {
 		gui_notify_popup("trackmenu_no_album");
 		return;
 	}
@@ -744,23 +743,19 @@ static void queue_row_hold(lv_obj_t *row, void *user) {
 		items[n++] = (sx_sheet_item_t){tr("queue_play_now"), &npicon_play, false, false, queue_sheet_play, NULL};
 	}
 	if (!parked && !playing && index != current + 1) {
-		items[n++] =
-			(sx_sheet_item_t){tr("queue_move_next"), &npicon_play_next, false, false, queue_sheet_next, NULL};
+		items[n++] = (sx_sheet_item_t){tr("queue_move_next"), &npicon_play_next, false, false, queue_sheet_next, NULL};
 	}
 	if (upcoming && index - 1 > current) {
-		items[n++] = (sx_sheet_item_t){tr("queue_move_up"), &npicon_move_up, false, false, queue_sheet_move,
-									   (void *)(intptr_t)-1};
+		items[n++] = (sx_sheet_item_t){tr("queue_move_up"), &npicon_move_up, false, false, queue_sheet_move, (void *)(intptr_t)-1};
 	}
 	if (upcoming && index + 1 < queue_total) {
-		items[n++] = (sx_sheet_item_t){tr("queue_move_down"), &npicon_move_down, false, false, queue_sheet_move,
-									   (void *)(intptr_t)1};
+		items[n++] = (sx_sheet_item_t){tr("queue_move_down"), &npicon_move_down, false, false, queue_sheet_move, (void *)(intptr_t)1};
 	}
 	if (has_album) {
 		items[n++] = (sx_sheet_item_t){tr("show_album"), &npicon_album, false, false, queue_sheet_album, NULL};
 	}
 	if (queue_removable(index)) {
-		items[n++] =
-			(sx_sheet_item_t){tr("queue_remove"), &npicon_remove, false, true, queue_sheet_remove, NULL};
+		items[n++] = (sx_sheet_item_t){tr("queue_remove"), &npicon_remove, false, true, queue_sheet_remove, NULL};
 	}
 	if (n > 0) {
 		sx_sheet_menu(title, sub, items, n);
@@ -981,8 +976,7 @@ static void queue_more_cb(lv_event_t *e) {
 	if (queue_mode == QUEUE_MODE_QUEUE && queue_total > 0)
 		items[n++] = (sx_sheet_item_t){tr("queue_save_as_playlist"), &npicon_add_playlist, false, false, queue_save_cb, NULL};
 	if (shufflable) {
-		items[n++] =
-			(sx_sheet_item_t){tr("queue_shuffle_rest"), &npicon_shuffle, false, false, queue_shuffle_rest_cb, NULL};
+		items[n++] = (sx_sheet_item_t){tr("queue_shuffle_rest"), &npicon_shuffle, false, false, queue_shuffle_rest_cb, NULL};
 	}
 	if (upcoming) {
 		items[n++] = (sx_sheet_item_t){tr("queue_clear_next"), &npicon_clear, false, true, queue_clear_cb, NULL};
@@ -1012,11 +1006,9 @@ int trackmenu_queue_paths(const char *const *paths, int count, playlist_queue_wh
 		if (queued == 1 && paths && paths[0]) {
 			char title[256], artist[256];
 			queue_names_of(paths[0], title, sizeof(title), artist, sizeof(artist), NULL, 0);
-			snprintf(text, sizeof(text),
-					 tr(where == PLAYLIST_QUEUE_NEXT ? "queue_next_named_fmt" : "queue_end_named_fmt"), title);
+			snprintf(text, sizeof(text), tr(where == PLAYLIST_QUEUE_NEXT ? "queue_next_named_fmt" : "queue_end_named_fmt"), title);
 		} else {
-			snprintf(text, sizeof(text), "%s",
-					 tr(where == PLAYLIST_QUEUE_NEXT ? "queue_will_play_next" : "queue_added_to_end"));
+			snprintf(text, sizeof(text), "%s", tr(where == PLAYLIST_QUEUE_NEXT ? "queue_will_play_next" : "queue_added_to_end"));
 		}
 		queue_undo_commit(text);
 	}
@@ -1283,9 +1275,7 @@ static void details_add_gain(const char *name, float gain_db, float peak) {
 
 // `playing` adds what the player is applying to this file right now, which
 // only exists for the track being played.
-static void details_fill(const char *file, const song_metadata_t *tags, int bits, double sample_rate,
-						 int channels, double duration_secs, const char *codec, int kbps, bool lossy,
-						 bool playing) {
+static void details_fill(const char *file, const song_metadata_t *tags, int bits, double sample_rate, int channels, double duration_secs, const char *codec, int kbps, bool lossy, bool playing) {
 	char buffer[64];
 
 	const char *slash = strrchr(file, '/');
@@ -1323,8 +1313,7 @@ static void details_fill(const char *file, const song_metadata_t *tags, int bits
 			details_add_row("trackmenu_format", buffer);
 		}
 	} else if (sample_rate > 0) {
-		snprintf(buffer, sizeof(buffer), tr("trackmenu_bit_khz_channels"), bits > 0 ? bits : 16,
-				 sample_rate / 1000.0, channels);
+		snprintf(buffer, sizeof(buffer), tr("trackmenu_bit_khz_channels"), bits > 0 ? bits : 16, sample_rate / 1000.0, channels);
 		details_add_row("trackmenu_format", buffer);
 	}
 
@@ -1372,7 +1361,7 @@ static void details_fill(const char *file, const song_metadata_t *tags, int bits
 	// user's own that does not exist. The source service is shown instead.
 	const stream_provider_t *service = stream_provider_for_path(file);
 	if (service) {
-		details_add_row("trackmenu_source", service->id);
+		details_add_row("trackmenu_source", tr(service->id));
 	} else {
 		details_add_row("trackmenu_file", file);
 	}
@@ -1419,8 +1408,7 @@ static void details_rebuild(void) {
 			}
 		}
 
-		details_fill(details_path, &tags, bits, sample_rate, channels, duration_secs, codec, kbps, lossy,
-					 false);
+		details_fill(details_path, &tags, bits, sample_rate, channels, duration_secs, codec, kbps, lossy, false);
 		return;
 	}
 
@@ -1441,16 +1429,14 @@ static void details_rebuild(void) {
 	// As in the player: when the file declares no bitrate, fall back to the real
 	// average, but only for a local file -- a streamed one may still be half
 	// downloaded and the number would climb by itself.
-	if (lossy && kbps <= 0 && !stream_provider_owns(state.current_file) &&
-		state.progress_total_secs > 0.5) {
+	if (lossy && kbps <= 0 && !stream_provider_owns(state.current_file) && state.progress_total_secs > 0.5) {
 		struct stat st_lossy;
 		if (stat(state.current_file, &st_lossy) == 0 && st_lossy.st_size > 0) {
 			kbps = (int)((double)st_lossy.st_size * 8.0 / state.progress_total_secs / 1000.0 + 0.5);
 		}
 	}
 
-	details_fill(state.current_file, &state.metadata, audio_get_stream_bits(), state.stream_sample_rate,
-				 state.stream_channels, state.progress_total_secs, codec, kbps, lossy, true);
+	details_fill(state.current_file, &state.metadata, audio_get_stream_bits(), state.stream_sample_rate, state.stream_channels, state.progress_total_secs, codec, kbps, lossy, true);
 }
 
 static void details_loaded_cb(lv_event_t *e) {
@@ -1552,14 +1538,22 @@ static void save_stream_track_cb(void *user) {
 // and its episodes button on a podcast -- a podcast's episodes are exactly the
 // queue.
 void trackmenu_open_queue(void) {
+	bool return_to_player = player_sheet_is_open();
 	if (audiobook_is_playing()) {
 		chapters_open();
 		return;
 	}
 	player_sheet_close(false);
 	switch_screen(queue_screen);
-	switcher_set_player_return(queue_screen);
+	switcher_set_player_return(return_to_player ? queue_screen : NULL);
 }
+
+static void queue_button_clicked(lv_event_t *e) {
+	(void)e;
+	trackmenu_open_queue();
+}
+
+lv_obj_t *trackmenu_queue_button(lv_obj_t *parent, gui_config_t *cfg, int slot) { return svcui_header_button(parent, cfg, slot, &npicon_queue, queue_button_clicked, NULL); }
 
 // "Stop after this track / this album": one-shot, cleared when it fires (see
 // device_state_set_stop_after()); choosing the one already set clears it. The
@@ -1578,10 +1572,7 @@ static void stop_after_pick(void *user) {
 	}
 	device_state_set_stop_after(want);
 	topbar_refresh_playback();
-	sx_toast_undo(tr(want == DEVICE_STATE_STOP_AFTER_TRACK	 ? "trackmenu_stop_after_track_set"
-					 : want == DEVICE_STATE_STOP_AFTER_ALBUM ? "trackmenu_stop_after_album_set"
-															 : "trackmenu_stop_after_cleared"),
-				  stop_after_undo, (void *)(intptr_t)was);
+	sx_toast_undo(tr(want == DEVICE_STATE_STOP_AFTER_TRACK ? "trackmenu_stop_after_track_set" : want == DEVICE_STATE_STOP_AFTER_ALBUM ? "trackmenu_stop_after_album_set" : "trackmenu_stop_after_cleared"), stop_after_undo, (void *)(intptr_t)was);
 }
 
 static void chain_cb(void *user) {
@@ -1628,6 +1619,41 @@ static void add_to_playlist_cb(void *user) {
 
 // "Show album": the record the playing track came off. Backing out of it
 // returns to the player, like everything else this menu opens.
+static bool playback_source_available(const device_state_t *state) {
+	if (state->live || !state->current_file[0] || audiobook_is_playing() || podcastcache_is_episode(state->current_file))
+		return false;
+	const stream_provider_t *provider = stream_provider_for_path(state->current_file);
+	if (provider && !provider->gui.open_playback_place)
+		return false;
+	playbackplace_t place;
+	return playbackplace_get(provider ? provider->id : "music", &place) && !strcmp(place.path, state->current_file);
+}
+
+static bool trackmenu_open_playback_source(void) {
+	device_state_t state;
+	device_state_get(&state);
+	if (!playback_source_available(&state))
+		return false;
+	const stream_provider_t *provider = stream_provider_for_path(state.current_file);
+	bool player = player_sheet_is_open();
+	player_sheet_close(false);
+	bool opened = provider ? provider->gui.open_playback_place() : browser_open_playback_place() || medialist_open_playback_place();
+	if (!opened) {
+		if (player)
+			player_sheet_open(false);
+		return false;
+	}
+	if (player && (provider || !medialist_step_back_to_player()))
+		switcher_set_player_return(lv_screen_active());
+	return true;
+}
+
+static void open_source_cb(void *unused) {
+	(void)unused;
+	if (!trackmenu_open_playback_source())
+		sx_toast(tr("playback_source_unavailable"));
+}
+
 static void open_album_cb(void *user) {
 	(void)user;
 
@@ -1660,8 +1686,7 @@ static void open_album_cb(void *user) {
 	// enough, since different albums share a title.
 	const stream_provider_t *service = stream_provider_for_path(state.current_file);
 	char service_album[64];
-	if (service && service->album_id && service->gui.open_album &&
-		service->album_id(state.current_file, service_album, sizeof(service_album))) {
+	if (service && service->album_id && service->gui.open_album && service->album_id(state.current_file, service_album, sizeof(service_album))) {
 		char title[256];
 		if (!library_track_album(state.current_file, title, sizeof(title)) || !title[0]) {
 			device_state_t now;
@@ -1762,15 +1787,14 @@ void trackmenu_open(lv_obj_t *anchor) {
 	static char title[256];
 	static char sub[256];
 	const char *slash = strrchr(state.current_file, '/');
-	snprintf(title, sizeof(title), "%.255s",
-			 ext && outside[0] ? outside
-			 : state.metadata.title[0] ? state.metadata.title
-									   : (slash ? slash + 1 : state.current_file));
+	snprintf(title, sizeof(title), "%.255s", ext && outside[0] ? outside : state.metadata.title[0] ? state.metadata.title : (slash ? slash + 1 : state.current_file));
 	snprintf(sub, sizeof(sub), "%s", state.live ? state.metadata.artist : metadata_shown_artist(&state.metadata));
 
-	sx_sheet_item_t items[13];
+	sx_sheet_item_t items[14];
 	int n = 0;
 	const stream_provider_t *service = !state.live && !ext ? stream_provider_for_track(state.current_file) : NULL;
+	if (!ext && loaded && playback_source_available(&state))
+		items[n++] = (sx_sheet_item_t){tr("playback_source_open"), &npicon_album, false, false, open_source_cb, NULL};
 	if (service && service->save_track) {
 		snprintf(menu_save_path, sizeof(menu_save_path), "%s", state.current_file);
 		menu_save_duration = (int)state.progress_total_secs;
@@ -1778,25 +1802,19 @@ void trackmenu_open(lv_obj_t *anchor) {
 		items[n++] = (sx_sheet_item_t){tr(saved ? service->saved_label_key : service->save_label_key), &icon_download, saved, false, saved ? NULL : save_stream_track_cb, menu_save_path};
 	}
 	if (!ext && !state.live && loaded) {
-		items[n++] = (sx_sheet_item_t){tr("np_stop_after_track"), &npicon_stop_after,
-									   stop == DEVICE_STATE_STOP_AFTER_TRACK, false, stop_after_pick,
-									   (void *)(intptr_t)DEVICE_STATE_STOP_AFTER_TRACK};
+		items[n++] = (sx_sheet_item_t){tr("np_stop_after_track"), &npicon_stop_after, stop == DEVICE_STATE_STOP_AFTER_TRACK, false, stop_after_pick, (void *)(intptr_t)DEVICE_STATE_STOP_AFTER_TRACK};
 	}
 	items[n++] = (sx_sheet_item_t){player_sleep_label(), &npicon_sleep, false, false, sleep_cb, NULL};
 	items[n++] = (sx_sheet_item_t){tr("np_audio_chain"), &npicon_details, false, false, chain_cb, NULL};
 	if (!ext && loaded) {
-		items[n++] = (sx_sheet_item_t){tr("add_to_playlist"), &npicon_add_playlist, false, false, add_to_playlist_cb,
-									   NULL};
-		items[n++] = (sx_sheet_item_t){tr(podcast ? "trackmenu_show_podcast" : "show_album"), &npicon_album, false,
-									   false, open_album_cb, NULL};
+		items[n++] = (sx_sheet_item_t){tr("add_to_playlist"), &npicon_add_playlist, false, false, add_to_playlist_cb, NULL};
+		items[n++] = (sx_sheet_item_t){tr(podcast ? "trackmenu_show_podcast" : "show_album"), &npicon_album, false, false, open_album_cb, NULL};
 		if (!podcast) {
 			items[n++] = (sx_sheet_item_t){tr("show_artist"), &npicon_artist, false, false, open_artist_cb, NULL};
-			items[n++] =
-				(sx_sheet_item_t){tr("np_shuffle"), &npicon_shuffle, player_shuffle_on(), false, shuffle_cb, NULL};
+			items[n++] = (sx_sheet_item_t){tr("np_shuffle"), &npicon_shuffle, player_shuffle_on(), false, shuffle_cb, NULL};
 		}
 		if (player_lyrics_available()) {
-			items[n++] =
-				(sx_sheet_item_t){tr("np_lyrics"), &npicon_lyrics, player_lyrics_shown(), false, lyrics_cb, NULL};
+			items[n++] = (sx_sheet_item_t){tr("np_lyrics"), &npicon_lyrics, player_lyrics_shown(), false, lyrics_cb, NULL};
 		}
 	}
 	items[n++] = (sx_sheet_item_t){tr("trackmenu_queue"), &npicon_queue, false, false, open_queue_cb, NULL};

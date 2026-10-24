@@ -1,3 +1,6 @@
+#include "src/gui/nowplaying/trackmenu.h"
+#include "src/gui/shell/playbackplace.h"
+#include "src/system/streaming/zvukcache.h"
 #ifdef SONIX_ZVUK
 
 #include "zvukpage.h"
@@ -15,8 +18,8 @@
 #include "src/gui/shell/confirm.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/keyboard.h"
-#include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/main_menu.h"
+#include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/sx_card.h"
 #include "src/gui/shell/sx_row.h"
@@ -840,6 +843,9 @@ static int list_history_len;
 static list_step_t list_current;
 static bool list_has_current;
 static bool list_restore_pending;
+static playbackplace_t requested_place;
+static char requested_track[64];
+static bool returning_place;
 static unsigned list_restore_generation;
 
 static void show_list(const list_step_t *step);
@@ -868,17 +874,10 @@ static bool list_back_guard(void) {
 	return true;
 }
 
-static void open_list(const char *title, job_kind_t kind, const char *a, const char *b, int n) {
-	list_step_t step;
-	memset(&step, 0, sizeof(step));
-	step.kind = kind;
-	step.n = n;
-	snprintf(step.title, sizeof(step.title), "%s", title ? title : "");
-	snprintf(step.a, sizeof(step.a), "%s", a ? a : "");
-	snprintf(step.b, sizeof(step.b), "%s", b ? b : "");
+static void note_list_step(const list_step_t *step) {
 	if (lv_screen_active() != list_screen) {
 		list_history_len = 0;
-	} else if (list_has_current && !same_list(&list_current, &step)) {
+	} else if (list_has_current && !same_list(&list_current, step)) {
 		if (list_history_len == LIST_HISTORY_DEPTH) {
 			memmove(list_history, list_history + 1, (LIST_HISTORY_DEPTH - 1) * sizeof(list_history[0]));
 			list_history_len--;
@@ -887,6 +886,17 @@ static void open_list(const char *title, job_kind_t kind, const char *a, const c
 			svclist_capture(list, &list_current.anchor);
 		list_history[list_history_len++] = list_current;
 	}
+}
+
+static void open_list(const char *title, job_kind_t kind, const char *a, const char *b, int n) {
+	list_step_t step;
+	memset(&step, 0, sizeof(step));
+	step.kind = kind;
+	step.n = n;
+	snprintf(step.title, sizeof(step.title), "%s", title ? title : "");
+	snprintf(step.a, sizeof(step.a), "%s", a ? a : "");
+	snprintf(step.b, sizeof(step.b), "%s", b ? b : "");
+	note_list_step(&step);
 	list_current = step;
 	list_has_current = true;
 	show_list(&step);
@@ -1052,7 +1062,35 @@ static void fill_list(void) {
 
 // --- playing -----------------------------------------------------------------
 
+static void remember_requested_place(int tapped) {
+	requested_track[0] = 0;
+	if (!list_has_current || !shown)
+		return;
+	row_t row;
+	if (shown->list)
+		zvuklist_id(shown->list, tapped, requested_track, sizeof(requested_track));
+	else if (view_row(tapped, &row) && row.kind == ROW_TRACK)
+		snprintf(requested_track, sizeof(requested_track), "%s", row.u.track.id);
+	requested_place = (playbackplace_t){.kind = list_current.kind, .index = tapped};
+	snprintf(requested_place.title, sizeof(requested_place.title), "%s", list_current.title);
+	snprintf(requested_place.a, sizeof(requested_place.a), "%s", list_current.a);
+	snprintf(requested_place.b, sizeof(requested_place.b), "%s", list_current.b);
+	requested_place.filter = list_current.n;
+}
+
+static void confirm_requested_place(void) {
+	if (!requested_track[0])
+		return;
+	char path[512], id[64];
+	audio_get_current_file(path, sizeof(path));
+	zvukcache_track_id(path, id, sizeof(id));
+	if (!strcmp(id, requested_track))
+		playbackplace_arm("zvuk", &requested_place, path);
+	requested_track[0] = 0;
+}
+
 static void play_rows(int tapped) {
+	remember_requested_place(tapped);
 	row_t r;
 	bool have = view_row(tapped, &r);
 	if (have && r.kind == ROW_TRACK && !r.u.track.available) {
@@ -1095,6 +1133,7 @@ static void playback_event(zvukplay_event_t event, const char *text) {
 	}
 	switch (event) {
 	case ZVUKPLAY_STARTED:
+		confirm_requested_place();
 		player_refresh_now_playing();
 		if (list && playing_update()) {
 			svclist_rebind(list);
@@ -1609,8 +1648,11 @@ static void ensure_list(void) {
 
 static void build_list_page(gui_config_t *cfg) {
 	list_screen = lv_obj_create(NULL);
+	switcher_browse_bind("zvuk", list_screen, zvuk_screen);
 	lv_obj_add_style(list_screen, &theme_style_screen, 0);
 	list_title = settingsrow_title(list_screen, cfg, "");
+	settingsrow_title_corner_slots(list_title, cfg, 1);
+	trackmenu_queue_button(list_screen, cfg, 0);
 	int top = settingsrow_content_top(cfg);
 
 	album_bar = bar_create(list_screen, LV_FLEX_ALIGN_CENTER);
@@ -1711,6 +1753,7 @@ static void search_accept_cb(lv_event_t *e) {
 
 static void build_search_page(gui_config_t *cfg) {
 	search_screen = lv_obj_create(NULL);
+	switcher_browse_bind("zvuk", search_screen, zvuk_screen);
 	lv_obj_add_style(search_screen, &theme_style_screen, 0);
 	main_menu_search_header(search_screen, cfg, HOME_ZVUK);
 	int top = settingsrow_content_top(cfg);
@@ -1730,6 +1773,7 @@ static void build_search_page(gui_config_t *cfg) {
 	lv_obj_set_style_pad_hor(search_field, SX_CARD_PAD_H, 0);
 	lv_obj_set_style_text_font(search_field, &font_ui_24, 0);
 	keyboard_style_caret(search_field);
+	main_menu_search_bind(search_screen, search_field);
 	keyboard_create(search_screen, cfg->screen_width, 316, search_field, NULL, "ok", search_accept_cb, NULL);
 	switcher_attach_back_gesture(search_screen);
 }
@@ -1976,6 +2020,29 @@ static void open_cb(lv_event_t *e) {
 	open_list(tr(TITLES[kind]), kind, NULL, NULL, 0);
 }
 
+void zvukpage_search_results_kind(const char *query, int kind) {
+	gui_init_rest();
+	if (!zvuk_logged_in()) {
+		switch_screen(zvuk_screen);
+		return;
+	}
+	open_list(query, JOB_SEARCH, query, NULL, kind >= 0 && kind <= 2 ? kind : ZVUK_SEARCH_TRACKS);
+}
+
+void zvukpage_search_results(const char *query) { zvukpage_search_results_kind(query, -1); }
+
+void zvukpage_open_artist(const char *id, const char *name) {
+	if (zvuk_logged_in())
+		open_list(name, JOB_ARTIST, id, NULL, 0);
+}
+
+void zvukpage_note_search_play(const char *query, const char *path) {
+	playbackplace_t place = {.kind = JOB_SEARCH};
+	snprintf(place.title, sizeof(place.title), "%s", query);
+	snprintf(place.a, sizeof(place.a), "%s", query);
+	playbackplace_arm("zvuk", &place, path);
+}
+
 void zvukpage_search_open(void) {
 	gui_init_rest();
 	switch_screen(zvuk_logged_in() ? search_screen : zvuk_screen);
@@ -2061,6 +2128,46 @@ bool zvukpage_open_album(const char *album_id, const char *title) {
 	return true;
 }
 
+static bool provider_open_playback_place(void) {
+	playbackplace_t place;
+	if (!zvuk_logged_in() || !playbackplace_get("zvuk", &place))
+		return false;
+	switch ((job_kind_t)place.kind) {
+	case JOB_LIKED:
+	case JOB_PLAYLIST:
+	case JOB_ALBUM:
+	case JOB_ARTIST:
+	case JOB_SEARCH:
+	case JOB_SAVED:
+	case JOB_SAVED_ALBUM:
+	case JOB_BOOK:
+	case JOB_PODCAST:
+		break;
+	default:
+		return false;
+	}
+	list_step_t step = {.kind = (job_kind_t)place.kind};
+	snprintf(step.title, sizeof(step.title), "%.*s", (int)sizeof(step.title) - 1, place.title);
+	snprintf(step.a, sizeof(step.a), "%.*s", (int)sizeof(step.a) - 1, place.a);
+	snprintf(step.b, sizeof(step.b), "%.*s", (int)sizeof(step.b) - 1, place.b);
+	step.n = place.filter;
+	char path[512], id[64];
+	audio_get_current_file(path, sizeof(path));
+	zvukcache_track_id(path, id, sizeof(id));
+	if (!id[0])
+		zvukcache_track_id(place.path, id, sizeof(id));
+	step.anchor = (svclist_anchor_t){.index = place.index, .valid = true};
+	if (id[0])
+		snprintf(step.anchor.key, sizeof(step.anchor.key), "%d:%zu:%s:", ROW_TRACK, strlen(id), id);
+	note_list_step(&step);
+	list_current = step;
+	list_has_current = true;
+	returning_place = true;
+	show_list(&list_current);
+	returning_place = false;
+	return true;
+}
+
 static void *provider_open_album(const char *album_id, const char *title) { return zvukpage_open_album(album_id, title) ? list_screen : NULL; }
 
 void zvukpage_check_connection_cb(lv_event_t *e) {
@@ -2091,12 +2198,14 @@ static void build_signed_out(lv_obj_t *column) {
 
 void zvukpage_init(gui_config_t *cfg) {
 	page_cfg = cfg;
-	const stream_provider_gui_t provider_gui = {.badge = &icon_zvuk_badge, .open_album = provider_open_album};
+	const stream_provider_gui_t provider_gui = {.badge = &icon_zvuk_badge, .open_album = provider_open_album, .open_playback_place = provider_open_playback_place};
 	stream_provider_attach_gui("zvuk", &provider_gui);
 
 	zvuk_screen = lv_obj_create(NULL);
+	switcher_browse_bind("zvuk", zvuk_screen, zvuk_screen);
 	lv_obj_add_style(zvuk_screen, &theme_style_screen, 0);
-	settingsrow_title(zvuk_screen, cfg, "zvuk");
+	settingsrow_title_corner_slots(settingsrow_title(zvuk_screen, cfg, "zvuk"), cfg, 1);
+	trackmenu_queue_button(zvuk_screen, cfg, 0);
 	home_search = svcui_header_button(zvuk_screen, cfg, 0, &icon_search, open_search_cb, NULL);
 
 	home_in = svcui_column(zvuk_screen, cfg);

@@ -1,6 +1,7 @@
 #ifndef SUBSONICPAGE_H
 #define SUBSONICPAGE_H
 
+#include "src/gui/library/searchsource.h"
 #include <stdbool.h>
 
 #include "src/gui/shell/gui.h"
@@ -22,5 +23,9 @@ bool subsonicpage_open_album(const char *album_id, const char *title);
 
 // The list page, for callers that need to know where back leads.
 extern lv_obj_t *subsonic_list_screen;
+
+void subsonicpage_search_results_kind(const char *query, int kind);
+bool subsonicpage_search_path(const search_hit_t *hit, char *out, size_t size);
+void subsonicpage_search_open_hit(const search_result_t *result, int index, const char *query);
 
 #endif /* SUBSONICPAGE_H */

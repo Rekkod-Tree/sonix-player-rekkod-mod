@@ -116,6 +116,8 @@ void sx_row_set_person(lv_obj_t *row, const lv_image_dsc_t *image, const char *n
 // A glyph (white, at its own size) on a tone plaque: a folder, a file that has
 // no picture of its own.
 void sx_row_set_glyph(lv_obj_t *row, const lv_image_dsc_t *glyph, lv_color_t tone);
+// A neutral UI icon, without an artwork plaque; follows theme changes.
+void sx_row_set_icon(lv_obj_t *row, const lv_image_dsc_t *glyph);
 void sx_row_set_number(lv_obj_t *row, int number);
 void sx_row_set_letter(lv_obj_t *row, const char *letter, lv_color_t tone, bool round);
 void sx_row_set_no_lead(lv_obj_t *row);

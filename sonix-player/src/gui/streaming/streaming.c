@@ -1,10 +1,12 @@
 #include "streaming.h"
+#include "src/gui/shell/playbackplace.h"
+#include "src/system/streaming/provider.h"
 
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "lvgl/lvgl.h"
 
@@ -80,23 +82,64 @@ typedef enum {
 	SVC_COUNT,
 } service_t;
 
+static void open_service_place(service_t service);
+static bool service_signed_in(service_t service);
+#define PLACE_SHORTCUT(name, service)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  \
+	static void name##_place(void) { open_service_place(service); }                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    \
+	static void name##_place_description(char *text, size_t size) {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    \
+		snprintf(text, size, "%s", tr(#name));                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         \
+		if (service_signed_in(service) && !switcher_browse_description(#name, text, size))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             \
+			playbackplace_description(#name, text, size);                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              \
+	}
+PLACE_SHORTCUT(tidal, SVC_TIDAL)
+PLACE_SHORTCUT(qobuz, SVC_QOBUZ)
+PLACE_SHORTCUT(subsonic, SVC_SUBSONIC)
+PLACE_SHORTCUT(yandex, SVC_YANDEX)
+#ifdef SONIX_ZVUK
+PLACE_SHORTCUT(zvuk, SVC_ZVUK)
+#endif
+#undef PLACE_SHORTCUT
+
 static const struct {
 	const char *id; // its name in the config, never translated
 	grid_entry_t entry;
 } SERVICES[SVC_COUNT] = {
-	[SVC_TIDAL] = {"tidal", {"tidal", &icon_menu_tidal, &tidal_screen, NULL}},
-	[SVC_QOBUZ] = {"qobuz", {"qobuz", &icon_menu_qobuz, &qobuz_screen, NULL}},
+	[SVC_TIDAL] = {"tidal", {"tidal", &icon_menu_tidal, NULL, tidal_place, tidal_place_description}},
+	[SVC_QOBUZ] = {"qobuz", {"qobuz", &icon_menu_qobuz, NULL, qobuz_place, qobuz_place_description}},
 	[SVC_RADIO] = {"radio", {"radio", &icon_menu_radio, &radiopage_screen, NULL}},
 	[SVC_PODCASTS] = {"podcasts", {"podcasts", &icon_menu_podcast, &podcast_screen, NULL}},
 	// The user's own server: Navidrome, Gonic, Airsonic...
-	[SVC_SUBSONIC] = {"subsonic", {"subsonic", &icon_menu_subsonic, &subsonic_screen, NULL}},
-	[SVC_YANDEX] = {"yandex", {"yandex", &icon_menu_yandex, &yandex_screen, NULL}},
+	[SVC_SUBSONIC] = {"subsonic", {"subsonic", &icon_menu_subsonic, NULL, subsonic_place, subsonic_place_description}},
+	[SVC_YANDEX] = {"yandex", {"yandex", &icon_menu_yandex, NULL, yandex_place, yandex_place_description}},
 	[SVC_SPOTIFY] = {"spotify", {"spotify", &icon_menu_spotify, NULL, spotifypage_open}},
 #ifdef SONIX_ZVUK
 	// Fork only (Makefile: SONIX_ZVUK).
-	[SVC_ZVUK] = {"zvuk", {"zvuk", &icon_menu_zvuk, &zvuk_screen, NULL}},
+	[SVC_ZVUK] = {"zvuk", {"zvuk", &icon_menu_zvuk, NULL, zvuk_place, zvuk_place_description}},
 #endif
 };
+
+static void open_service_place(service_t service) {
+	gui_init_rest();
+	const char *source = SERVICES[service].id;
+	if (service_signed_in(service)) {
+		if (switcher_browse_open(source))
+			return;
+	} else
+		switcher_browse_forget(source);
+	lv_obj_t *root = service == SVC_TIDAL ? tidal_screen : service == SVC_QOBUZ ? qobuz_screen : service == SVC_SUBSONIC ? subsonic_screen : yandex_screen;
+#ifdef SONIX_ZVUK
+	if (service == SVC_ZVUK)
+		root = zvuk_screen;
+#endif
+	switch_screen(root);
+	for (int i = 0; i < stream_provider_count(); i++) {
+		const stream_provider_t *provider = stream_provider_at(i);
+		if (!strcmp(provider->id, SERVICES[service].id) && provider->gui.open_playback_place) {
+			provider->gui.open_playback_place();
+			return;
+		}
+	}
+}
 
 static service_t added[SVC_COUNT];
 static int added_n;

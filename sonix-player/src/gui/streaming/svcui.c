@@ -18,11 +18,30 @@
 #include "src/gui/shell/theme.h"
 #include "src/system/core/lang.h"
 #include "src/system/playback/device_state.h"
+#include "src/system/streaming/podcastcache.h"
+#include "src/system/streaming/provider.h"
 
 // See svcui.h.
 
-lv_obj_t *svcui_header_button(lv_obj_t *screen, gui_config_t *cfg, int slot, const lv_image_dsc_t *glyph,
-							  lv_event_cb_t cb, void *user) {
+const char *svcui_track_source(const char *path) {
+	if (!path || !path[0])
+		return "";
+	const stream_provider_t *provider = stream_provider_for_path(path);
+	if (provider)
+		return tr(provider->id);
+	if (podcastcache_is_episode(path))
+		return "RSS";
+	return tr("home_search_card");
+}
+
+void svcui_track_caption(const char *path, const char *detail, char *out, size_t size) {
+	if (!out || !size)
+		return;
+	const char *source = svcui_track_source(path);
+	snprintf(out, size, "%s%s%s", source, source[0] && detail && detail[0] ? " · " : "", detail ? detail : "");
+}
+
+lv_obj_t *svcui_header_button(lv_obj_t *screen, gui_config_t *cfg, int slot, const lv_image_dsc_t *glyph, lv_event_cb_t cb, void *user) {
 	lv_obj_t *button = lv_btn_create(screen);
 	lv_obj_set_size(button, 56, 56);
 	lv_obj_set_style_bg_opa(button, LV_OPA_TRANSP, 0);
@@ -115,16 +134,14 @@ int svcui_queue(const char *const *paths, int count, playlist_queue_where_t wher
 		return 0; // the reason has been said
 	}
 	char line[320];
-	lv_snprintf(line, sizeof(line), tr(where == PLAYLIST_QUEUE_NEXT ? "svc_queued_next" : "svc_queued_end"),
-				what && what[0] ? what : "");
+	lv_snprintf(line, sizeof(line), tr(where == PLAYLIST_QUEUE_NEXT ? "svc_queued_next" : "svc_queued_end"), what && what[0] ? what : "");
 	// Without "Undo" when nothing was queued before: the set became the queue,
 	// and taking it out again would be emptying it.
 	queue_undo_commit(line);
 	return queued;
 }
 
-void svcui_star_toast(bool on, const char *on_key, const char *off_key, const char *what, void (*undo)(void *user),
-					  void *user) {
+void svcui_star_toast(bool on, const char *on_key, const char *off_key, const char *what, void (*undo)(void *user), void *user) {
 	char line[320];
 	lv_snprintf(line, sizeof(line), tr(on ? on_key : off_key), what && what[0] ? what : "");
 	if (undo) {

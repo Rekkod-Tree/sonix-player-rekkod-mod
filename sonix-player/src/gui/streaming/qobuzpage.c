@@ -1,5 +1,7 @@
 #include "qobuzpage.h"
+#include "src/gui/nowplaying/trackmenu.h"
 #include "src/gui/shell/artview.h"
+#include "src/gui/shell/playbackplace.h"
 #include "src/system/playback/sleeptimer.h"
 
 #include <malloc.h>
@@ -1093,7 +1095,10 @@ static void cover_ready_async(void *user) {
 
 // 2.0: the page stays where it is, the mini player comes up with the track
 // (the player is a tap on it away), and the row playing is marked.
+static void place_started(void);
+static void place_reveal(void);
 static void play_started_async(void *user) {
+	place_started();
 	(void)user;
 	player_refresh_now_playing();
 	if (playing_update()) {
@@ -1374,6 +1379,7 @@ static void do_play(int index, unsigned sleep_serial) {
 //      there yet -- in that case the first missing one is exactly the one being
 //      waited for, and gets served first on its own.
 static void queue_watch_cb(lv_timer_t *timer) {
+	place_reveal();
 	(void)timer;
 	// The playing row follows the track, which moves on by itself; only
 	// while the list is on screen.
@@ -1799,7 +1805,73 @@ static bool list_back_guard(void) {
 	return true;
 }
 
+static playbackplace_t requested_place, reveal_place;
+static char requested_id[128];
+static bool reveal_pending;
+static unsigned reveal_serial;
+static void maybe_load_more(void);
+
+static void place_requested(const job_t *job) {
+	if (job->kind != JOB_PLAY || !have_current_list || !kind_is_tracks(current_list_job.kind) || job->index < 0 || job->index >= shown_count)
+		return;
+	requested_place = (playbackplace_t){.kind = current_list_job.kind, .index = job->index};
+	snprintf(requested_place.title, sizeof(requested_place.title), "%s", lv_label_get_text(list_title));
+	snprintf(requested_place.a, sizeof(requested_place.a), "%s", current_list_job.id_text);
+	snprintf(requested_place.b, sizeof(requested_place.b), "%.*s", (int)sizeof(requested_place.b) - 1, current_list_job.text);
+	requested_place.filter = (int32_t)current_list_job.id;
+	snprintf(requested_id, sizeof(requested_id), "%ld", result_tracks[job->index].id);
+}
+
+static void place_started(void) {
+	if (!requested_id[0])
+		return;
+	char path[512], id[128];
+	audio_get_current_file(path, sizeof(path));
+	snprintf(id, sizeof(id), "%ld", qobuzcache_track_id(path));
+	if (!strcmp(id, requested_id))
+		playbackplace_arm("qobuz", &requested_place, path);
+	requested_id[0] = 0;
+}
+
+static void place_reveal(void) {
+	if (!reveal_pending || lv_screen_active() != list_screen)
+		return;
+	if (!lv_obj_is_hidden(list_spin))
+		return;
+	if (!lv_obj_is_hidden(list_error)) {
+		reveal_pending = false;
+		return;
+	}
+	if (reveal_serial != list_serial) {
+		reveal_pending = false;
+		return;
+	}
+	char path[512];
+	audio_get_current_file(path, sizeof(path));
+	long id = qobuzcache_track_id(path);
+	if (!id)
+		id = qobuzcache_track_id(reveal_place.path);
+	int found = -1;
+	for (int i = 0; id && i < shown_count; i++)
+		if (result_tracks[i].id == id) {
+			found = i;
+			break;
+		}
+	if (found < 0 && page_loading)
+		return;
+	if (found < 0 && page_more) {
+		maybe_load_more();
+		return;
+	}
+	if (found < 0)
+		found = reveal_place.index;
+	svclist_anchor_t anchor = {.index = found, .valid = true};
+	svclist_restore(list, &anchor);
+	reveal_pending = false;
+}
+
 static void run(const job_t *job_in, const char *waiting_text) {
+	place_requested(job_in);
 	(void)waiting_text;
 	job_t copy = *job_in;
 	copy.sleep_serial = sleeptimer_expiration_serial();
@@ -2020,6 +2092,7 @@ static void open_search_cb(lv_event_t *e) {
 
 static void build_search_page(gui_config_t *cfg) {
 	search_screen = lv_obj_create(NULL);
+	switcher_browse_bind("qobuz", search_screen, qobuz_screen);
 	lv_obj_add_style(search_screen, &theme_style_screen, 0);
 
 	settingsrow_title(search_screen, cfg, "qobuz_search_qobuz");
@@ -2366,6 +2439,7 @@ static void home_loaded_cb(lv_event_t *e) {
 
 static void build_list_page(gui_config_t *cfg) {
 	list_screen = lv_obj_create(NULL);
+	switcher_browse_bind("qobuz", list_screen, qobuz_screen);
 	lv_obj_add_style(list_screen, &theme_style_screen, 0);
 	lv_obj_add_event_cb(list_screen, list_loaded_cb, LV_EVENT_SCREEN_LOADED, NULL);
 	lv_obj_add_event_cb(list_screen, list_unloaded_cb, LV_EVENT_SCREEN_UNLOADED, NULL);
@@ -2409,22 +2483,39 @@ static void build_list_page(gui_config_t *cfg) {
 
 // "Show album" from the player, as the provider registry asks for it: the
 // screen back leads to, or NULL when the album could not be opened.
+static bool provider_open_playback_place(void) {
+	playbackplace_t place;
+	if (!qobuz_logged_in() || !playbackplace_get("qobuz", &place) || !kind_is_tracks((job_kind_t)place.kind))
+		return false;
+	job_t job = {.kind = (job_kind_t)place.kind};
+	snprintf(job.id_text, sizeof(job.id_text), "%.*s", (int)sizeof(job.id_text) - 1, place.a);
+	snprintf(job.text, sizeof(job.text), "%s", place.b);
+	job.id = place.filter;
+	reveal_place = place;
+	reveal_pending = true;
+	run(&job, "loading");
+	reveal_serial = list_serial;
+	return true;
+}
+
 static void *provider_open_album(const char *album_id, const char *title) { return qobuzpage_open_album(album_id, title) ? qobuz_list_screen : NULL; }
 
 void qobuzpage_init(gui_config_t *cfg) {
 	// What only the GUI can tell the rest of the program about Qobuz: its mark
 	// over the artwork and how to open one of its albums (provider.h).
-	const stream_provider_gui_t provider_gui = {.badge = &icon_qobuz_badge, .open_album = provider_open_album};
+	const stream_provider_gui_t provider_gui = {.badge = &icon_qobuz_badge, .open_album = provider_open_album, .open_playback_place = provider_open_playback_place};
 	stream_provider_attach_gui("qobuz", &provider_gui);
 
 	qobuz_screen = lv_obj_create(NULL);
+	switcher_browse_bind("qobuz", qobuz_screen, qobuz_screen);
 	lv_obj_add_style(qobuz_screen, &theme_style_screen, 0);
 	lv_obj_t *title = settingsrow_title(qobuz_screen, cfg, "qobuz");
 	home_container = svcui_column(qobuz_screen, cfg);
 
 	// The magnifier top right. The title must be told the corner is taken,
 	// otherwise its text runs under it.
-	settingsrow_title_corner_slots(title, cfg, 1);
+	settingsrow_title_corner_slots(title, cfg, 2);
+	trackmenu_queue_button(qobuz_screen, cfg, 1);
 	search_btn = svcui_header_button(qobuz_screen, cfg, 0, &icon_search, open_search_cb, NULL);
 
 	build_list_page(cfg);
@@ -2453,4 +2544,63 @@ void qobuzpage_init(gui_config_t *cfg) {
 	switcher_attach_back_gesture(qobuz_screen);
 	player_sheet_attach_drag(qobuz_screen, true);
 	player_sheet_attach_drag(home_container, true);
+}
+
+// Search overview actions use the same native cache metadata and prefetch.
+void qobuzpage_search_results_kind(const char *query, int kind) {
+	gui_init_rest();
+	if (!qobuz_logged_in() || !query || !query[0])
+		return;
+	job_t job = {0};
+	job.kind = kind == SEARCH_ALBUM ? JOB_SEARCH_ALBUMS : kind == SEARCH_ARTIST ? JOB_SEARCH_ARTISTS : JOB_SEARCH_TRACKS;
+	snprintf(job.text, sizeof(job.text), "%s", query);
+	run(&job, "searching");
+}
+bool qobuzpage_search_path(const search_hit_t *hit, char *out, size_t size) {
+	if (!hit || hit->kind != SEARCH_TRACK || !hit->data || !qobuz_logged_in())
+		return false;
+	const qobuz_track_t *track = hit->data;
+	if (!track->streamable) {
+		toast_error(tr("stream_not_in_subscription"));
+		return false;
+	}
+	out[0] = 0;
+	queued_add(track, out, size);
+	return out[0] != 0;
+}
+void qobuzpage_search_open_hit(const search_result_t *r, int at, const char *query) {
+	const search_hit_t *hit = &r->hits[at];
+	if (hit->kind == SEARCH_TRACK && hit->data && !((const qobuz_track_t *)hit->data)->streamable) {
+		toast_error(tr("stream_not_in_subscription"));
+		return;
+	}
+	if (hit->kind != SEARCH_TRACK) {
+		job_t job = {0};
+		job.kind = hit->kind == SEARCH_ALBUM ? JOB_ALBUM_TRACKS : JOB_ARTIST_ALBUMS;
+		snprintf(job.text, sizeof(job.text), "%s", hit->name);
+		if (hit->kind == SEARCH_ALBUM)
+			snprintf(job.id_text, sizeof(job.id_text), "%.*s", (int)sizeof(job.id_text) - 1, hit->id);
+		else
+			job.id = strtol(hit->id, NULL, 10);
+		run(&job, "loading");
+		return;
+	}
+	char paths[SEARCH_PREVIEW][512];
+	const char *ptrs[SEARCH_PREVIEW];
+	int count = 0, start = -1;
+	for (int i = 0; i < r->count && count < SEARCH_PREVIEW; i++)
+		if (r->hits[i].kind == SEARCH_TRACK && r->hits[i].data && ((const qobuz_track_t *)r->hits[i].data)->streamable && qobuzpage_search_path(&r->hits[i], paths[count], sizeof(paths[0]))) {
+			if (i == at)
+				start = count;
+			ptrs[count] = paths[count];
+			count++;
+		}
+	if (start < 0)
+		return;
+	device_state_play_list(ptrs, count, start);
+	playbackplace_t place = {.kind = JOB_SEARCH_TRACKS, .index = start};
+	snprintf(place.title, sizeof(place.title), "%s", query);
+	snprintf(place.b, sizeof(place.b), "%s", query);
+	playbackplace_arm("qobuz", &place, paths[start]);
+	player_refresh_now_playing();
 }

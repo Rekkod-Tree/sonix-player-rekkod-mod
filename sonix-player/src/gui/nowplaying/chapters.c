@@ -253,9 +253,10 @@ void chapters_refresh(void) {
 }
 
 void chapters_open(void) {
+	bool return_to_player = player_sheet_is_open();
 	player_sheet_close(false);
 	switch_screen(chapters_screen);
-	switcher_set_player_return(chapters_screen);
+	switcher_set_player_return(return_to_player ? chapters_screen : NULL);
 }
 
 void chapters_init(gui_config_t *cfg) {

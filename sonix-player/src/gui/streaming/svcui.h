@@ -22,8 +22,7 @@
 
 // A button in the header, right of the title: slot 0 in the corner, slot 1
 // to its left. The same 56 px target and spacing as the Music page's.
-lv_obj_t *svcui_header_button(lv_obj_t *screen, gui_config_t *cfg, int slot, const lv_image_dsc_t *glyph,
-							  lv_event_cb_t cb, void *user);
+lv_obj_t *svcui_header_button(lv_obj_t *screen, gui_config_t *cfg, int slot, const lv_image_dsc_t *glyph, lv_event_cb_t cb, void *user);
 
 // The handoff's group heading -- "FAVOURITES · 3" -- as a line in a column of
 // cards (a list draws its own, svclist.h). Mono caps in the secondary colour.
@@ -46,6 +45,11 @@ lv_obj_t *svcui_note(lv_obj_t *parent, const char *text);
 lv_color_t svcui_tone(const char *name);
 float svcui_hue(const char *name);
 
+// Read-only source caption for cross-service screens. Cache ownership is an
+// in-memory lookup; a local copy is shown as Card, without guessing its origin.
+const char *svcui_track_source(const char *path);
+void svcui_track_caption(const char *path, const char *detail, char *out, size_t size);
+
 // "Play next" / "Add to the end of the queue" from a streaming row: the
 // tracks (their files, or the cache paths their service fetches when they
 // come up) go into the queue, the queue is written to the card once, and the
@@ -58,8 +62,7 @@ int svcui_queue(const char *const *paths, int count, playlist_queue_where_t wher
 // The toast for a star turned on or off from a row, with "Undo" calling
 // `undo(user)`. `on_key` / `off_key`: the translation keys of the two
 // sentences, each with one %s for `what`.
-void svcui_star_toast(bool on, const char *on_key, const char *off_key, const char *what, void (*undo)(void *user),
-					  void *user);
+void svcui_star_toast(bool on, const char *on_key, const char *off_key, const char *what, void (*undo)(void *user), void *user);
 
 // A wait in the middle of a page, for a list on its way: the spinner alone,
 // over the page, not blocking it (the handoff has no veils). Shown and hidden

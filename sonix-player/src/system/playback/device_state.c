@@ -120,8 +120,7 @@ static remember_state_t remember = {.pos = -1.0, .restore_pos = -1.0};
 
 // Whether this sample is worth writing. Updates `st` when it says yes, so the
 // caller has nothing to remember on its own.
-static bool remember_should_write(remember_state_t *st, const char *file, audio_status_t status, double pos,
-								  uint32_t now) {
+static bool remember_should_write(remember_state_t *st, const char *file, audio_status_t status, double pos, uint32_t now) {
 	// The restore latch: hold everything until the engine reports the position
 	// that was asked for, and let go on its own if it never does.
 	if (st->restore_pos >= 0) {
@@ -179,9 +178,7 @@ static bool remember_enabled(void) { return device_state_remember_enabled(); }
 
 // A track this player must not offer to come back to: a live stream has no
 // position, and a streaming cache file will not exist at the next boot.
-static bool remember_worth_saving(const device_state_t *state) {
-	return !state->live && state->current_file[0] && !stream_provider_owns(state->current_file);
-}
+static bool remember_worth_saving(const device_state_t *state) { return !state->live && state->current_file[0] && !stream_provider_owns(state->current_file); }
 
 void device_state_remember_restored(const char *path, double position) {
 	snprintf(remember.file, sizeof(remember.file), "%s", path ? path : "");
@@ -199,8 +196,7 @@ void device_state_remember_restored(const char *path, double position) {
 // after a reboot played that second and stopped again, and looked as if it did
 // nothing.
 static double remember_position(const device_state_t *state) {
-	if (state->status != AUDIO_STATUS_PLAYING && state->progress_total_secs > 2.0 &&
-		state->progress_current_secs >= state->progress_total_secs - 1.0) {
+	if (state->status != AUDIO_STATUS_PLAYING && state->progress_total_secs > 2.0 && state->progress_current_secs >= state->progress_total_secs - 1.0) {
 		return 0.0;
 	}
 	return state->progress_current_secs;
@@ -563,7 +559,7 @@ static void history_leave_for(const char *next, double position) {
 // pressed.
 static void note_started(bool restored) {
 	snprintf(started_file, sizeof(started_file), "%s", current_metadata_file);
-	bool kept_out = audiobook_is_playing() || podcastcache_is_episode(current_metadata_file) || podcastdl_owns(current_metadata_file) || dlna_owns_path(current_metadata_file);
+	bool kept_out = dlna_owns_path(current_metadata_file);
 	playhistory_started(current_metadata_file, current_metadata.title, metadata_shown_artist(&current_metadata), kept_out, restored);
 }
 
@@ -729,8 +725,7 @@ static void restore_queue_album(void) {
 
 // The same restore, but with the queue that was saved next to the track, so
 // next and prev work from the first press.
-void device_state_restore_index(library_index_t *ix, int start_index, const char *const *extra,
-								const int *extra_slots, int extra_count, const char *filepath, double position) {
+void device_state_restore_index(library_index_t *ix, int start_index, const char *const *extra, const int *extra_slots, int extra_count, const char *filepath, double position) {
 	// Same reason as load_and_play: this changes the track too.
 	scrub_cancel();
 
@@ -793,8 +788,7 @@ void device_state_restore_index(library_index_t *ix, int start_index, const char
 	device_state_remember_restored(current_metadata_file, position);
 }
 
-void device_state_restore_list(const char *const *list, int count, int start_index, bool custom, const char *filepath,
-							   double position) {
+void device_state_restore_list(const char *const *list, int count, int start_index, bool custom, const char *filepath, double position) {
 	// Same reason as load_and_play: this changes the track too.
 	scrub_cancel();
 
@@ -904,8 +898,7 @@ static void parked_before_new_queue(const char *first_path) {
 	if (playlist_count() > 0 && playlist_appended_count() <= PARKED_MAX_PATHS) {
 		parked = playlist_snapshot_take();
 		if (parked) {
-			fprintf(stderr, "queue: parked %d track(s) behind '%s' (%zu bytes)\n", playlist_snapshot_count(parked),
-					first_path, playlist_snapshot_bytes(parked));
+			fprintf(stderr, "queue: parked %d track(s) behind '%s' (%zu bytes)\n", playlist_snapshot_count(parked), first_path, playlist_snapshot_bytes(parked));
 		}
 	}
 }
@@ -920,9 +913,7 @@ bool device_state_parked(int *count, int *position) {
 	return parked != NULL;
 }
 
-bool device_state_parked_path(int index, char *out, size_t size) {
-	return playlist_snapshot_path_at(parked, index, out, size);
-}
+bool device_state_parked_path(int index, char *out, size_t size) { return playlist_snapshot_path_at(parked, index, out, size); }
 
 bool device_state_resume_parked(int index) {
 	if (!parked) {
@@ -990,8 +981,8 @@ void device_state_play_file(const char *filepath) {
 	const char *filename = filepath;
 	char *slash = strrchr(folder, '/');
 	if (slash) {
-		*slash = '\0';		   // terminate the folder portion
-		filename = slash + 1;  // the bare file name within the folder
+		*slash = '\0';		  // terminate the folder portion
+		filename = slash + 1; // the bare file name within the folder
 	}
 
 	playlist_load_folder(folder, filename);
@@ -1166,13 +1157,11 @@ static bool album_track_cb(const char *name, const char *path, const char *artis
 // no tracks.
 static bool start_album(const char *wanted, bool forward) {
 	album_tracks_t tracks = {NULL, 0, 0};
-	library_for_each_ordered(LIBRARY_LIST_TRACKS, LIBRARY_FILTER_ALBUM, wanted, LIBRARY_ORDER_DEFAULT,
-							 album_track_cb, &tracks);
+	library_for_each_ordered(LIBRARY_LIST_TRACKS, LIBRARY_FILTER_ALBUM, wanted, LIBRARY_ORDER_DEFAULT, album_track_cb, &tracks);
 
 	bool started = false;
 	if (tracks.count > 0) {
-		device_state_play_list((const char *const *)tracks.paths, tracks.count,
-							   forward ? 0 : tracks.count - 1);
+		device_state_play_list((const char *const *)tracks.paths, tracks.count, forward ? 0 : tracks.count - 1);
 		playlist_set_album(wanted); // so the record beyond that one can follow too
 		char shown[256];
 		library_album_title(wanted, shown, sizeof(shown));
@@ -1231,8 +1220,7 @@ static bool random_albums_recent(const char *album, int how_far) {
 
 static void random_albums_push(const char *album) {
 	if (random_albums.depth == RANDOM_ALBUM_HISTORY) {
-		memmove(random_albums.history[0], random_albums.history[1],
-				(RANDOM_ALBUM_HISTORY - 1) * sizeof(random_albums.history[0]));
+		memmove(random_albums.history[0], random_albums.history[1], (RANDOM_ALBUM_HISTORY - 1) * sizeof(random_albums.history[0]));
 		random_albums.depth--;
 	}
 	snprintf(random_albums.history[random_albums.depth++], sizeof(random_albums.history[0]), "%s", album);
@@ -1242,9 +1230,7 @@ static void random_albums_push(const char *album) {
 // is long enough, none of the last few played either. False when the list has
 // no record to give.
 static bool random_albums_pick(const char *avoid, char *out, size_t size) {
-	library_index_t *ix = library_index_open(LIBRARY_LIST_ALBUMS, random_albums.filter,
-											 random_albums.value[0] ? random_albums.value : NULL,
-											 LIBRARY_ORDER_DEFAULT, false);
+	library_index_t *ix = library_index_open(LIBRARY_LIST_ALBUMS, random_albums.filter, random_albums.value[0] ? random_albums.value : NULL, LIBRARY_ORDER_DEFAULT, false);
 	int count = library_index_count(ix);
 	if (count <= 0) {
 		library_index_close(ix);
@@ -1309,8 +1295,7 @@ bool device_state_play_random_album(library_filter_t filter, const char *value) 
 // another at random going forward, the one before going back. False when the
 // queue is not one of those records, which leaves the step to the order by name.
 static bool random_albums_beside(const char *current, bool forward) {
-	if (!random_albums.on || random_albums.depth == 0 ||
-		!library_album_same(random_albums.history[random_albums.depth - 1], current)) {
+	if (!random_albums.on || random_albums.depth == 0 || !library_album_same(random_albums.history[random_albums.depth - 1], current)) {
 		random_albums.on = false;
 		return false;
 	}
@@ -1380,8 +1365,7 @@ static bool play_folder_beside(const char *file, bool forward) {
 	*slash = '\0';
 
 	char wanted[512];
-	bool have = forward ? playlist_next_folder(root, folder, wanted, sizeof(wanted))
-						: playlist_prev_folder(root, folder, wanted, sizeof(wanted));
+	bool have = forward ? playlist_next_folder(root, folder, wanted, sizeof(wanted)) : playlist_prev_folder(root, folder, wanted, sizeof(wanted));
 	if (!have) {
 		return false;
 	}
@@ -1424,8 +1408,7 @@ static bool chain_beside(bool forward) {
 			return true;
 		}
 	}
-	if (device_state_folder_chaining() && !playlist_is_custom() &&
-		play_folder_beside(current_metadata_file, forward)) {
+	if (device_state_folder_chaining() && !playlist_is_custom() && play_folder_beside(current_metadata_file, forward)) {
 		return true;
 	}
 	return false;
@@ -1439,8 +1422,7 @@ static device_state_stop_after_t stop_after;
 
 void device_state_set_stop_after(device_state_stop_after_t when) {
 	stop_after = when;
-	fprintf(stderr, "player: stop after %s\n",
-			when == DEVICE_STATE_STOP_AFTER_TRACK ? "this track" : when == DEVICE_STATE_STOP_AFTER_ALBUM ? "this album" : "nothing");
+	fprintf(stderr, "player: stop after %s\n", when == DEVICE_STATE_STOP_AFTER_TRACK ? "this track" : when == DEVICE_STATE_STOP_AFTER_ALBUM ? "this album" : "nothing");
 }
 
 device_state_stop_after_t device_state_stop_after(void) { return stop_after; }
@@ -1500,8 +1482,7 @@ static bool stop_after_fire(char *out_path, size_t out_size) {
 	fprintf(stderr, "player: stopping after this %s, as asked\n", was == DEVICE_STATE_STOP_AFTER_TRACK ? "track" : "album");
 
 	char next[512];
-	if (playlist_at_end() || playlist_get_mode() == PLAYBACK_MODE_REPEAT_ONE ||
-		!playlist_advance_auto(next, sizeof(next))) {
+	if (playlist_at_end() || playlist_get_mode() == PLAYBACK_MODE_REPEAT_ONE || !playlist_advance_auto(next, sizeof(next))) {
 		return false;
 	}
 	load_paused(next);
@@ -1653,8 +1634,7 @@ bool device_state_advance_auto(char *out_path, size_t out_size) {
 void device_state_read_ahead(double position, double total) {
 	// Only where gapless can use it: what it buys is the next track opening
 	// before the queue held at the end of this one runs out.
-	if (!audio_get_gapless() || radio_is_active() || total <= 0.0 || position < READAHEAD_SETTLE_SECS ||
-		total - position > READAHEAD_LEAD_SECS) {
+	if (!audio_get_gapless() || radio_is_active() || total <= 0.0 || position < READAHEAD_SETTLE_SECS || total - position > READAHEAD_LEAD_SECS) {
 		return;
 	}
 	// The same ends device_state_advance_auto() stops at. At the end of the

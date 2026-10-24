@@ -1,5 +1,7 @@
 #include "search.h"
+#include "src/gui/library/music.h"
 #include "src/gui/shell/artview.h"
+#include "src/gui/shell/playbackplace.h"
 
 #include <ctype.h>
 #include <malloc.h>
@@ -16,8 +18,8 @@
 #include "src/gui/shell/gui.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/keyboard.h"
-#include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/main_menu.h"
+#include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/sx_card.h"
 #include "src/gui/shell/sx_frame.h"
@@ -63,10 +65,10 @@ lv_obj_t *search_screen;
 
 #define FIELD_H 60
 #define FIELD_GAP 8
-#define FIELD_ICON_W 56	 // the ⌕ at the field's left
-#define FIELD_CLEAR_W 60 // the ✕ at its right
-#define SEARCH_KEYBOARD_H 316	 // tall enough for honest fingertip-sized keys
-#define GROUP_H 44		 // a group's heading above its rows
+#define FIELD_ICON_W 56		  // the ⌕ at the field's left
+#define FIELD_CLEAR_W 60	  // the ✕ at its right
+#define SEARCH_KEYBOARD_H 316 // tall enough for honest fingertip-sized keys
+#define GROUP_H 44			  // a group's heading above its rows
 #define RESULTS_BOTTOM 12
 #define RECENT_MAX 6
 #define QUERY_BYTES 256
@@ -136,8 +138,8 @@ typedef struct {
 	lv_obj_t *row;
 	int cat; // -1: unbound
 	int index;
-	char name[256];	 // a track's title, an album's value, an artist
-	char path[512];	 // a track's file
+	char name[256]; // a track's title, an album's value, an artist
+	char path[512]; // a track's file
 	char artist[256];
 	rowart_t art;
 	bool picture_shown;
@@ -165,7 +167,7 @@ static char recent[RECENT_MAX][128];
 static int recent_filter[RECENT_MAX];
 static int recent_count = -1; // -1 until read
 
-static void query_copy(char *out, size_t size, const char *text) {
+void search_query_copy(char *out, size_t size, const char *text) {
 	if (!size)
 		return;
 	if (!text)
@@ -193,7 +195,7 @@ static void recent_load(void) {
 		char key[32], query[sizeof(recent[0])];
 		snprintf(key, sizeof(key), "search_recent_%d", i);
 		const char *q = config_get_copy("library", key, "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE);
-		query_copy(query, sizeof(query), q);
+		search_query_copy(query, sizeof(query), q);
 		if (!query[0])
 			continue;
 		bool duplicate = false;
@@ -275,8 +277,7 @@ static void layout_groups(void) {
 		}
 		group_top[c] = y;
 		char text[96];
-		snprintf(text, sizeof(text), cat_count[c] >= LIBRARY_SEARCH_MAX ? "%s \xC2\xB7 %d+" : "%s \xC2\xB7 %d",
-				 tr(CAT_HEAD[c]), cat_count[c]);
+		snprintf(text, sizeof(text), cat_count[c] >= LIBRARY_SEARCH_MAX ? "%s \xC2\xB7 %d+" : "%s \xC2\xB7 %d", tr(CAT_HEAD[c]), cat_count[c]);
 		lv_label_set_text(heading[c], text);
 		int head_h = group_height();
 		int line_h = lv_font_get_line_height(&font_ui_17);
@@ -304,9 +305,7 @@ static row_t *row_live(void *user) {
 	return r && r->cat >= 0 && r->cat < CAT_COUNT && r->index < cat_count[r->cat] ? r : NULL;
 }
 
-static void row_mark_playing(row_t *r) {
-	sx_row_set_playing(r->row, r->cat == CAT_TRACKS && playing_path[0] && strcmp(r->path, playing_path) == 0);
-}
+static void row_mark_playing(row_t *r) { sx_row_set_playing(r->row, r->cat == CAT_TRACKS && playing_path[0] && strcmp(r->path, playing_path) == 0); }
 
 static void playing_refresh(void) {
 	device_state_t state;
@@ -606,6 +605,10 @@ static void row_tap_cb(lv_obj_t *obj, void *user) {
 			return;
 		}
 		if (ix && device_state_play_index(library_index_clone(ix), r->index)) {
+			playbackplace_t place = {.kind = LIBRARY_LIST_TRACKS, .filter = LIBRARY_FILTER_SEARCH};
+			snprintf(place.title, sizeof(place.title), "%s", searched);
+			snprintf(place.a, sizeof(place.a), "%s", searched);
+			playbackplace_arm("music", &place, r->path);
 			listacts_played();
 		} else if (r->path[0]) {
 			player_play_file(r->path);
@@ -697,8 +700,7 @@ static void remove_cb(void *user) {
 	}
 	sx_sheet_item_t items[MENU_PLAYLISTS_MAX];
 	for (int i = 0; i < menu_playlist_count; i++) {
-		items[i] = (sx_sheet_item_t){menu_playlists[i], &icon_list_music, false, false, remove_one_cb,
-									 (void *)(intptr_t)i};
+		items[i] = (sx_sheet_item_t){menu_playlists[i], &icon_list_music, false, false, remove_one_cb, (void *)(intptr_t)i};
 	}
 	sx_sheet_menu(tr("medialist_remove_from_playlist"), NULL, items, menu_playlist_count);
 }
@@ -716,8 +718,7 @@ static void row_hold_cb(lv_obj_t *obj, void *user) {
 		sx_sheet_item_t extra[1];
 		int n = 0;
 		if (menu_playlist_count > 0) {
-			extra[n++] =
-				(sx_sheet_item_t){tr("medialist_remove_from_playlist"), &icon_list_music, false, true, remove_cb, NULL};
+			extra[n++] = (sx_sheet_item_t){tr("medialist_remove_from_playlist"), &icon_list_music, false, true, remove_cb, NULL};
 		}
 		listacts_track_sheet(r->path, r->name, r->artist, NULL, NULL, NULL, extra, n);
 	} else if (r->cat == CAT_ALBUMS) {
@@ -830,7 +831,7 @@ static void results_clear(void) {
 // stay where they were.
 static void run_search(const char *query, bool keep_place) {
 	char wanted[sizeof(searched)];
-	query_copy(wanted, sizeof(wanted), query);
+	search_query_copy(wanted, sizeof(wanted), query);
 	int scroll = keep_place ? (int)lv_obj_get_scroll_y(results) : 0;
 
 	results_clear();
@@ -1102,9 +1103,54 @@ static void refresh_theme(void) {
 
 void search_open(void) { switch_screen(search_screen); }
 
+void search_open_query_kind(const char *query, int kind) {
+	search_open();
+	filter = kind >= 0 && kind < CAT_COUNT ? kind : FILTER_ALL;
+	run_search(query, false);
+	keyboard_show(false);
+}
+
+void search_open_query(const char *query) { search_open_query_kind(query, -1); }
+
+int search_recent_queries(char out[][128], int max) {
+	recent_load();
+	int count = 0;
+	for (int i = 0; i < recent_count && count < max; i++) {
+		bool duplicate = false;
+		for (int j = 0; j < count; j++)
+			if (!strcmp(out[j], recent[i]))
+				duplicate = true;
+		if (duplicate)
+			continue;
+		memcpy(out[count], recent[i], 128);
+		out[count++][127] = '\0';
+	}
+	return count;
+}
+
+void search_note_query(const char *query) { recent_note(query); }
+
+void search_forget_query(const char *query) {
+	recent_load();
+	bool removed = false;
+	for (int i = 0; query && i < recent_count;) {
+		if (strcmp(recent[i], query)) {
+			i++;
+			continue;
+		}
+		memmove(recent + i, recent + i + 1, (size_t)(recent_count - i - 1) * sizeof(recent[0]));
+		memmove(recent_filter + i, recent_filter + i + 1, (size_t)(recent_count - i - 1) * sizeof(recent_filter[0]));
+		recent_count--;
+		removed = true;
+	}
+	if (removed)
+		recent_save();
+}
+
 void search_init(gui_config_t *cfg) {
 	page_cfg = cfg;
 	search_screen = lv_obj_create(NULL);
+	switcher_browse_bind("music", search_screen, music_screen);
 	lv_obj_add_style(search_screen, &theme_style_screen, 0);
 	main_menu_search_header(search_screen, cfg, HOME_MUSIC);
 
@@ -1132,6 +1178,7 @@ void search_init(gui_config_t *cfg) {
 	lv_obj_add_event_cb(field, field_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
 	lv_obj_add_event_cb(field, field_clicked_cb, LV_EVENT_CLICKED, NULL);
 	keyboard_style_caret(field);
+	main_menu_search_bind(search_screen, field);
 
 	field_icon = lv_image_create(search_screen);
 	lv_image_set_src(field_icon, &icon_search);
@@ -1216,8 +1263,7 @@ void search_init(gui_config_t *cfg) {
 	lv_obj_align(nothing_box, LV_ALIGN_TOP_LEFT, 0, content_top);
 	show_part(NULL);
 
-	keyboard = keyboard_create(search_screen, cfg->screen_width, SEARCH_KEYBOARD_H, field, &icon_search, NULL, kb_search_cb,
-							   NULL);
+	keyboard = keyboard_create(search_screen, cfg->screen_width, SEARCH_KEYBOARD_H, field, &icon_search, NULL, kb_search_cb, NULL);
 	// The results reach the bottom of the screen once the keyboard is down:
 	// room at their end for the mini player.
 	sx_frame_reserve_bottom(results);
