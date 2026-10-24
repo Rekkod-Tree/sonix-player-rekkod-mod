@@ -337,6 +337,15 @@ int main(int argc, char **argv) {
 	int expected = initial_mode == SX_MINI_COMPACT ? SX_MINI_COMPACT : SX_MINI_NORMAL;
 	assert(sx_mini_mode() == expected && config_saves == 0);
 	lv_obj_t *screen = lv_screen_active();
+	// Streaming lists create an empty heading before their data arrives.
+	lv_obj_t *dynamic_title = settingsrow_title(screen, &cfg, "");
+	settingsrow_title_corner_slots(dynamic_title, &cfg, 1);
+	lv_label_set_text(dynamic_title, "Search results");
+	lv_obj_update_layout(screen);
+	lv_area_t dynamic_bounds = bounds(dynamic_title);
+	fprintf(stderr, "dynamic header bounds: %d,%d..%d,%d\n", dynamic_bounds.x1, dynamic_bounds.y1, dynamic_bounds.x2, dynamic_bounds.y2);
+	assert(dynamic_bounds.x1 >= SX_BODY_PAD_L && dynamic_bounds.y1 >= SX_STATUSBAR_H && dynamic_bounds.y2 < SX_BODY_TOP);
+	lv_obj_delete(dynamic_title);
 	lv_obj_t *scroller = settingsrow_page(screen, &cfg, "Settings");
 	lv_obj_t *last = NULL;
 	for (int i = 0; i < 14; i++)

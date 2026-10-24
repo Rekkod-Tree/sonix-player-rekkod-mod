@@ -227,6 +227,7 @@ static void fit_title(lv_obj_t *label, int width) {
 
 	const char *text = lv_label_get_text(label);
 	if (!text || !text[0] || width <= 0) {
+		title_place(label);
 		return;
 	}
 
