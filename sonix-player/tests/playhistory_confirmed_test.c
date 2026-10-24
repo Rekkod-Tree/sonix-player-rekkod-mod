@@ -116,6 +116,29 @@ int main(void) {
 	for (int i = 0; i < 20; i++)
 		playhistory_poll();
 	assert(stored_count() == 4 + 64);
+	int before_untagged = stored_count();
+	snprintf(fake_file, sizeof(fake_file), "/fixture/untagged.aac");
+	fake_ready = false;
+	playhistory_started(fake_file, "", "", false, false);
+	fake_ready = true;
+	playhistory_heard(fake_file);
+	long long untagged = playhistory_current_id();
+	assert(playhistory_entry(untagged, NULL, 0, name, sizeof(name), NULL, 0));
+	fprintf(stderr, "untagged history title bytes: %zu\n", strlen(name));
+	assert(!strcmp(name, "untagged.aac"));
+	playhistory_metadata(fake_file, "Late book title", "Narrator");
+	playhistory_poll();
+	assert(playhistory_entry(untagged, NULL, 0, name, sizeof(name), NULL, 0));
+	assert(!strcmp(name, "Late book title") && stored_count() == before_untagged + 1);
+	playhistory_left();
+	long long legacy = library_history_record_at(library_database_epoch(), "/fixture/old-untagged.aac", "", "", 1);
+	assert(legacy > 0 && playhistory_entry(legacy, NULL, 0, name, sizeof(name), NULL, 0));
+	assert(!strcmp(name, "old-untagged.aac"));
+	sqlite3_stmt *legacy_row;
+	assert(sqlite3_prepare_v2(db, "SELECT name FROM PLAY_HISTORY WHERE id=?1", -1, &legacy_row, NULL) == SQLITE_OK);
+	sqlite3_bind_int64(legacy_row, 1, legacy);
+	assert(sqlite3_step(legacy_row) == SQLITE_ROW && !sqlite3_column_bytes(legacy_row, 0));
+	sqlite3_finalize(legacy_row); // Display fallback must not rewrite old records.
 	assert(sqlite3_close(db) == SQLITE_OK);
 	db = NULL;
 	puts("PASS confirmed starts, same-listen metadata, paused restore, short listen, deferred transaction, stale card and bounded memory");

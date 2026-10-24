@@ -3017,7 +3017,10 @@ bool library_history_entry_at(unsigned wanted_epoch, long long id, char *path, s
 				snprintf(path, path_size, "%s", p ? (const char *)p : "");
 			}
 			if (name && name_size > 0) {
-				snprintf(name, name_size, "%s", n ? (const char *)n : "");
+				const char *shown = n && n[0] ? (const char *)n : p ? (const char *)p : "";
+				if ((!n || !n[0]) && strrchr(shown, '/'))
+					shown = strrchr(shown, '/') + 1;
+				snprintf(name, name_size, "%s", shown);
 			}
 			found = p && p[0];
 		}

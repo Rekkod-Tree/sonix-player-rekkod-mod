@@ -13,6 +13,8 @@
   podcasts. Pause/resume and updated tags keep one event; a new listen gets a new
   event. Pending writes are bounded and tied to the card that admitted them.
   History and queue captions identify the source before the artist.
+  Untagged files fall back to their filename; old empty history titles display
+  the fallback without rewriting stored records.
 - Card and service playback origins are remembered independently of browsing.
   Section tiles reopen the last catalog page and scroll position in the current
   session; a player-menu action opens the confirmed playback source. A first
@@ -41,6 +43,8 @@
   while separating overlay menus and the quick panel from nearby cards.
   Terminal palettes retain full frames. These edges do not change control sizes
   or add background work.
+  Dynamic list headings stay in the header row even when created before their
+  title is available.
 
 ## Bluetooth service lifecycle (main; replacement image pending)
 

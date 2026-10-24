@@ -165,6 +165,10 @@ void playhistory_started(const char *path, const char *title, const char *artist
 	char shown[sizeof(live.title)];
 	if (!counts || !library_track_title(path, shown, sizeof(shown)))
 		snprintf(shown, sizeof(shown), "%s", title ? title : "");
+	if (counts && !shown[0]) {
+		const char *base = strrchr(path, '/');
+		snprintf(shown, sizeof(shown), "%s", base ? base + 1 : path);
+	}
 	pthread_mutex_lock(&live_lock);
 	sync_epoch_locked();
 	if (counts && live.active && live.epoch == epoch && !strcmp(path, live.path)) {
