@@ -1599,7 +1599,8 @@ static void *worker_main(void *arg) {
 			}
 			pthread_mutex_lock(&lock);
 			int room = asked == generation && n > 0 ? QUEUE_MAX - queue_len : 0;
-			int take = n < room ? n : room;
+			// Failed, empty or cancelled expansion must not produce a negative offset.
+			int take = n > 0 && room > 0 ? (n < room ? n : room) : 0;
 			entry_t *grown = take > 0 ? realloc(queue, (size_t)(queue_len + take) * sizeof(*queue)) : queue;
 			if (grown) {
 				queue = grown;

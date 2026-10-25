@@ -1,5 +1,15 @@
 ﻿# Features
 
+## Download queue safety (next build)
+
+- A failed, empty or cancelled Yandex album expansion adds no tracks and cannot
+  turn a negative API result into an offset before the pending queue. The
+  existing error event, following jobs and successful track order are retained.
+- The extracted production branch passes ten ASan/UBSan host cases and the same
+  ten standalone MIPS cases on R1. This is component verification, not a claim
+  of end-to-end downloads on a new installed image. The already delivered
+  `1.4.2` image predates this fix.
+
 ## Bluetooth output recovery (1.4.2; R1 runtime verified)
 
 Scope, measurements and remaining limitations: `RELEASE_1.4.2.md`.
