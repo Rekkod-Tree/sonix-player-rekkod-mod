@@ -1,7 +1,9 @@
-# Playback format telemetry (candidate, issue 95)
+# Playback format telemetry (1.4.2, issue 95)
 
-This work is not yet accepted on the final R1 image. It supplements the Bluetooth
-crash and position-retention fixes; it does not replace their hardware checks.
+The final ordinary USE runtime was checked on R1 with Space One Pro, including
+real encoder values, pause, refused reconfiguration and reconnect. See
+`RELEASE_1.4.2.md` for exact identities and boundaries. Installed-image boot and
+USB-DAC acceptance remain separate from runtime and extraction checks.
 
 ## Values and ownership
 

@@ -1,5 +1,9 @@
 # Graphite 2 coverage and acceptance
 
+Current 1.4.2: only the standard Graphite 2 player remains. References below to
+retaining Studio/Waveform describe earlier alpha work, before their approved
+removal. Lyrics and source controls remain; see `RELEASE_1.4.2.md`.
+
 The approved prototype remains the visual reference. Native features absent from it keep their behavior and use the shared typography, colours and controls. A successful build or screenshot count does not establish complete acceptance.
 
 ## Implemented in the alpha3 work

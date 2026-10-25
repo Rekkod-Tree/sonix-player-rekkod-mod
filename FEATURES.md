@@ -1,6 +1,8 @@
 ﻿# Features
 
-## Bluetooth output recovery (1.4.2 candidate)
+## Bluetooth output recovery (1.4.2; R1 runtime verified)
+
+Scope, measurements and remaining limitations: `RELEASE_1.4.2.md`.
 
 - Only the standard Graphite 2 player is available. Legacy Waveform/Studio
   preferences open the standard player; the layout selector is removed.
@@ -10,14 +12,14 @@
 - LDAC handle allocation/free is bound to the matching encoder or decoder
   library. This removes retained encoder buffers caused by the stock libraries'
   colliding API names while keeping LDAC input, output and adaptive ABR.
-  Native standalone encode/decode and repeated PCM tests cover the fix; final
-  release-image integration remains pending. See `BLUEALSA_BUILD.md`.
+  Native standalone encode/decode, repeated PCM tests and the ordinary R1 USE
+  runtime cover the fix. See `BLUEALSA_BUILD.md`.
 
-- Candidate signal-chain telemetry reports source bitrate, measured LDAC ABR
+- Signal-chain telemetry reports source bitrate, measured LDAC ABR
   bitrate and a differing negotiated wired/USB PCM format. It reuses the current
   player line and disclosure, bounded signal caches and the existing ALSA open;
-  no new poller, timer or SD telemetry writes. Final integration/native acceptance
-  remains pending; contracts and limitations are in `BLUETOOTH_TELEMETRY.md`.
+  no new poller, timer or SD telemetry writes. Contracts and limitations are in
+  `BLUETOOTH_TELEMETRY.md`.
 
 - A failed audio output pauses the existing source at its current position
   instead of replaying the file from its beginning. Resume retries only the PCM;
@@ -35,10 +37,11 @@
   guards, original plugins/pairing storage and HiBy ACL priority support.
   ALSA/BlueALSA versions, codec libraries, ALSA plugins and controller firmware
   are preserved; the two service executables are rebuilt with scoped fixes.
-- Source-level sanitizer tests and the first R1 candidate reproduced the codec
-  refusal while preserving music/book position and daemon liveness. Final
-  optimized-image acceptance is still pending; this does not claim that all
-  Bluetooth negotiation failures, RF stutters or rare device reboots are fixed.
+- Source-level sanitizer tests and the final ordinary LTO/O3/PGO R1 runtime
+  cover retained position, reconnect, telemetry, books and screen-off/wake.
+  Codec refusals preserved the source and daemon liveness. This does not claim
+  that all Bluetooth negotiation failures, RF stutters or rare device reboots
+  are fixed. Installed-image boot acceptance remains separate.
 
 ## Listening context and mini-player (1.4.1; R1 runtime verified)
 
@@ -487,8 +490,8 @@ A CUE referencing a converted WAV can find a neighboring FLAC, WavPack or APE.
 
 ## Now playing
 
-- Artwork edge to edge across the top, and the same picture flipped, blurred and dimmed behind the controls.
-- **Alternative layout** - the progress bar becomes a **waveform**
+- Inset square artwork and the flat Graphite 2 player background, with the
+  existing cover tint and monochrome artwork preferences.
 - **Cover Flow** - an album carousel, swiped up from the bottom of the Music page.
 - **Queue**, **Details** and, while an audiobook is loaded, **Chapters**.
 
@@ -588,7 +591,7 @@ certificate checking, and HLS.
 - **Appearance** - Graphite 2 dark and light surfaces, a Graphite accent, seven colour presets including neutral Gray, and cover accent. Gray adapts to dark/light themes; saved preset indices remain compatible. New configurations start without cover tint; saved choices are retained.
 - **Settings controls** - filled selected segments, aligned title/switch rows and full-width explanations. Long Bluetooth battery details open separately without toggling the setting. Every accent has a visible name; date/time controls share the settings geometry.
 - **Status bar** - compact 20px type and glyphs, a 24px battery and one neutral ink for normal states. High volume and low battery keep readable warnings; idle radios are dimmed. Local play/pause and sleep indicators are omitted, with their controls retained. Left, centre, right and hidden clocks support both time formats.
-- **Playback surfaces** - the control centre and volume overlay share the mini-player's background and foreground, including cover accents. The standard player uses one flat canvas in both themes, also with cover tint; Studio and Waveform remain available.
+- **Playback surfaces** - the control centre and volume overlay share the mini-player's background and foreground, including cover accents. The standard player uses one flat canvas in both themes, also with cover tint. Retired Studio/Waveform layouts were removed in 1.4.2.
 - **Open shade** - the status bar adopts the control centre's colours while it is open and restores the underlying page/artwork treatment on dismissal. Quick-control captions can use two lines. The compact floating volume pill keeps its existing dimensions.
 - **Quiet idle UI** - unchanged quick-control colours and glyphs no longer request new frames. R1 reads touch events on demand while idle, retaining timed reading during contact, holds and scrolling; `[display] touch_events=0` restores timer polling. Other models retain their previous default.
 - **Startup identity** - an atmospheric Rekkod Mod splash credits Sonix. Baseline JPEG assets are supplied for both panels and all three boot-theme slots; the startup mechanism is unchanged.
@@ -607,7 +610,7 @@ certificate checking, and HLS.
   colours, Segoe semibold percentage and Rekkod Mod branding. Low charge uses a
   muted warning fill; unknown charge stays explicit. Power-key/cable behaviour,
   charge limits and the redraw-only-on-change policy are unchanged.
-- **Now Playing** - an inset square sleeve, compact right-aligned Up Next, and audio-chain details in the menu. Waveform, Studio, lyrics and existing source controls remain available.
+- **Now Playing** - an inset square sleeve, compact right-aligned Up Next, and audio-chain details in the menu. Lyrics and existing source controls remain available; 1.4.2 retains only the standard Graphite 2 arrangement.
 - **Save the current stream** - Zvuk and Yandex Music offer Save to card directly in the playing track's menu, or a checked Saved state. The action retains the track selected when the menu opened and uses the existing download queue. Services without permanent downloads do not show this action.
 - **Track metadata** - symmetric inner row padding keeps duration away from the edge. Long artist names shorten before the format and duration, including compact queue rows.
 - **Feedback** - two-line Undo toasts pause their timeout while touched; long sheet messages scroll above the action buttons.

@@ -498,7 +498,7 @@ sonix-player/
 │   │   │   ├── fonts/               the lv_font_t objects FreeType fills in at startup
 │   │   │   ├── gearboy/             game list, screen and button pad
 │   │   │   ├── library/             file browser, media lists, playlists, search
-│   │   │   ├── nowplaying/          player screen, cover art, cover flow, waveform, queue
+│   │   │   ├── nowplaying/          player screen, cover art, cover flow, chapters, queue
 │   │   │   ├── settings/            26 files, one page each
 │   │   │   ├── shell/               40 files: theme, screen switcher, status bar, control
 │   │   │   │                        centre, keyboard, popups, toasts, settings rows, icons.c
