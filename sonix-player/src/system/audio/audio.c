@@ -2957,6 +2957,8 @@ static bool reopen_paused_pcm(snd_pcm_t **pcm, int channels, int rate, int bits,
 			*pcm = NULL;
 			pcm_device_open = false;
 			playback_follow(NULL);
+			// A cancelled open can be retried in this same track loop too.
+			usleep(150 * 1000);
 		}
 		// A quiesce request is acknowledged only after the actual close.
 		// Reuse the pause path so a pending flush cannot cause reopen spinning.

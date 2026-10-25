@@ -25,6 +25,8 @@ if a.controls:
     start = helper.index('\tif (serial != resume_request_serial')
     finish = helper.index(') {', start) + 1
     variants.append(('stale-open-accepted', helper[:start] + '\t(void)serial; (void)same_output;\n\tif (false)' + helper[finish:]))
+    assert helper.count('\t\t\tusleep(150 * 1000);') == 1
+    variants.append(('no-cancelled-close-settle', helper.replace('\t\t\tusleep(150 * 1000);', '')))
 resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
 records = []
 with tempfile.TemporaryDirectory(prefix='sonix-resume-open-') as d:

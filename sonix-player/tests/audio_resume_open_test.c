@@ -13,6 +13,14 @@ static int closes, route;
 static unsigned delay_ms;
 static pthread_t owner;
 static snd_pcm_t *handle;
+static uint64_t last_close_ms;
+
+static void require_settled_close(void) {
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	uint64_t ms = (uint64_t)now.tv_sec * 1000U + (uint64_t)now.tv_nsec / 1000000U;
+	assert(!last_close_ms || ms - last_close_ms >= 140);
+}
 
 int snd_pcm_close(snd_pcm_t *pcm) {
 	assert(pthread_equal(pthread_self(), owner));
@@ -20,6 +28,9 @@ int snd_pcm_close(snd_pcm_t *pcm) {
 	assert(pthread_mutex_trylock(&audio_mutex) == 0);
 	pthread_mutex_unlock(&audio_mutex);
 	closes++;
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	last_close_ms = (uint64_t)now.tv_sec * 1000U + (uint64_t)now.tv_nsec / 1000000U;
 	return 0;
 }
 
@@ -27,6 +38,7 @@ static snd_pcm_t *fixture_open(int channels, int rate, int bits, snd_pcm_uframes
 	(void)error;
 	assert(channels == 2 && rate == 44100 && bits == 16 && *period == 512);
 	assert(pthread_equal(pthread_self(), owner));
+	require_settled_close();
 	pthread_mutex_lock(&gate);
 	entered = true;
 	pthread_cond_broadcast(&condition);
@@ -44,6 +56,7 @@ static void fixture_follow(snd_pcm_t *pcm) { assert(!pcm); }
 static void fixture_release_due(snd_pcm_t **pcm, uint64_t at) {
 	(void)at;
 	assert(!*pcm);
+	require_settled_close();
 	pthread_mutex_lock(&audio_mutex);
 	hold_flush_request = false;
 	pthread_mutex_unlock(&audio_mutex);
@@ -80,6 +93,7 @@ static void run(int action, unsigned delay, bool old_handle, bool failure) {
 	fail_open = failure;
 	delay_ms = delay;
 	closes = route = 0;
+	last_close_ms = 0;
 	handle = old_handle ? (snd_pcm_t *)1 : NULL;
 	audio_command = AUDIO_CMD_PLAY;
 	playback_status = AUDIO_STATUS_PLAYING;
