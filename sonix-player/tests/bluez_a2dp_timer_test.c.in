@@ -1,0 +1,175 @@
+#include <assert.h>
+#include <errno.h>
+#include <glib.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+static void fixture_debug(const char *fmt, ...) { (void)fmt; }
+#define DBG(...) fixture_debug(__VA_ARGS__)
+#define error(...) ((void)0)
+#define RECONFIGURE_TIMEOUT 500
+#define AVDTP_SEP_TYPE_SINK 1
+struct avdtp {
+	int unused;
+};
+struct avdtp_local_sep {
+	int unused;
+};
+struct avdtp_stream {
+	int unused;
+};
+struct avdtp_error {
+	int unused;
+};
+struct queue {
+	int unused;
+};
+struct a2dp_channel {
+	int unused;
+};
+struct avdtp_service_capability {
+	unsigned char data[8];
+};
+struct avdtp_media_codec_capability {
+	unsigned char media_codec_type;
+};
+struct avdtp_remote_sep {
+	struct avdtp_service_capability *codec;
+};
+struct a2dp_remote_sep {
+	struct avdtp_remote_sep *sep;
+};
+struct a2dp_sep {
+	struct avdtp_local_sep *lsep;
+	int codec, type;
+};
+struct a2dp_setup {
+	struct a2dp_channel *chan;
+	struct avdtp *session;
+	struct queue *eps;
+	struct a2dp_sep *sep;
+	struct a2dp_remote_sep *rsep;
+	struct avdtp_stream *stream;
+	struct avdtp_error *err;
+	void *setconf_cb;
+	GSList *seps, *caps;
+	gboolean reconfigure, start;
+	GSList *cb;
+	GIOChannel *io;
+#ifdef FIXED
+	guint id;
+#endif
+	int ref;
+};
+static GSList *setups;
+static struct a2dp_setup *active;
+static struct a2dp_remote_sep *found;
+static int configured, finalized, last_errno, config_rc;
+static void queue_destroy(struct queue *q, void *f) {
+	(void)q;
+	(void)f;
+}
+static void avdtp_unref(struct avdtp *s) { (void)s; }
+static struct a2dp_setup *find_setup_by_session(struct avdtp *s) {
+	(void)s;
+	return active;
+}
+static struct a2dp_remote_sep *get_remote_sep(struct a2dp_channel *c, struct avdtp_stream *s) {
+	(void)c;
+	(void)s;
+	return found;
+}
+static struct a2dp_remote_sep *find_remote_sep(struct a2dp_channel *c, struct a2dp_sep *s) {
+	(void)c;
+	(void)s;
+	return found;
+}
+static struct avdtp_service_capability *avdtp_get_codec(struct avdtp_remote_sep *s) { return s->codec; }
+static int avdtp_set_configuration(struct avdtp *s, struct avdtp_remote_sep *r, struct avdtp_local_sep *l, GSList *c, struct avdtp_stream **stream) {
+	(void)s;
+	(void)c;
+	(void)stream;
+	assert(r && l);
+	configured++;
+	return config_rc;
+}
+static void finalize_config(struct a2dp_setup *s) { (void)s; }
+static void finalize_setup_errno(struct a2dp_setup *s, int e, void (*cb)(struct a2dp_setup *), void *unused) {
+	(void)unused;
+	finalized++;
+	last_errno = e;
+	cb(s);
+}
+@PRODUCTION_FUNCTIONS@
+
+static void pump(void) {
+	gint64 until = g_get_monotonic_time() + 650000;
+	while (g_get_monotonic_time() < until) {
+		while (g_main_context_iteration(NULL, FALSE)) {
+		}
+		g_usleep(1000);
+	}
+}
+int main(int argc, char **argv) {
+	assert(argc == 2);
+	const char *mode = argv[1];
+	struct avdtp_service_capability cap = {{0}};
+	struct avdtp_remote_sep remote = {&cap};
+	struct a2dp_remote_sep rsep = {&remote};
+	struct avdtp_local_sep local = {0};
+	struct a2dp_sep sep = {&local, 0, 0};
+	active = g_new0(struct a2dp_setup, 1);
+	active->sep = &sep;
+	active->rsep = &rsep;
+	active->ref = 1;
+	active->reconfigure = TRUE;
+	found = &rsep;
+	setups = g_slist_append(setups, active);
+	if (!strcmp(mode, "missing-local"))
+		sep.lsep = NULL;
+	if (!strcmp(mode, "missing-remote")) {
+		active->rsep = NULL;
+		found = NULL;
+	}
+	if (!strcmp(mode, "missing-nested"))
+		rsep.sep = NULL;
+	if (!strcmp(mode, "missing-codec"))
+		remote.codec = NULL;
+	if (!strcmp(mode, "config-error"))
+		config_rc = -EIO;
+	if (!strncmp(mode, "abort-", 6))
+		abort_cfm(NULL, NULL, NULL, NULL, &sep);
+	else
+		close_cfm(NULL, NULL, NULL, NULL, &sep);
+	if (!strcmp(mode, "duplicate"))
+		close_cfm(NULL, NULL, NULL, NULL, &sep);
+	if (!strcmp(mode, "abort-duplicate"))
+		abort_cfm(NULL, NULL, NULL, NULL, &sep);
+	if (!strcmp(mode, "mixed-close-abort"))
+		abort_cfm(NULL, NULL, NULL, NULL, &sep);
+	if (!strcmp(mode, "freed-before-timer") || !strcmp(mode, "abort-freed-before-timer")) {
+		setup_unref(active);
+		active = NULL;
+		pump();
+		assert(configured == 0 && finalized == 0);
+	} else if (!strcmp(mode, "abort-duplicate") || !strcmp(mode, "mixed-close-abort")) {
+		assert(setups == NULL);
+		active = NULL;
+		pump();
+		assert(configured == 0 && finalized == 0);
+	} else {
+		pump();
+		if (!strncmp(mode, "missing-", 8))
+			assert(configured == 0 && finalized == 1 && last_errno == -EINVAL);
+		else if (!strcmp(mode, "config-error"))
+			assert(configured == 1 && finalized == 1 && last_errno == -EIO);
+		else
+			assert(configured == 1 && finalized == 0);
+		setup_unref(active);
+		active = NULL;
+	}
+	assert(setups == NULL);
+	printf("PASS %s: configured=%d finalized=%d\n", mode, configured, finalized);
+	return 0;
+}

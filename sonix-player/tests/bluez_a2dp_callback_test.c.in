@@ -1,0 +1,190 @@
+#include <assert.h>
+#include <errno.h>
+#include <glib.h>
+#include <stdarg.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#define DBG(...) ((void)0)
+#define error(...) ((void)0)
+#define AVDTP_ERRNO 1
+#define AVDTP_SEP_TYPE_SINK 1
+struct avdtp {
+	int unused;
+};
+struct avdtp_stream {
+	int unused;
+};
+struct avdtp_local_sep {
+	int unused;
+};
+struct avdtp_remote_sep {
+	int unused;
+};
+struct queue {
+	int unused;
+};
+struct avdtp_error {
+	int category, error;
+};
+struct a2dp_sep;
+typedef void (*a2dp_config_cb_t)(struct avdtp *, struct a2dp_sep *, struct avdtp_stream *, int, void *);
+struct a2dp_setup;
+struct a2dp_setup_cb {
+	struct a2dp_setup *setup;
+	unsigned id;
+	guint source_id;
+	a2dp_config_cb_t config_cb;
+	void *user_data;
+};
+struct endpoint {
+	const char *(*get_name)(struct a2dp_sep *, void *);
+};
+struct a2dp_sep {
+	struct avdtp_local_sep *lsep;
+	int codec;
+	struct avdtp_stream *stream;
+	struct endpoint *endpoint;
+	void *user_data;
+};
+struct server {
+	GSList *sources, *sinks;
+};
+struct a2dp_channel {
+	struct avdtp *session;
+	struct server *server;
+};
+struct a2dp_remote_sep {
+	struct avdtp_remote_sep *sep;
+};
+struct a2dp_setup {
+	struct a2dp_channel *chan;
+	struct avdtp *session;
+	struct queue *eps;
+	struct a2dp_sep *sep;
+	struct a2dp_remote_sep *rsep;
+	struct avdtp_stream *stream;
+	struct avdtp_error *err;
+	GSList *caps, *cb;
+	GIOChannel *io;
+	guint id;
+	int ref;
+	gboolean reconfigure;
+};
+static GSList *setups;
+static unsigned cb_id;
+static int callbacks, config_rc, close_rc, abort_rc;
+static const char *sender = "owner";
+static void queue_destroy(struct queue *q, void *f) {
+	(void)q;
+	(void)f;
+}
+static void avdtp_unref(struct avdtp *s) { (void)s; }
+static void avdtp_error_init(struct avdtp_error *e, int c, int n) {
+	e->category = c;
+	e->error = n;
+}
+static int avdtp_error_category(struct avdtp_error *e) { return e->category; }
+static int avdtp_error_posix_errno(struct avdtp_error *e) { return e->error; }
+static void reconfig_cb(struct avdtp *s, struct a2dp_sep *p, struct avdtp_stream *t, int e, void *u) {
+	(void)s;
+	(void)p;
+	(void)t;
+	(void)e;
+	(void)u;
+	callbacks++;
+}
+static void caps_add_codec(GSList **l, int c, uint8_t *p, int n) {
+	(void)c;
+	(void)p;
+	(void)n;
+	*l = g_slist_append(*l, g_malloc0(8));
+}
+static int avdtp_get_type(struct avdtp_remote_sep *s) {
+	(void)s;
+	return AVDTP_SEP_TYPE_SINK;
+}
+static bool avdtp_has_stream(struct avdtp *s, struct avdtp_stream *t) {
+	(void)s;
+	(void)t;
+	return true;
+}
+static int avdtp_close(struct avdtp *s, struct avdtp_stream *t, bool b) {
+	(void)s;
+	(void)t;
+	(void)b;
+	return close_rc;
+}
+static int avdtp_abort(struct avdtp *s, struct avdtp_stream *t) {
+	(void)s;
+	(void)t;
+	return abort_rc;
+}
+static int avdtp_set_configuration(struct avdtp *s, struct avdtp_remote_sep *r, struct avdtp_local_sep *l, GSList *c, struct avdtp_stream **t) {
+	(void)s;
+	(void)r;
+	(void)l;
+	(void)c;
+	(void)t;
+	return config_rc;
+}
+static struct a2dp_setup *find_setup_by_session(struct avdtp *s) {
+	for (GSList *l = setups; l; l = l->next) {
+		struct a2dp_setup *p = l->data;
+		if (p->session == s)
+			return p;
+	}
+	return NULL;
+}
+static struct a2dp_setup *setup_new(struct avdtp *s) {
+	struct a2dp_setup *p = g_new0(struct a2dp_setup, 1);
+	p->session = s;
+	setups = g_slist_append(setups, p);
+	return p;
+}
+static const char *get_name(struct a2dp_sep *p, void *u) {
+	(void)p;
+	(void)u;
+	return sender;
+}
+@PRODUCTION_FUNCTIONS@
+
+int main(int argc, char **argv) {
+	assert(argc == 2);
+	const char *mode = argv[1];
+	struct avdtp session = {0};
+	struct server srv = {0};
+	struct a2dp_channel chan = {&session, &srv};
+	struct avdtp_local_sep local = {0};
+	struct avdtp_remote_sep remote = {0};
+	struct endpoint endpoint = {get_name};
+	struct a2dp_sep sep = {&local, 0, NULL, &endpoint, NULL};
+	struct a2dp_remote_sep rsep = {&remote};
+	bool prior = strcmp(mode, "single-failure") != 0;
+	struct a2dp_setup *s = NULL;
+	if (prior) {
+		s = a2dp_setup_get(&session);
+		struct a2dp_setup_cb *cb = setup_cb_new(s);
+		cb->config_cb = reconfig_cb;
+	}
+	config_rc = -ENOTCONN;
+	if (!strcmp(mode, "abort-failure") || !strcmp(mode, "sender-rejected")) {
+		sep.stream = (void *)&session;
+		srv.sources = g_slist_append(NULL, &sep);
+		close_rc = abort_rc = -ENOTCONN;
+		if (!strcmp(mode, "sender-rejected"))
+			sender = "different-owner";
+	}
+	int rc = a2dp_reconfig(&chan, "owner", &sep, &rsep, NULL, 0, NULL);
+	assert(rc < 0);
+	if (prior) {
+		/* The real asynchronous error finalizer retains a temporary reference. */
+		finalize_setup_errno(s, -ENOTCONN, finalize_config, NULL);
+		assert(callbacks == 1);
+	}
+	assert(setups == NULL);
+	g_slist_free(srv.sources);
+	printf("PASS %s: real callback ownership/finalization, callbacks=%d\n", mode, callbacks);
+	return 0;
+}

@@ -2926,6 +2926,18 @@ static bool retry_track_once(const char *filepath, const char *reason) {
 	return true;
 }
 
+// A failed output is not a failed source. Keep the decoder and its position;
+// the normal pause path rewinds unwritten input and reopens only the PCM on
+// resume. Never replace a newer play, stop or seek with this old write error.
+static void pause_failed_output(void) {
+	pthread_mutex_lock(&audio_mutex);
+	if (!play_request && !stop_thread && !seek_request && audio_command != AUDIO_CMD_STOP) {
+		audio_command = AUDIO_CMD_PAUSE;
+		playback_status = AUDIO_STATUS_PAUSED;
+	}
+	pthread_mutex_unlock(&audio_mutex);
+}
+
 // ---------------------------------------------------------------------------
 // Rebuffering
 //
@@ -3337,10 +3349,10 @@ static void play_wav_file(const char *filepath) {
 					pcm_handle = open_pcm_device(info.channels, info.sample_rate, info.out_bits, &new_period, NULL);
 					if (!pcm_handle) {
 						fprintf(stderr, "Audio: cannot reopen the device after a pause\n");
-						audio_command = AUDIO_CMD_STOP;
-						playback_status = AUDIO_STATUS_STOPPED;
+						audio_command = AUDIO_CMD_PAUSE;
+						playback_status = AUDIO_STATUS_PAUSED;
 						pthread_mutex_unlock(&audio_mutex);
-						break;
+						continue;
 					}
 					if (new_period > period_size) {
 						char *bigger = realloc(buffer, new_period * frame_bytes);
@@ -3513,14 +3525,9 @@ static void play_wav_file(const char *filepath) {
 		}
 		if (written < 0 || !pcm_handle) {
 			fprintf(stderr, "Audio: Write failed beyond recovery: %s\n", snd_strerror((int)written));
-			if (retry_track_once(filepath, "write failure")) {
-				break; // the thread loop picks the queued replay up
-			}
-			pthread_mutex_lock(&audio_mutex);
-			audio_command = AUDIO_CMD_STOP;
-			playback_status = AUDIO_STATUS_STOPPED;
-			pthread_mutex_unlock(&audio_mutex);
-			break;
+			input_needs_rewind = true;
+			pause_failed_output();
+			continue;
 		}
 
 		bt_seek_probe_report(pcm_handle);
@@ -4700,10 +4707,10 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 					pcm_exact_rate = false;
 					if (!pcm_handle) {
 						fprintf(stderr, "Audio: cannot reopen the device after a pause\n");
-						audio_command = AUDIO_CMD_STOP;
-						playback_status = AUDIO_STATUS_STOPPED;
+						audio_command = AUDIO_CMD_PAUSE;
+						playback_status = AUDIO_STATUS_PAUSED;
 						pthread_mutex_unlock(&audio_mutex);
-						break;
+						continue;
 					}
 					snd_pcm_uframes_t new_chunk = decimated_chunk(new_period, out_rate, decim_factor);
 					if (new_chunk > chunk_frames) {
@@ -5004,14 +5011,9 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 		}
 		if (written < 0 || !pcm_handle) {
 			fprintf(stderr, "Audio: Write failed beyond recovery: %s\n", snd_strerror((int)written));
-			if (retry_track_once(filepath, "write failure")) {
-				break; // the thread loop picks the queued replay up
-			}
-			pthread_mutex_lock(&audio_mutex);
-			audio_command = AUDIO_CMD_STOP;
-			playback_status = AUDIO_STATUS_STOPPED;
-			pthread_mutex_unlock(&audio_mutex);
-			break;
+			input_needs_rewind = true;
+			pause_failed_output();
+			continue;
 		}
 
 		bt_seek_probe_report(pcm_handle);
@@ -5403,10 +5405,8 @@ int audio_play_at(const char *filepath, double start_secs) {
 	write_fail_retry_used = false;
 	audio_command = AUDIO_CMD_PLAY;
 	playback_status = AUDIO_STATUS_PLAYING;
-	if (start_secs > 0) {
-		seek_request = true;
-		seek_target_secs = start_secs;
-	}
+	seek_request = start_secs > 0;
+	seek_target_secs = seek_request ? start_secs : -1.0;
 	progress_current_secs = start_secs > 0 ? start_secs : 0;
 	progress_floor_secs = -1.0;
 	progress_total_secs = 0;
@@ -5430,10 +5430,8 @@ int audio_play_paused(const char *filepath, double start_secs) {
 	write_fail_retry_used = false;
 	audio_command = AUDIO_CMD_PAUSE;
 	playback_status = AUDIO_STATUS_PAUSED;
-	if (start_secs > 0) {
-		seek_request = true;
-		seek_target_secs = start_secs;
-	}
+	seek_request = start_secs > 0;
+	seek_target_secs = seek_request ? start_secs : -1.0;
 	progress_current_secs = start_secs > 0 ? start_secs : 0;
 	progress_floor_secs = -1.0;
 	progress_total_secs = 0;

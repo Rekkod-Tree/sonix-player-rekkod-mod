@@ -73,10 +73,10 @@ static void restart_playback_if_running(void) {
 	double total = 0;
 	audio_get_progress(&position, &total);
 
-	audio_play(file);
-	audio_seek(position);
 	if (status == AUDIO_STATUS_PAUSED) {
-		audio_pause();
+		audio_play_paused(file, position);
+	} else {
+		audio_play_at(file, position);
 	}
 	player_refresh_now_playing();
 }

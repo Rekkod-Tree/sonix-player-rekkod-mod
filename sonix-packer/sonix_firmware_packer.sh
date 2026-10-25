@@ -454,6 +454,23 @@ build_one() {
 	# this separately built helper only after backup and explicit confirmation.
 	# The reviewed proprietary eraseblock is a private build input, never Git.
 	if [ "$MODEL_DIR" = R1 ]; then
+		# Never silently ship the original crashing A2DP daemon in a new image.
+		# Keep this private build output out of Git; BLUEZ_BUILD.md documents it.
+		R1_BLUETOOTHD="${R1_BLUETOOTHD:-$SCRIPT_DIR/bluetoothd-r1}"
+		R1_BLUETOOTHD_SHA256_FILE="${R1_BLUETOOTHD_SHA256_FILE:-$R1_BLUETOOTHD.sha256}"
+		[ -s "$R1_BLUETOOTHD" ] && [ -f "$R1_BLUETOOTHD_SHA256_FILE" ] || die "R1 requires the tested Bluetooth daemon and SHA-256 receipt; see BLUEZ_BUILD.md."
+		R1_BLUETOOTHD_EXPECTED="$(awk 'NR == 1 {print $1}' "$R1_BLUETOOTHD_SHA256_FILE")"
+		printf '%s\n' "$R1_BLUETOOTHD_EXPECTED" | grep -Eq '^[0-9a-f]{64}$' || die "Invalid R1 Bluetooth daemon receipt."
+		if command -v sha256sum >/dev/null 2>&1; then
+			R1_BLUETOOTHD_ACTUAL="$(sha256sum "$R1_BLUETOOTHD" | cut -d ' ' -f 1)"
+		else
+			R1_BLUETOOTHD_ACTUAL="$(shasum -a 256 "$R1_BLUETOOTHD" | cut -d ' ' -f 1)"
+		fi
+		[ "$R1_BLUETOOTHD_ACTUAL" = "$R1_BLUETOOTHD_EXPECTED" ] || die "R1 Bluetooth daemon does not match the tested receipt."
+		mkdir -p "$SQUASH_DIR/usr/libexec/bluetooth"
+		cp "$R1_BLUETOOTHD" "$SQUASH_DIR/usr/libexec/bluetooth/bluetoothd"
+		chmod 755 "$SQUASH_DIR/usr/libexec/bluetooth/bluetoothd"
+
 		# This overlay's modules require the reviewed Sonix kernel, not a silent
 		# fallback to the stock image. A new kernel needs a fresh module audit.
 		[ -f "$KERNEL_DIR/xImage-R1" ] || die "R1 overlay requires its matching Sonix kernel."

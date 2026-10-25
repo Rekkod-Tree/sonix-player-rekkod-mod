@@ -1,5 +1,23 @@
 ﻿# Features
 
+## Bluetooth output recovery (1.4.2 candidate)
+
+- A failed audio output pauses the existing source at its current position
+  instead of replaying the file from its beginning. Resume retries only the PCM;
+  another failed reopen keeps the source paused. Newer play/stop/seek commands
+  take precedence over an old write error.
+- Bluetooth route changes restore playback position and pause state atomically,
+  using the existing play-at/paused-at commands. A zero-position start clears
+  any seek left over from the preceding request.
+- R1 packages require the rebuilt BlueZ 5.54 daemon described in `BLUEZ_BUILD.md`:
+  callback reference and delayed reconfiguration lifetime fixes, missing-endpoint
+  guards, original plugins/pairing storage and HiBy ACL priority support.
+  ALSA, BlueALSA and controller firmware are not downgraded or replaced.
+- Source-level sanitizer tests and the first R1 candidate reproduced the codec
+  refusal while preserving music/book position and daemon liveness. Final
+  optimized-image acceptance is still pending; this does not claim that all
+  Bluetooth negotiation failures, RF stutters or rare device reboots are fixed.
+
 ## Listening context and mini-player (1.4.1; R1 runtime verified)
 
 Release image, hardware coverage and remaining limitations: `RELEASE_1.4.1.md`.
