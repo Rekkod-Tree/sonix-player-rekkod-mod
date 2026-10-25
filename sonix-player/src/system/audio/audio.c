@@ -2938,6 +2938,28 @@ static void pause_failed_output(void) {
 	pthread_mutex_unlock(&audio_mutex);
 }
 
+// A route reload may fail before reaching the normal pause loop. Its decoder
+// is already closed, so reuse the cold-resume state instead of restarting at
+// zero on the next Play. Newer commands keep ownership of their request.
+static void retain_failed_output(const char *filepath) {
+	pcm_device_open = false;
+	pthread_mutex_lock(&audio_mutex);
+	if (!play_request && !stop_thread && audio_command != AUDIO_CMD_STOP &&
+		strcmp(current_filepath, filepath) == 0) {
+		double position = seek_request ? seek_target_secs : progress_current_secs;
+		restart_fresh_pending = true;
+		snprintf(restart_fresh_path, sizeof(restart_fresh_path), "%s", filepath);
+		restart_fresh_pos = position > 0 ? position : 0;
+		progress_current_secs = restart_fresh_pos;
+		seek_request = false;
+		seek_target_secs = -1.0;
+		audio_command = AUDIO_CMD_STOP;
+		playback_status = AUDIO_STATUS_PAUSED;
+		track_completed = false;
+	}
+	pthread_mutex_unlock(&audio_mutex);
+}
+
 // ---------------------------------------------------------------------------
 // Rebuffering
 //
@@ -3156,10 +3178,7 @@ static void play_wav_file(const char *filepath) {
 	}
 	if (!pcm_handle) {
 		fclose(f);
-		pthread_mutex_lock(&audio_mutex);
-		audio_command = AUDIO_CMD_STOP;
-		playback_status = AUDIO_STATUS_STOPPED;
-		pthread_mutex_unlock(&audio_mutex);
+		retain_failed_output(filepath);
 		return;
 	}
 	track_started();
@@ -4455,10 +4474,7 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 	if (!pcm_handle) {
 		set_dac_dop(0);
 		decoder_close(dec);
-		pthread_mutex_lock(&audio_mutex);
-		audio_command = AUDIO_CMD_STOP;
-		playback_status = AUDIO_STATUS_STOPPED;
-		pthread_mutex_unlock(&audio_mutex);
+		retain_failed_output(filepath);
 		return;
 	}
 	track_started();
@@ -5587,8 +5603,8 @@ void audio_pause(void) {
 }
 
 void audio_resume(void) {
-	// The fresh restart, when the freeze armed one: the track context no longer
-	// exists (killed before mem, deliberately), so "resume" here means
+	// A freeze or failed initial output open may leave no track context, so
+	// a cold "resume" here means
 	// rebuilding everything from scratch at the right point -- fresh decoder,
 	// fresh route, fresh PCM. That is the same path every track start takes.
 	pthread_mutex_lock(&audio_mutex);
@@ -5598,7 +5614,7 @@ void audio_resume(void) {
 		double pos = restart_fresh_pos;
 		restart_fresh_pending = false;
 		pthread_mutex_unlock(&audio_mutex);
-		fprintf(stderr, "audio: resume after mem -> fresh start of '%s' at %.1f s\n", path, pos);
+		fprintf(stderr, "audio: cold resume -> fresh start of '%s' at %.1f s\n", path, pos);
 		audio_play_at(path, pos);
 		return;
 	}
@@ -5621,6 +5637,7 @@ void audio_resume(void) {
 void audio_stop(void) {
 	printf("stopping\n");
 	pthread_mutex_lock(&audio_mutex);
+	restart_fresh_pending = false; // explicit stop/card removal cancels cold resume
 	audio_command = AUDIO_CMD_STOP;
 	playback_status = AUDIO_STATUS_STOPPED;
 	seek_request = false;

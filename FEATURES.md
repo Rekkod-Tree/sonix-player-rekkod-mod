@@ -9,6 +9,10 @@
 - Bluetooth route changes restore playback position and pause state atomically,
   using the existing play-at/paused-at commands. A zero-position start clears
   any seek left over from the preceding request.
+- If the output fails before a decoder can enter its pause loop, Resume rebuilds
+  that context at the retained position. Explicit stop/card handoff cancels this
+  cold retry; there is no background reopen loop. LDAC defaults to adaptive ABR
+  unless a user has explicitly saved another quality mode.
 - R1 packages require the rebuilt BlueZ 5.54 daemon described in `BLUEZ_BUILD.md`:
   callback reference and delayed reconfiguration lifetime fixes, missing-endpoint
   guards, original plugins/pairing storage and HiBy ACL priority support.

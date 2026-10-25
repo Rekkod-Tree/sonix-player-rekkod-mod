@@ -1,7 +1,7 @@
 // Uses production command/wait code, with pipe-backed ALSA poll descriptors.
 // No audio device is opened and no configuration is read or written.
 // From sonix-player (native or matching MIPS compiler):
-// cc -std=gnu11 -O2 -ffunction-sections -fdata-sections -I. -Ilvgl \
+// cc -std=gnu11 -O2 -ffunction-sections -fdata-sections -I. -Ilvgl
 //   tests/audio_commands_test.c -Wl,--gc-sections -lasound -pthread -lm -o /tmp/audio_commands_test
 #define _GNU_SOURCE
 #include "src/system/audio/audio.c"
