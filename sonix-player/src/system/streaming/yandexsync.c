@@ -306,6 +306,7 @@ static stream_provider_t provider = {
 	.cache_dir = yandexcache_dir,
 	.owns_path = provider_owns,
 	.downloading = provider_downloading,
+	.playback_downloading = yandexcache_busy,
 	.network_wanted = provider_network_wanted,
 	// Transient, like Qobuz's: swept on the way out (yandexcache.h). What was
 	// saved to the library is the user's and is never touched.

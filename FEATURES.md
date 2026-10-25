@@ -9,6 +9,11 @@
   ten standalone MIPS cases on R1. This is component verification, not a claim
   of end-to-end downloads on a new installed image. The already delivered
   `1.4.2` image predates this fix.
+- Concurrent Yandex/Zvuk saves yield to playback cache traffic rather than to
+  each other's background jobs. The existing all-download flags still protect
+  storage handoff and network power; providers without the optional playback
+  hook retain their previous priority. Concurrent host and standalone MIPS
+  checks cover priority, cancellation, resumption and the fallback contract.
 
 ## Bluetooth output recovery (1.4.2; R1 runtime verified)
 

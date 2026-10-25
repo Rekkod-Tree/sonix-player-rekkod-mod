@@ -294,7 +294,7 @@ static bool others_downloading(void) {
 	}
 	for (int i = 0; i < stream_provider_count(); i++) {
 		const stream_provider_t *p = stream_provider_at(i);
-		if (p && strcmp(p->id, "yandex") != 0 && p->downloading && p->downloading()) {
+		if (p && strcmp(p->id, "yandex") != 0 && stream_provider_playback_downloading(p)) {
 			return true;
 		}
 	}

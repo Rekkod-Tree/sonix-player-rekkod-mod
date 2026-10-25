@@ -249,6 +249,7 @@ static stream_provider_t provider = {
 	.cache_dir = zvukcache_dir,
 	.owns_path = provider_owns,
 	.downloading = provider_downloading,
+	.playback_downloading = zvukcache_busy,
 	.network_wanted = provider_network_wanted,
 	// The cache is transient, swept on the way out; what was saved to the
 	// library is the user's and never touched.

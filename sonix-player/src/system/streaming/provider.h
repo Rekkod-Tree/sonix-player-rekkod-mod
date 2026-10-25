@@ -86,6 +86,9 @@ typedef struct stream_provider {
 
 	// A download is in progress right now.
 	bool (*downloading)(void);
+	// Only playback/cache traffic, excluding background saves. NULL uses
+	// downloading, retaining the existing priority of other providers.
+	bool (*playback_downloading)(void);
 
 	// The service needs the network even with nothing downloading this instant
 	// (between a track's end and the next one's first bytes). NULL = never.
@@ -186,6 +189,7 @@ bool stream_provider_fill_metadata(const char *path, song_metadata_t *out);
 
 // True when some service is downloading.
 bool stream_provider_any_downloading(void);
+bool stream_provider_playback_downloading(const stream_provider_t *provider);
 
 // True when some service is downloading or otherwise wants the network.
 bool stream_provider_any_network_wanted(void);

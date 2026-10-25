@@ -104,6 +104,13 @@ bool stream_provider_fill_metadata(const char *path, song_metadata_t *out) {
 	return changed;
 }
 
+bool stream_provider_playback_downloading(const stream_provider_t *provider) {
+	if (!provider)
+		return false;
+	bool (*busy)(void) = provider->playback_downloading ? provider->playback_downloading : provider->downloading;
+	return busy && busy();
+}
+
 bool stream_provider_any_downloading(void) {
 	for (int i = 0; i < provider_count; i++) {
 		if (providers[i]->downloading && providers[i]->downloading()) {
