@@ -34,6 +34,13 @@ $(info Cloning LVGL v$(LVGL_VER)...)
 $(shell git clone --depth 1 -b v$(LVGL_VER) https://github.com/lvgl/lvgl.git)
 endif
 
+# Apply the bounded evdev fix before make reads source/dependency timestamps.
+# The script is idempotent and fails closed on an unsupported driver layout.
+LVGL_EVDEV_FRAMES := $(shell python3 tools/lvgl_evdev_frames.py "$(LVGL_DIR)")
+ifneq ($(LVGL_EVDEV_FRAMES),ok)
+$(error Cannot prepare LVGL evdev frame delivery)
+endif
+
 # Read out of the headers, so a checkout with no git history still answers.
 # All three places are tried: the macros sit in lvgl.h up to 9.1, in
 # lv_version.h from 9.2 and in include/lvgl/lv_version.h from 9.6.

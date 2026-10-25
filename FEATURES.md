@@ -1,5 +1,19 @@
 ﻿# Features
 
+## Touch delivery and resume responsiveness (next build)
+
+- Queued touchscreen press/release frames are delivered separately instead of
+  losing a short tap while the GUI is busy. Pointer polling and idle timers
+  stay unchanged. The build applies the idempotent LVGL evdev patch from
+  `sonix-player/tools/lvgl_evdev_frames.py` before dependency timestamps are read.
+- WAV and decoded resume share one PCM reopen path. Driver close, settling,
+  routing and open run on the playback thread without holding the UI state
+  mutex. Newer playback commands and output changes invalidate a late result;
+  the same owner closes it, preserving the requested track and position.
+- Component checks cover actual evdev frames, real LVGL dispatch with the
+  production tap guard, slow/failing PCM opens and command races. Full target
+  and R1 acceptance are still pending; the earlier delivered image lacks these fixes.
+
 ## Download queue safety (next build)
 
 - A failed, empty or cancelled Yandex album expansion adds no tracks and cannot
