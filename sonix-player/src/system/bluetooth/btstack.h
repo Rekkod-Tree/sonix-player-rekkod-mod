@@ -192,6 +192,10 @@ int btstack_transport_sending(const char *address, unsigned *serial_out);
 // while the address stays the same. From the signal cache: any thread.
 unsigned btstack_sink_serial(void);
 
+// Encoded bitrate in bit/s from the current PCM's optional CodecBitrate
+// property, zero if unknown. Signal cache only: no RPC or worker wakeup.
+unsigned btstack_codec_bitrate(const char *address);
+
 // What bluealsa negotiated on one of the two streams, in parts rather than as
 // one line: the receiver page prints the codec and the rate on their own.
 // `receiving` picks the direction -- false for the headphones this device
@@ -201,6 +205,7 @@ typedef struct {
 	unsigned rate; // Hz, 0 when bluealsa has not said
 	unsigned channels;
 	unsigned bits; // 0 for a format word this build does not name
+	unsigned bitrate; // encoded codec bit/s, 0 when the daemon does not report it
 } btstack_stream_t;
 
 bool btstack_stream_info(const char *address, bool receiving, btstack_stream_t *out);

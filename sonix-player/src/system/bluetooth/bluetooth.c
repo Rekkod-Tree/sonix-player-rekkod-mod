@@ -5004,20 +5004,18 @@ bool bluetooth_codec_summary(const char *mac, char *out, int size) {
 	bool ours = g_enabled && g_a2dp_connected && g_codec_selected[0] && (!mac || strcasecmp(mac, g_a2dp_mac) == 0);
 	char codec[BT_CODEC_MAX];
 	copy_field(codec, sizeof(codec), g_codec_selected, sizeof(g_codec_selected));
+	char headset[BT_MAC_MAX];
+	copy_field(headset, sizeof(headset), g_a2dp_mac, sizeof(g_a2dp_mac));
 	unsigned rate = g_sink_rate;
 	pthread_mutex_unlock(&lock);
 	if (!ours) {
 		return false;
 	}
 
-	// LDAC's bit rate is not on the bus; it is the daemon option this player
-	// started bluealsa with, so it is read back from the same setting.
-	char name[BT_CODEC_MAX + 8];
+	// An adaptive mode is not a measured bitrate. Only the current encoder's
+	// optional D-Bus property supplies a number; old daemons remain supported.
+	char name[BT_CODEC_MAX + 24];
 	if (strcasecmp(codec, "LDAC") == 0) {
-		static const struct {
-			const char *mode;
-			const char *label;
-		} LDAC_LABELS[] = {{"high", "LDAC 990"}, {"standard", "LDAC 660"}, {"mobile", "LDAC 330"}, {"abr", "LDAC ABR"}};
 		// What the running daemon was given, which is not the setting while a
 		// Wi-Fi coexistence change is in force (daemon_options_check).
 		// The setting is read before the lock: it takes the lock itself.
@@ -5026,12 +5024,12 @@ bool bluetooth_codec_summary(const char *mac, char *out, int size) {
 		pthread_mutex_lock(&lock);
 		snprintf(quality, sizeof(quality), "%s", g_ldac_started[0] ? g_ldac_started : setting);
 		pthread_mutex_unlock(&lock);
-		snprintf(name, sizeof(name), "%s", codec);
-		for (size_t i = 0; i < sizeof(LDAC_LABELS) / sizeof(LDAC_LABELS[0]); i++) {
-			if (strcmp(quality, LDAC_LABELS[i].mode) == 0) {
-				snprintf(name, sizeof(name), "%s", LDAC_LABELS[i].label);
-			}
-		}
+		unsigned bitrate = btstack_codec_bitrate(headset);
+		const char *mode = !strcmp(quality, "abr") ? " ABR" : "";
+		if (bitrate > 0)
+			snprintf(name, sizeof(name), "%s%s %u kbps", codec, mode, bitrate / 1000);
+		else
+			snprintf(name, sizeof(name), "%s%s", codec, mode);
 	} else {
 		snprintf(name, sizeof(name), "%s", codec);
 	}

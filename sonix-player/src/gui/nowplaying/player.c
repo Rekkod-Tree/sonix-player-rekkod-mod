@@ -114,6 +114,8 @@ static lv_obj_t *pause_badge;	  // the play glyph over the artwork while paused
 static void cover_gesture_cb(lv_event_t *e);
 static void np_chain_build(lv_obj_t *parent);
 static void np_chain_refresh(const device_state_t *state);
+static void np_file_short(const device_state_t *state, char *out, size_t size, bool compact);
+static void np_chain_compose(const device_state_t *state, char *out, size_t size, bool *warn);
 static void np_upnext_build(void);
 static void upnext_update(void);
 static void menu_style_for_layout(void);
@@ -4162,6 +4164,18 @@ static void update_format_label(const device_state_t *state) {
 		lv_label_set_text(format_label, "");
 		return;
 	}
+	if (layout_studio_now) {
+		char summary[192];
+		bool warn;
+		// Studio already has a separate Bluetooth line. Keep the source on
+		// this line there; wired conversions use the shared full composer.
+		if (bluetooth_audio_active())
+			np_file_short(state, summary, sizeof(summary), false);
+		else
+			np_chain_compose(state, summary, sizeof(summary), &warn);
+		lv_label_set_text(format_label, summary);
+		return;
+	}
 
 	const char *dot = strrchr(state->current_file, '.');
 	char kind[8] = "";
@@ -6172,7 +6186,7 @@ static void np_khz(char *out, size_t size, int hz) {
 
 // The file, in the chain's words: "FLAC 16/44.1", "MP3 320", "DSD64", "AAC
 // 128" for a station.
-static void np_file_short(const device_state_t *state, char *out, size_t size) {
+static void np_file_short(const device_state_t *state, char *out, size_t size, bool compact) {
 	out[0] = '\0';
 	if (state->live) {
 		radio_now_t now;
@@ -6205,8 +6219,8 @@ static void np_file_short(const device_state_t *state, char *out, size_t size) {
 			codec[k] = '\0';
 		}
 	}
-	if (audio_stream_is_lossy()) {
-		int kbps = audio_get_stream_bitrate_kbps();
+	int kbps = audio_get_stream_bitrate_kbps();
+	if (audio_stream_is_lossy() || (compact && kbps > 0)) {
 		if (kbps > 0) {
 			snprintf(out, size, "%s %d", codec, kbps);
 		} else {
@@ -6217,7 +6231,24 @@ static void np_file_short(const device_state_t *state, char *out, size_t size) {
 	int bits = audio_get_stream_bits();
 	char khz[12];
 	np_khz(khz, sizeof(khz), state->stream_sample_rate);
-	snprintf(out, size, "%s %d/%s", codec, bits > 0 ? bits : 16, khz);
+	char format[48];
+	snprintf(format, sizeof(format), "%s %d/%s", codec, bits > 0 ? bits : 16, khz);
+	if (kbps > 0)
+		snprintf(out, size, tr("np_chain_kbps"), format, kbps);
+	else
+		snprintf(out, size, "%s", format);
+}
+
+static bool np_output_differs(const device_state_t *state, const audio_output_format_t *output) {
+	return state->stream_sample_rate > 0 &&
+		(output->dop || output->rate != (unsigned)state->stream_sample_rate ||
+		 (!audio_stream_is_lossy() && audio_get_stream_bits() > 0 && output->bits != (unsigned)audio_get_stream_bits()));
+}
+
+static void np_output_short(const audio_output_format_t *output, bool usb, char *out, size_t size) {
+	char khz[12];
+	np_khz(khz, sizeof(khz), (int)output->rate);
+	snprintf(out, size, "%s %u/%s", output->dop ? "DoP" : usb ? "USB" : "PCM", output->bits, khz);
 }
 
 // The line: the file, and where it goes when that is somewhere worth naming --
@@ -6225,21 +6256,20 @@ static void np_file_short(const device_state_t *state, char *out, size_t size) {
 // rate the output was opened at that is not the file's.
 static void np_chain_compose(const device_state_t *state, char *out, size_t size, bool *warn) {
 	*warn = false;
-	char file[48];
-	np_file_short(state, file, sizeof(file));
+	char file[96];
 	char link[96] = "";
-	if (btline_compose(link, sizeof(link))) {
+	bool bt = btline_compose(link, sizeof(link));
+	np_file_short(state, file, sizeof(file), bt);
+	if (bt) {
 		char tmp[96];
 		sx_chain_short(tmp, sizeof(tmp), warn); // the warn: a codec other than the one chosen
-	} else if (usbaudio_active()) {
-		snprintf(link, sizeof(link), "USB");
 	} else {
-		int device = audio_get_device_rate();
-		if (!state->live && state->stream_sample_rate > 0 && device > 0 && device != state->stream_sample_rate && audio_get_dsd_multiple() <= 0) {
-			char khz[12];
-			np_khz(khz, sizeof(khz), device);
-			snprintf(link, sizeof(link), "%s kHz", khz);
-		}
+		bool usb = usbaudio_active();
+		audio_output_format_t output;
+		if (audio_get_output_format(&output) && np_output_differs(state, &output))
+			np_output_short(&output, usb, link, sizeof(link));
+		else if (usb)
+			snprintf(link, sizeof(link), "USB");
 	}
 	if (file[0] && link[0]) {
 		snprintf(out, size, "%s \xE2\x86\x92 %s", file, link);
@@ -6435,7 +6465,12 @@ static void chain_block_fill(void) {
 			}
 		} else {
 			int bits = audio_get_stream_bits();
-			snprintf(line, sizeof(line), tr("np_chain_bits"), codec, bits > 0 ? bits : 16, khz);
+			snprintf(part, sizeof(part), tr("np_chain_bits"), codec, bits > 0 ? bits : 16, khz);
+			int kbps = audio_get_stream_bitrate_kbps();
+			if (kbps > 0)
+				snprintf(line, sizeof(line), tr("np_chain_kbps"), part, kbps);
+			else
+				snprintf(line, sizeof(line), "%s", part);
 		}
 	}
 	chain_set_val(0, line[0] ? line : "\xE2\x80\x94");
@@ -6486,10 +6521,21 @@ static void chain_block_fill(void) {
 	} else if (usbaudio_active()) {
 		char name[64] = "";
 		usbaudio_card_name(name, sizeof(name));
-		snprintf(line, sizeof(line), "USB%s%s", name[0] ? " \xC2\xB7 " : "", name);
+		audio_output_format_t output;
+		if (audio_get_output_format(&output))
+			np_output_short(&output, true, part, sizeof(part));
+		else
+			snprintf(part, sizeof(part), "USB");
+		snprintf(line, sizeof(line), "%s%s%s", part, name[0] ? " \xC2\xB7 " : "", name);
 		chain_set_val(2, line);
 	} else {
-		chain_set_val(2, tr("np_chain_jack"));
+		snprintf(line, sizeof(line), "%s", tr("np_chain_jack"));
+		audio_output_format_t output;
+		if (audio_get_output_format(&output)) {
+			np_output_short(&output, false, part, sizeof(part));
+			chain_join(line, sizeof(line), part);
+		}
+		chain_set_val(2, line);
 	}
 
 	// НАУШНИКИ: who listens.

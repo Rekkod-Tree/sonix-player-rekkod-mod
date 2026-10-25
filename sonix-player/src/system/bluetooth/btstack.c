@@ -56,6 +56,15 @@ static void (*change_cb)(void);
 static char pcm_addr[MAX_PCMS][BT_ADDR_MAX];
 static int pcm_count;
 
+// Live encoded rates, not negotiated PCM rates or configured quality presets.
+// The signal reader owns updates; UI readers only copy these bounded entries.
+static struct {
+	char address[BT_ADDR_MAX];
+	unsigned bitrate;
+} pcm_bitrates[MAX_PCMS];
+static int pcm_bitrate_count;
+static unsigned pcm_bitrate_serial;
+
 // The same list for the other direction: devices streaming into this one.
 static char rx_addr[MAX_PCMS][BT_ADDR_MAX];
 static int rx_count;
@@ -112,6 +121,8 @@ static char media_player_address[BT_ADDR_MAX];
 // The caller holds lock. No callback, RPC or disconnect is allowed here.
 static void invalidate_caches_locked(void) {
 	pcm_count = rx_count = transport_count = headset_battery_count = 0;
+	pcm_bitrate_count = 0;
+	pcm_bitrate_serial++;
 	sink_serial++;
 	transport_serial++;
 	headset_battery_serial++;
@@ -411,6 +422,99 @@ static bool read_transport_state(dbus_reader_t *r, char *state, size_t size) {
 static bool path_is_a2dp_sink(const char *path) { return strncmp(path, "/org/bluealsa/", 14) == 0 && strstr(path, "/a2dpsrc/sink") != NULL; }
 
 static bool path_is_a2dp_source(const char *path) { return strncmp(path, "/org/bluealsa/", 14) == 0 && strstr(path, "/a2dpsnk/source") != NULL; }
+
+// Caller holds lock. A reset also invalidates in-flight property snapshots.
+static bool pcm_bitrate_registered(const char *address) {
+	for (int i = 0; address && i < pcm_count; i++) {
+		if (!strcasecmp(pcm_addr[i], address))
+			return true;
+	}
+	return false;
+}
+
+static void pcm_bitrate_note(const char *address, unsigned bitrate) {
+	if (!pcm_bitrate_registered(address))
+		return;
+	int i = 0;
+	while (i < pcm_bitrate_count && strcasecmp(pcm_bitrates[i].address, address))
+		i++;
+	if (i == pcm_bitrate_count) {
+		if (pcm_bitrate_count == MAX_PCMS)
+			return;
+		snprintf(pcm_bitrates[i].address, BT_ADDR_MAX, "%s", address);
+		pcm_bitrate_count++;
+	}
+	pcm_bitrates[i].bitrate = bitrate;
+	pcm_bitrate_serial++;
+}
+
+static void pcm_bitrate_forget(const char *address) {
+	for (int i = 0; i < pcm_bitrate_count; i++) {
+		if (!strcasecmp(pcm_bitrates[i].address, address)) {
+			memmove(&pcm_bitrates[i], &pcm_bitrates[i + 1],
+					sizeof(pcm_bitrates[0]) * (size_t)(pcm_bitrate_count - i - 1));
+			pcm_bitrate_count--;
+			break;
+		}
+	}
+	pcm_bitrate_serial++;
+}
+
+unsigned btstack_codec_bitrate(const char *address) {
+	unsigned bitrate = 0;
+	pthread_mutex_lock(&lock);
+	if (conn && !service_changed && pcm_bitrate_registered(address)) {
+		for (int i = 0; i < pcm_bitrate_count; i++) {
+			if (!strcasecmp(pcm_bitrates[i].address, address)) {
+				bitrate = pcm_bitrates[i].bitrate;
+				break;
+			}
+		}
+	}
+	pthread_mutex_unlock(&lock);
+	return bitrate;
+}
+
+// Consume a PCM PropertiesChanged body after its interface name. Telemetry
+// alone must not wake the routing worker or cause another D-Bus request.
+static bool read_pcm_bitrate(dbus_reader_t *r, unsigned *bitrate, bool *other) {
+	bool found = false;
+	*other = false;
+	dbus_array_iter_t props;
+	if (!dbus_r_array_begin(r, "{sv}", &props))
+		return false;
+	while (dbus_r_array_more(r, &props)) {
+		char key[64], sig[16];
+		if (!dbus_r_string(r, key, sizeof(key)) || !dbus_r_signature(r, sig, sizeof(sig)))
+			return false;
+		if (!strcmp(key, "CodecBitrate") && !strcmp(sig, "u")) {
+			uint32_t value;
+			if (!dbus_r_u32(r, &value))
+				return false;
+			*bitrate = value;
+			found = true;
+		} else {
+			*other = true;
+			if (!dbus_r_skip(r, sig))
+				return false;
+		}
+	}
+	dbus_array_iter_t invalid;
+	if (!dbus_r_array_begin(r, "s", &invalid))
+		return false;
+	while (dbus_r_array_more(r, &invalid)) {
+		char key[64];
+		if (!dbus_r_string(r, key, sizeof(key)))
+			return false;
+		if (!strcmp(key, "CodecBitrate")) {
+			*bitrate = 0;
+			found = true;
+		} else {
+			*other = true;
+		}
+	}
+	return found && !r->bad;
+}
 
 // ---------------------------------------------------------------------------
 // the headsets' battery (see headset_batteries above)
@@ -733,6 +837,7 @@ static void on_signal(dbus_conn_t *c, const dbus_msg_t *m, void *user) {
 		} else if (path_is_a2dp_sink(path) && address_from_path(path, address, sizeof(address))) {
 			if (!lock_current(c))
 				return;
+			pcm_bitrate_forget(address);
 			pcm_add(pcm_addr, &pcm_count, address);
 			sink_serial++;
 			pthread_mutex_unlock(&lock);
@@ -772,6 +877,7 @@ static void on_signal(dbus_conn_t *c, const dbus_msg_t *m, void *user) {
 		} else if (path_is_a2dp_sink(path) && address_from_path(path, address, sizeof(address))) {
 			if (!lock_current(c))
 				return;
+			pcm_bitrate_forget(address);
 			pcm_remove(pcm_addr, &pcm_count, address);
 			pthread_mutex_unlock(&lock);
 			fprintf(stderr, "btstack: the A2DP sink on %s is gone\n", address);
@@ -800,6 +906,19 @@ static void on_signal(dbus_conn_t *c, const dbus_msg_t *m, void *user) {
 		char iface[DBUS_NAME_MAX];
 		if (!dbus_r_string(&r, iface, sizeof(iface))) {
 			return;
+		}
+		if (!strcmp(iface, BALSA_PCM_IFACE) && path_is_a2dp_sink(m->path)) {
+			char address[BT_ADDR_MAX];
+			unsigned bitrate = 0;
+			bool other;
+			if (address_from_path(m->path, address, sizeof(address)) && read_pcm_bitrate(&r, &bitrate, &other)) {
+				if (!lock_current(c))
+					return;
+				pcm_bitrate_note(address, bitrate);
+				pthread_mutex_unlock(&lock);
+				if (!other)
+					return;
+			}
 		}
 
 		if (strcmp(iface, BLUEZ_TRANSPORT_IFACE) == 0) {
@@ -1436,6 +1555,8 @@ void btstack_refresh_audio(void) {
 			return;
 		pcm_count = 0;
 		rx_count = 0;
+		pcm_bitrate_count = 0;
+		pcm_bitrate_serial++;
 		pthread_mutex_unlock(&lock);
 		return;
 	}
@@ -1471,6 +1592,14 @@ void btstack_refresh_audio(void) {
 	pcm_count = count;
 	for (int i = 0; i < count; i++) {
 		snprintf(pcm_addr[i], BT_ADDR_MAX, "%.*s", BT_ADDR_MAX - 1, found[i]);
+	}
+	// A rescan can discover a removal whose signal was missed. Do not let
+	// obsolete peers occupy the bounded telemetry cache indefinitely.
+	for (int i = 0; i < pcm_bitrate_count;) {
+		if (!pcm_bitrate_registered(pcm_bitrates[i].address))
+			pcm_bitrate_forget(pcm_bitrates[i].address);
+		else
+			i++;
 	}
 	rx_count = count_rx;
 	for (int i = 0; i < count_rx; i++) {
@@ -1636,6 +1765,9 @@ bool btstack_stream_info(const char *address, bool receiving, btstack_stream_t *
 	if (!c || !pcm_path_dir(address, receiving, path, sizeof(path))) {
 		return false;
 	}
+	pthread_mutex_lock(&lock);
+	unsigned bitrate_serial = pcm_bitrate_serial;
+	pthread_mutex_unlock(&lock);
 
 	dbus_writer_t *w = dbus_call_begin(c, BALSA_SERVICE, path, PROPS_IFACE, "GetAll", "s");
 	dbus_w_string(w, BALSA_PCM_IFACE);
@@ -1663,6 +1795,10 @@ bool btstack_stream_info(const char *address, bool receiving, btstack_stream_t *
 			dbus_r_string(&r, out->codec, sizeof(out->codec));
 		} else if ((strcmp(key, "Sampling") == 0 || strcmp(key, "Rate") == 0) && strcmp(sig, "u") == 0) {
 			dbus_r_u32(&r, &rate);
+		} else if (!strcmp(key, "CodecBitrate") && !strcmp(sig, "u")) {
+			uint32_t bitrate;
+			if (dbus_r_u32(&r, &bitrate))
+				out->bitrate = bitrate;
 		} else if (strcmp(key, "Channels") == 0 && strcmp(sig, "y") == 0) {
 			dbus_r_byte(&r, &channels);
 		} else if (strcmp(key, "Format") == 0 && strcmp(sig, "q") == 0) {
@@ -1675,6 +1811,11 @@ bool btstack_stream_info(const char *address, bool receiving, btstack_stream_t *
 	out->rate = (unsigned)rate;
 	out->channels = (unsigned)channels;
 	out->bits = format_bits(format);
+	if (!r.bad && !receiving && address && lock_current(c)) {
+		if (bitrate_serial == pcm_bitrate_serial)
+			pcm_bitrate_note(address, out->bitrate);
+		pthread_mutex_unlock(&lock);
+	}
 	return !r.bad && connection_current(c);
 }
 

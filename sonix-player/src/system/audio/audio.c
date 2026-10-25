@@ -601,6 +601,10 @@ static int stream_sample_rate = 0;
 // and the Bluetooth resampler made of it. For the Now Playing line that says
 // when the music is converted on its way to the headphones.
 static int stream_device_rate = 0;
+// Negotiated PCM format, protected by output_lock rather than audio_mutex:
+// some output opens are already called with audio_mutex held.
+static audio_output_format_t output_format;
+static char output_format_device[sizeof(output_pcm)];
 static int stream_channels = 0;
 static int stream_bits = 0; // source bit depth (16/24/32), for the format line
 // DSD, for the format line: 64/128/256, or 0 when the track is not DSD. A DSD
@@ -1716,6 +1720,7 @@ retry_open:
 		return NULL;
 	}
 
+	audio_output_format_t negotiated = {0};
 	// Read back what the hardware actually settled on, not what was asked for:
 	// this line is the answer to "is the DAC really following the track?" --
 	// play a 24/96 FLAC after a 16/44.1 MP3 and the log has to change.
@@ -1727,6 +1732,13 @@ retry_open:
 		snd_pcm_hw_params_get_rate(hw_params, &actual_rate, &rdir);
 		snd_pcm_hw_params_get_format(hw_params, &actual_format);
 		snd_pcm_hw_params_get_channels(hw_params, &actual_channels);
+		int actual_bits = snd_pcm_hw_params_get_sbits(hw_params);
+		if (actual_bits <= 0)
+			actual_bits = snd_pcm_format_width(actual_format);
+		negotiated.rate = actual_rate;
+		negotiated.channels = actual_channels;
+		negotiated.bits = actual_bits > 0 ? (unsigned)actual_bits : 0;
+		negotiated.dop = pcm_exact_rate;
 		// The device name belongs on this line: without it the log cannot tell
 		// a track that went to the headphones from one that went to the jack,
 		// since the two otherwise print identically.
@@ -1804,6 +1816,10 @@ retry_open:
 	}
 	failure->code = 0;
 	*period_size_out = period_size;
+	pthread_mutex_lock(&output_lock);
+	output_format = negotiated;
+	snprintf(output_format_device, sizeof(output_format_device), "%s", route.device);
+	pthread_mutex_unlock(&output_lock);
 	pcm_device_open = true;
 	return pcm_handle;
 }
@@ -5828,6 +5844,17 @@ void audio_get_output_device(char *out, size_t out_size) {
 	pthread_mutex_lock(&output_lock);
 	snprintf(out, out_size, "%s", output_pcm);
 	pthread_mutex_unlock(&output_lock);
+}
+
+bool audio_get_output_format(audio_output_format_t *out) {
+	if (!out)
+		return false;
+	pthread_mutex_lock(&output_lock);
+	bool available = pcm_device_open && !strcmp(output_format_device, output_pcm) &&
+		output_format.rate > 0 && output_format.bits > 0 && output_format.channels > 0;
+	*out = available ? output_format : (audio_output_format_t){0};
+	pthread_mutex_unlock(&output_lock);
+	return available;
 }
 
 // ---------------------------------------------------------------------------

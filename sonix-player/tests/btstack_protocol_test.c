@@ -7,6 +7,7 @@
 static dbus_writer_t request, response;
 static unsigned manager_calls, bluez_manager_calls;
 static bool send_available = true;
+static void (*before_reply_read)(void);
 static dbus_writer_t *fake_begin(dbus_conn_t *c, const char *dest, const char *path, const char *interface, const char *member, const char *signature) {
 	(void)c;
 	if (!strcmp(member, "GetManagedObjects")) {
@@ -32,6 +33,8 @@ static bool fake_send(dbus_conn_t *c, int timeout, char *error, size_t length) {
 static void fake_reader(dbus_conn_t *c, dbus_reader_t *r) {
 	(void)c;
 	*r = (dbus_reader_t){.data = response.buf, .len = response.used};
+	if (before_reply_read)
+		before_reply_read();
 }
 #define dbus_call_begin fake_begin
 #define dbus_call_send fake_send
@@ -256,4 +259,5 @@ int main(void) {
 	discover_existing_and_signals();
 	discover_failures_and_reconnect();
 	puts("PASS BlueALSA4/5 actual Sonix PCM info, codec rates, rate selection and raw volume restore");
+	return 0;
 }

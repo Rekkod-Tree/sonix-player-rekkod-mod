@@ -17,6 +17,7 @@
 
 #include <fcntl.h>
 #include <math.h>
+#include <limits.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -2016,6 +2017,20 @@ decoder_t *decoder_open_info(const char *filepath, decode_format_t format) {
 	return decoder_open_file(filepath, format);
 }
 
+// A complete local file may declare no encoded bitrate (FLAC, VBR MP3).
+// Calculate its average once at open, never from a still-growing cache or on
+// the UI poll path. CUE opens reach this before narrowing the track duration.
+static int complete_file_bitrate(const char *filepath, int rate, uint64_t frames, bool growing) {
+	if (growing || rate <= 0 || frames == UINT64_MAX || frames <= (unsigned)rate / 2 ||
+		growfile_is_growing(filepath))
+		return 0;
+	struct stat info;
+	if (stat(filepath, &info) != 0 || !S_ISREG(info.st_mode) || info.st_size <= 0)
+		return 0;
+	double kbps = (double)info.st_size * 8.0 * rate / (double)frames / 1000.0;
+	return isfinite(kbps) && kbps > 0 && kbps < INT_MAX - 0.5 ? (int)(kbps + 0.5) : 0;
+}
+
 static decoder_t *decoder_open_file(const char *filepath, decode_format_t format) {
 	decoder_t *dec = calloc(1, sizeof(decoder_t));
 	if (!dec)
@@ -2368,6 +2383,8 @@ static decoder_t *decoder_open_file(const char *filepath, decode_format_t format
 		decoder_close(dec);
 		return NULL;
 	}
+	if (dec->bitrate_kbps <= 0)
+		dec->bitrate_kbps = complete_file_bitrate(filepath, dec->sample_rate, dec->total_pcm_frames, dec->growing != NULL);
 
 	return dec;
 }

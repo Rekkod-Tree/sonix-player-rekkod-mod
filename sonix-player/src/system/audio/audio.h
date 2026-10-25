@@ -197,6 +197,17 @@ double audio_get_speed(void);
 void audio_set_output_device(const char *pcm);
 void audio_get_output_device(char *out, size_t out_size);
 
+typedef struct {
+	unsigned rate; // negotiated PCM Hz
+	unsigned bits; // ALSA significant bits, or PCM format width if unavailable
+	unsigned channels;
+	bool dop; // DSD over PCM carrier, not PCM audio
+} audio_output_format_t;
+
+// Cached at a successful ALSA open; no device query or file IO on the UI path.
+// False when no matching current PCM is open or its format is unavailable.
+bool audio_get_output_format(audio_output_format_t *out);
+
 // Whether the stream is going out over Bluetooth. Asked outside this file by
 // the software volume, which stands down there: on A2DP the level belongs to
 // the headphones (AVRCP absolute volume), and ot_devices.json says the same

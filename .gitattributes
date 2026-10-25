@@ -9,3 +9,4 @@ sonix-packer/** text=auto eol=lf
 
 # Unified diff context includes a leading space before tabs/blank lines.
 sonix-player/tools/bluez/*.patch text eol=lf -whitespace
+sonix-player/tools/bluealsa/*.patch text eol=lf -whitespace

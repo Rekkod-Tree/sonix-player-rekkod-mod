@@ -2,6 +2,12 @@
 
 ## Bluetooth output recovery (1.4.2 candidate)
 
+- Candidate signal-chain telemetry reports source bitrate, measured LDAC ABR
+  bitrate and a differing negotiated wired/USB PCM format. It reuses the current
+  player line and disclosure, bounded signal caches and the existing ALSA open;
+  no new poller, timer or SD telemetry writes. Final integration/native acceptance
+  remains pending; contracts and limitations are in `BLUETOOTH_TELEMETRY.md`.
+
 - A failed audio output pauses the existing source at its current position
   instead of replaying the file from its beginning. Resume retries only the PCM;
   another failed reopen keeps the source paused. Newer play/stop/seek commands
