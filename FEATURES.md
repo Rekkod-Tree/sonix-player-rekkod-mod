@@ -1,6 +1,6 @@
 ﻿# Features
 
-## Touch delivery and resume responsiveness (next build)
+## Touch delivery and resume responsiveness (1.4.2; R1 runtime verified)
 
 - Queued touchscreen press/release frames are delivered separately instead of
   losing a short tap while the GUI is busy. Pointer polling and idle timers
@@ -11,18 +11,20 @@
   mutex. Newer playback commands and output changes invalidate a late result;
   the same owner closes it, preserving the requested track and position.
 - Component checks cover actual evdev frames, real LVGL dispatch with the
-  production tap guard, slow/failing PCM opens and command races. Full target
-  and R1 acceptance are still pending; the earlier delivered image lacks these fixes.
+  production tap guard, slow/failing PCM opens and command races. The final
+  ordinary LTO/O3/fresh-PGO program passed 20 ms taps without duplicate toggles,
+  cover-drag cancellation, WAV/decoded resume, seek, books and screen-off/wake
+  on R1. Hardware getter latency percentiles have not been measured.
 
-## Download queue safety (next build)
+## Download queue safety (1.4.2)
 
 - A failed, empty or cancelled Yandex album expansion adds no tracks and cannot
   turn a negative API result into an offset before the pending queue. The
   existing error event, following jobs and successful track order are retained.
 - The extracted production branch passes ten ASan/UBSan host cases and the same
-  ten standalone MIPS cases on R1. This is component verification, not a claim
-  of end-to-end downloads on a new installed image. The already delivered
-  `1.4.2` image predates this fix.
+  ten standalone MIPS cases on R1. This is component verification; a real
+  simultaneous Yandex/Zvuk account-download run remains untested. The final
+  release image includes this fix; installed-image boot is checked separately.
 - Concurrent Yandex/Zvuk saves yield to playback cache traffic rather than to
   each other's background jobs. The existing all-download flags still protect
   storage handoff and network power; providers without the optional playback
