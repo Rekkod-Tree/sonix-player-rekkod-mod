@@ -2,6 +2,12 @@
 
 ## Bluetooth output recovery (1.4.2 candidate)
 
+- LDAC handle allocation/free is bound to the matching encoder or decoder
+  library. This removes retained encoder buffers caused by the stock libraries'
+  colliding API names while keeping LDAC input, output and adaptive ABR.
+  Native standalone encode/decode and repeated PCM tests cover the fix; final
+  release-image integration remains pending. See `BLUEALSA_BUILD.md`.
+
 - Candidate signal-chain telemetry reports source bitrate, measured LDAC ABR
   bitrate and a differing negotiated wired/USB PCM format. It reuses the current
   player line and disclosure, bounded signal caches and the existing ALSA open;
@@ -22,7 +28,8 @@
 - R1 packages require the rebuilt BlueZ 5.54 daemon described in `BLUEZ_BUILD.md`:
   callback reference and delayed reconfiguration lifetime fixes, missing-endpoint
   guards, original plugins/pairing storage and HiBy ACL priority support.
-  ALSA, BlueALSA and controller firmware are not downgraded or replaced.
+  ALSA/BlueALSA versions, codec libraries, ALSA plugins and controller firmware
+  are preserved; the two service executables are rebuilt with scoped fixes.
 - Source-level sanitizer tests and the first R1 candidate reproduced the codec
   refusal while preserving music/book position and daemon liveness. Final
   optimized-image acceptance is still pending; this does not claim that all

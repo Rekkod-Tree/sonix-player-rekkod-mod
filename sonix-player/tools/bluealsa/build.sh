@@ -26,6 +26,7 @@ mkdir -- "$BLUEALSA_BUILD/source" "$BLUEALSA_BUILD/artifacts"
 git -C "$BLUEALSA_SOURCE" archive "$pin" | tar -x -C "$BLUEALSA_BUILD/source"
 cd -- "$BLUEALSA_BUILD/source"
 patch -p1 --forward --input="$script_dir/bluealsa-5.0-codec-bitrate.patch"
+patch -p1 --forward --input="$script_dir/bluealsa-5.0-ldac-handles.patch"
 mkdir -p m4
 "${AUTORECONF:-autoreconf}" --install --force
 
@@ -51,5 +52,6 @@ cp -- src/bluealsad "$artifacts/bluealsad.debug"
     sha256sum bluealsad > bluealsad.sha256
     printf 'BlueALSA 5.0.0 source=%s LTO=2 ABI=checked native=unverified\n' "$pin" > BUILD.txt
     sha256sum "$script_dir/bluealsa-5.0-codec-bitrate.patch" >> BUILD.txt
+    sha256sum "$script_dir/bluealsa-5.0-ldac-handles.patch" >> BUILD.txt
 )
 printf 'Built daemon only; native validation and matching firmware packaging remain: %s\n' "$artifacts"
