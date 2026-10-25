@@ -1,6 +1,8 @@
 ﻿# Features
 
-## Listening context and mini-player (in development; R1 acceptance pending)
+## Listening context and mini-player (1.4.1; R1 runtime verified)
+
+Release image, hardware coverage and remaining limitations: `RELEASE_1.4.1.md`.
 
 - Normal mini-player uses an 88 px cover, a readable two-line caption and a
   full-colour action button. Compact keeps its smaller footer without artwork;
