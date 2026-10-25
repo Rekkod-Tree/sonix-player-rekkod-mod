@@ -5000,6 +5000,8 @@ void player_cover_accent_set(bool on) {
 }
 
 void player_layout_set(player_layout_t layout) {
+	// Only the standard arrangement is supported by this release.
+	layout = PLAYER_LAYOUT_STANDARD;
 	if (layout == layout_choice) {
 		return;
 	}
@@ -5007,9 +5009,6 @@ void player_layout_set(player_layout_t layout) {
 	config_set_int("screen", "player_layout_alt", (int)layout);
 	config_save();
 
-	// Not apply_layout() directly: choosing Alternative while a radio station
-	// is on must not put the alternative arrangement up. What the setting does
-	// is change the answer update_layout() will give, so it is asked again.
 	device_state_t state;
 	device_state_get(&state);
 	update_layout(&state);
@@ -7591,10 +7590,8 @@ void player_init(gui_config_t *cfg) {
 	bar_height = (int)cfg->top_bar_height;
 	player_set_statusbar_always(config_get_int("screen", "statusbar_always", 0) != 0);
 
-	// Whichever arrangement was left selected, now that every widget it moves
-	// exists.
-	int saved = (int)config_get_int("screen", "player_layout_alt", 0);
-	layout_choice = (saved == (int)PLAYER_LAYOUT_ALTERNATIVE) ? PLAYER_LAYOUT_ALTERNATIVE : (saved == (int)PLAYER_LAYOUT_STUDIO) ? PLAYER_LAYOUT_STUDIO : PLAYER_LAYOUT_STANDARD;
+	// Ignore legacy layout choices; keep the saved value for downgrade compatibility.
+	layout_choice = PLAYER_LAYOUT_STANDARD;
 	cover_accent = config_get_bool("screen", "cover_accent", false);
 	layout_alt_now = false; // apply_layout() below puts the standard one up first
 	layout_studio_now = false;

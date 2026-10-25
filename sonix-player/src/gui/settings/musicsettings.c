@@ -1709,38 +1709,6 @@ static void cover_accent_cb(lv_event_t *e) {
 }
 
 // ---------------------------------------------------------------------------
-// Which of the two arrangements the now-playing page uses
-//
-// Here and not under Appearance, where everything applies to the whole
-// interface: this applies to the music on the card and to nothing else -- not
-// to a radio station, not to a stream from a phone, not to an audiobook.
-//
-// The page owns the setting; this stores it and asks the page to decide again.
-// ---------------------------------------------------------------------------
-
-static lv_obj_t *layout_standard_pill;
-static lv_obj_t *layout_alternative_pill;
-static lv_obj_t *layout_studio_pill;
-
-static void layout_refresh(void) {
-	if (!layout_standard_pill) {
-		return;
-	}
-	player_layout_t chosen = player_layout_get();
-	settingsrow_pill_active(layout_standard_pill, chosen == PLAYER_LAYOUT_STANDARD);
-	settingsrow_pill_active(layout_alternative_pill, chosen == PLAYER_LAYOUT_ALTERNATIVE);
-	settingsrow_pill_active(layout_studio_pill, chosen == PLAYER_LAYOUT_STUDIO);
-}
-
-static void layout_pick_cb(lv_event_t *e) {
-	if (player_sheet_drag_active() || switcher_back_drag_active()) {
-		return;
-	}
-	player_layout_set((player_layout_t)(intptr_t)lv_event_get_user_data(e));
-	layout_refresh();
-}
-
-// ---------------------------------------------------------------------------
 // Library
 //
 // Everything about finding the music: the Music page's tiles and Cover Flow,
@@ -1848,27 +1816,7 @@ static void build_nowplaying_page(gui_config_t *cfg) {
 	lv_obj_t *container = settingsrow_page(nowplaying_screen, cfg, "musicsettings_now_playing");
 	settingsrow_title_corner_slots(settingsrow_page_title(nowplaying_screen), cfg, 0);
 
-	// How the now-playing page is arranged.
-	lv_obj_t *layout_pills = NULL;
-	settingsrow_pills(container, "musicsettings_player_layout", &layout_pills);
-	layout_standard_pill =
-		settingsrow_pill(layout_pills, "musicsettings_layout_standard", PLAYER_LAYOUT_STANDARD, layout_pick_cb);
-	layout_alternative_pill =
-		settingsrow_pill(layout_pills, "musicsettings_layout_alternative", PLAYER_LAYOUT_ALTERNATIVE, layout_pick_cb);
-	layout_studio_pill =
-		settingsrow_pill(layout_pills, "musicsettings_layout_studio", PLAYER_LAYOUT_STUDIO, layout_pick_cb);
-
-	layout_refresh();
-	theme_register_refresh(layout_refresh);
-
-	// Said here rather than left to be discovered: the Waveform arrangement is
-	// built out of a file on the card -- the shape of the track, the sleeve it
-	// takes its colour from, the tags in the pill -- so a radio station, a
-	// stream from a phone and an audiobook all get the standard one whatever
-	// this says. Studio asks for less and takes all of them.
-	option_note(container, "musicsettings_local_only_note");
-
-	// The sleeve's colour as the accent of the other two arrangements too.
+	// Cover-derived accent for the standard player.
 	settingsrow_toggle(container, "musicsettings_cover_accent", &cover_accent_switch, cover_accent_cb);
 	option_note(container, "musicsettings_cover_accent_note");
 	if (player_cover_accent()) {

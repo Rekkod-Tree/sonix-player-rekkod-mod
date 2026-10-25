@@ -2,6 +2,10 @@
 
 ## Bluetooth output recovery (1.4.2 candidate)
 
+- Only the standard Graphite 2 player is available. Legacy Waveform/Studio
+  preferences open the standard player; the layout selector is removed.
+  Other playback, accent and artwork settings are retained.
+
 - LDAC handle allocation/free is bound to the matching encoder or decoder
   library. This removes retained encoder buffers caused by the stock libraries'
   colliding API names while keeping LDAC input, output and adaptive ABR.
