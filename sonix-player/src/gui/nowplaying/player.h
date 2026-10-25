@@ -36,38 +36,7 @@ void player_lyrics_reload(const char *path);
 // where the screen shows nothing -- one track, a book, DLNA, a stream.
 bool player_queue_position(int *position, int *count);
 
-// ---------------------------------------------------------------------------
-// The three arrangements of the now-playing page
-//
-// Standard is the one this player has always had. Waveform moves the title and
-// the star onto the sleeve and turns the progress bar into the shape of the
-// track, all of it drawn in the sleeve's own colour. Studio centres the sleeve
-// with the title across the top and the format under it, over a blurred copy of
-// the same artwork filling the screen.
-//
-// The setting lives in Music > Display options; these are how that page reads
-// and writes it. The numbers are what goes in the config, so the first two keep
-// the values they have always had.
-//
-// Which one is actually in force also depends on what is playing: see the note
-// on layout_alternative in player.c. Waveform is for a file on the card; Studio
-// takes whatever is playing, a station included.
-//
-// The names below are the ones the code has always used; the pills say
-// Normale, Waveform and Alternativo. ALTERNATIVE is the one the pill calls
-// Waveform, and STUDIO the one it calls Alternativo.
-// ---------------------------------------------------------------------------
-typedef enum {
-	PLAYER_LAYOUT_STANDARD = 0,
-	PLAYER_LAYOUT_ALTERNATIVE = 1,
-	PLAYER_LAYOUT_STUDIO = 2,
-} player_layout_t;
-
-player_layout_t player_layout_get(void);
-void player_layout_set(player_layout_t layout);
-
-// Whether the Standard and Studio arrangements take the sleeve's colour as
-// their accent, as Waveform always does. Off by default; saved in the config.
+// Whether the standard player takes its accent from the cover.
 bool player_cover_accent(void);
 void player_cover_accent_set(bool on);
 

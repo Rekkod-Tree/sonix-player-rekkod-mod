@@ -4,7 +4,8 @@
 
 - Only the standard Graphite 2 player is available. Legacy Waveform/Studio
   preferences open the standard player; the layout selector is removed.
-  Other playback, accent and artwork settings are retained.
+  The retired layouts, their hidden widgets and waveform canvas/worker are
+  removed. Other playback, lyrics, accent and artwork settings are retained.
 
 - LDAC handle allocation/free is bound to the matching encoder or decoder
   library. This removes retained encoder buffers caused by the stock libraries'

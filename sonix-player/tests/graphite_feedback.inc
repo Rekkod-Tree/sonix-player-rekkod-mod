@@ -114,7 +114,6 @@ static void feedback_states(void) {
 	case 1:
 		if (library_scan_running() || audiobookdb_scan_running()) { step--; break; }
 		feedback_large_m3u();
-		player_layout_set(PLAYER_LAYOUT_STANDARD);
 		player_play_file(getenv("SONIX_UI_TEST_TRACK"));
 		player_sheet_open(false);
 		break;

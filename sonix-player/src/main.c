@@ -30,7 +30,6 @@
 #include "src/system/audio/eq.h"
 #include "src/system/audio/headset.h"
 #include "src/system/audio/usbaudio.h"
-#include "src/system/audio/waveform.h"
 #include "src/system/bluetooth/bluetooth.h"
 #include "src/system/bluetooth/btlog.h"
 #include "src/system/bluetooth/btplayer.h"
@@ -2316,12 +2315,6 @@ int main(int argc, char **argv) {
 	// browsing a library only ever decodes each cover once -- the same trick
 	// the stock player uses with its own .hiby/.../cache folder.
 	cover_set_cache_dir(gui_cfg.sd_root_path);
-
-	// The shapes of tracks, for the player's alternative layout. The worker
-	// sleeps until a page asks for one, so starting it costs a thread and
-	// nothing else.
-	waveform_set_cache_dir(gui_cfg.sd_root_path);
-	waveform_start();
 
 	// User playlists: plain .m3u files in <card>/Playlist.
 	playlists_init(gui_cfg.sd_root_path);

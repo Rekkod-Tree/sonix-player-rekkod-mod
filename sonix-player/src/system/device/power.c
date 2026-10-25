@@ -9,7 +9,6 @@
 // getter, and both places here have to read the period before changing it.
 #include "lvgl/src/misc/lv_timer_private.h"
 
-#include "src/system/audio/waveform.h"
 #include "src/system/device/ota.h"
 #include "src/system/device/system.h"
 
@@ -1526,7 +1525,6 @@ static bool (*g_wake_hook)(void);
 void power_set_wake_hook(bool (*cb)(void)) { g_wake_hook = cb; }
 
 void power_screen_off(void) {
-	waveform_set_screen_on(false); // told, but not a reason to stop -- see waveform.h
 	if (!g_screen_on) {
 		return;
 	}
@@ -1626,7 +1624,6 @@ void power_keep_animations_paused(void) {
 }
 
 void power_screen_on(void) {
-	waveform_set_screen_on(true);
 	if (g_screen_on) {
 		return;
 	}

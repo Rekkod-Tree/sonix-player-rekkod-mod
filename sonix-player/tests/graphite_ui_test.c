@@ -1071,16 +1071,14 @@ static void surface_states(void) {
 
 static void player_home_gestures(void) {
 	int height = lv_display_get_vertical_resolution(lv_display_get_default());
-	player_layout_t saved = player_layout_get();
 	device_state_t before, after;
 	device_state_get(&before);
-	for (int layout = PLAYER_LAYOUT_STANDARD; layout <= PLAYER_LAYOUT_STUDIO; layout++) {
+	{
 		player_sheet_close(false);
 		switch_screen_no_history(music_screen);
-		player_layout_set((player_layout_t)layout);
 		player_sheet_open(false);
 		lv_obj_update_layout(player_screen);
-		capture(layout == PLAYER_LAYOUT_STANDARD ? "home-gesture-player-standard" : layout == PLAYER_LAYOUT_ALTERNATIVE ? "home-gesture-player-waveform" : "home-gesture-player-studio");
+		capture("home-gesture-player-standard");
 		int bottom = height - 8;
 		input(5, height - 110, true);
 		input(5, height - 210, true);
@@ -1110,7 +1108,7 @@ static void player_home_gestures(void) {
 		assert(player_sheet_is_open()); // Home commits on release, not while held.
 		input(240, bottom - 100, false);
 		assert(!player_sheet_is_open() && lv_screen_active() == main_menu_screen);
-		capture(layout == PLAYER_LAYOUT_STANDARD ? "player-home-standard" : layout == PLAYER_LAYOUT_ALTERNATIVE ? "player-home-waveform" : "player-home-studio");
+		capture("player-home-standard");
 		// Home resets the stack, including the previous Music page.
 		back_btn_cb(NULL);
 		assert(lv_screen_active() == main_menu_screen);
@@ -1160,9 +1158,8 @@ static void player_home_gestures(void) {
 	}
 	device_state_get(&after);
 	assert(strcmp(before.current_file, after.current_file) == 0 && before.volume == after.volume && before.status == after.status);
-	player_layout_set(saved);
 	player_sheet_open(false);
-	printf("UI_HOME_GESTURE_PASS %s: taps/short/horizontal/cancel/held/Home/quick/diagonal/wide-start, three layouts\n", theme_is_dark() ? "dark" : "light");
+	printf("UI_HOME_GESTURE_PASS %s: taps/short/horizontal/cancel/held/Home/quick/diagonal/wide-start, standard layout\n", theme_is_dark() ? "dark" : "light");
 }
 
 static lv_obj_t *find_visible_image(lv_obj_t *root, const lv_image_dsc_t *glyph) {
@@ -1583,7 +1580,7 @@ static void run(lv_timer_t *timer) {
 			assert(lv_obj_is_hidden(player_screen) && lv_screen_active() == main_menu_screen && sx_mini_visible());
 			capture(step == 2 ? "home-ready-light" : "home-ready-dark");
 			if (step == 4) {
-				puts("UI_TEST_PASS player Home gesture and completed animation, both themes and three layouts");
+				puts("UI_TEST_PASS player Home gesture and completed animation, both themes and standard layout");
 				fflush(stdout);
 				exit(0);
 			}
@@ -2020,18 +2017,15 @@ static void run(lv_timer_t *timer) {
 		break;
 	case 24:
 		capture("player-cover");
-		player_layout_set(PLAYER_LAYOUT_ALTERNATIVE);
 		break;
 	case 25:
-		capture("player-waveform");
+		capture("player-standard-dark");
 		theme_set_dark(false);
-		capture("player-waveform-light");
-		player_layout_set(PLAYER_LAYOUT_STUDIO);
+		capture("player-standard-light");
 		break;
 	case 26:
-		capture("player-studio");
+		capture("player-standard-light-restored");
 		theme_set_dark(true);
-		player_layout_set(PLAYER_LAYOUT_STANDARD);
 		break;
 	case 27:
 		capture("player-standard-restored");
