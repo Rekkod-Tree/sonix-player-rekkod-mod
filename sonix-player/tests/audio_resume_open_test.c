@@ -14,6 +14,7 @@ static unsigned delay_ms;
 static pthread_t owner;
 static snd_pcm_t *handle;
 static uint64_t last_close_ms;
+static bool cancel_on_close;
 
 static void require_settled_close(void) {
 	struct timespec now;
@@ -31,11 +32,14 @@ int snd_pcm_close(snd_pcm_t *pcm) {
 	struct timespec now;
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	last_close_ms = (uint64_t)now.tv_sec * 1000U + (uint64_t)now.tv_nsec / 1000000U;
+	if (cancel_on_close && pcm == (snd_pcm_t *)1)
+		audio_stop();
 	return 0;
 }
 
 static snd_pcm_t *fixture_open(int channels, int rate, int bits, snd_pcm_uframes_t *period, pcm_open_error_t *error) {
 	(void)error;
+	assert(!cancel_on_close); // A command received before the open must prevent it.
 	assert(channels == 2 && rate == 44100 && bits == 16 && *period == 512);
 	assert(pthread_equal(pthread_self(), owner));
 	require_settled_close();
@@ -186,5 +190,20 @@ int main(void) {
 	}
 	run(0, 200, true, false);
 	run(0, 2000, true, false);
+	// A receiver can take the output after Stop during the close/settle phase.
+	// An obsolete local attempt must never open it or request it back again.
+	cancel_on_close = true;
+	owner = pthread_self();
+	handle = (snd_pcm_t *)1;
+	last_close_ms = 0;
+	closes = 0;
+	audio_command = AUDIO_CMD_PLAY;
+	play_request = seek_request = stop_thread = false;
+	hold_flush_request = resume_recover_pending = false;
+	pthread_mutex_lock(&audio_mutex);
+	snd_pcm_uframes_t period = 512;
+	assert(!reopen_paused_pcm(&handle, 2, 44100, 16, &period, false));
+	pthread_mutex_unlock(&audio_mutex);
+	assert(!handle && closes == 1 && period == 512 && audio_command == AUDIO_CMD_STOP);
 	puts("PASS resume: responsive getters, new commands retained, one owner/close, failed open stays paused");
 }

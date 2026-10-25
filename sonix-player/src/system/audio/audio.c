@@ -2922,6 +2922,12 @@ static bool pcm_reroute(snd_pcm_t **pcm, int channels, int rate, int bits, snd_p
 	return *pcm != NULL;
 }
 
+// Caller holds audio_mutex. Re-check after each unlocked driver phase.
+static bool resume_request_cancelled(unsigned serial) {
+	return serial != resume_request_serial || play_request || stop_thread || seek_request ||
+		   hold_flush_request || resume_recover_pending || audio_command != AUDIO_CMD_PLAY;
+}
+
 // Enter and return with audio_mutex held. The playback thread remains the
 // sole owner of the handle while slow driver work runs without the UI lock.
 static bool reopen_paused_pcm(snd_pcm_t **pcm, int channels, int rate, int bits, snd_pcm_uframes_t *period, bool exact_rate) {
@@ -2937,6 +2943,15 @@ static bool reopen_paused_pcm(snd_pcm_t **pcm, int channels, int rate, int bits,
 		// Preserve the driver's close/open settling interval.
 		usleep(150 * 1000);
 	}
+	pthread_mutex_lock(&audio_mutex);
+	if (resume_request_cancelled(serial)) {
+		// Do not touch a receiver's output after Stop during the settling wait.
+		pthread_mutex_unlock(&audio_mutex);
+		paused_release_due(pcm, paused_clock_ms());
+		pthread_mutex_lock(&audio_mutex);
+		return false;
+	}
+	pthread_mutex_unlock(&audio_mutex);
 	int route = alsa_output_key();
 	char device[sizeof(output_pcm)];
 	audio_get_output_device(device, sizeof(device));
@@ -2948,7 +2963,7 @@ static bool reopen_paused_pcm(snd_pcm_t **pcm, int channels, int rate, int bits,
 	audio_get_output_device(current_device, sizeof(current_device));
 	bool same_output = route == alsa_output_key() && !strcmp(device, current_device);
 	pthread_mutex_lock(&audio_mutex);
-	if (serial != resume_request_serial || !same_output || play_request || stop_thread || seek_request || hold_flush_request || resume_recover_pending || audio_command != AUDIO_CMD_PLAY) {
+	if (!same_output || resume_request_cancelled(serial)) {
 		// Do not publish or use a late handle, and never replace the new command
 		// with an old open failure. Close on this same owner without the UI lock.
 		pthread_mutex_unlock(&audio_mutex);

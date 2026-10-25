@@ -21,12 +21,15 @@ helper = text[m.start():end] + '\n'
 assert text.count('if (!reopen_paused_pcm(&pcm_handle,') == 2
 variants = [('actual', helper)]
 if a.controls:
-    variants.append(('locked-driver', helper.replace('\tpthread_mutex_unlock(&audio_mutex);', '\t/* kept lock */', 1)))
-    start = helper.index('\tif (serial != resume_request_serial')
+    opening = '\t*pcm = open_pcm_device(channels, rate, bits, period, NULL);'
+    assert helper.count(opening) == 1
+    variants.append(('locked-driver', helper.replace(opening, '\tpthread_mutex_lock(&audio_mutex);\n' + opening + '\n\tpthread_mutex_unlock(&audio_mutex);')))
+    start = helper.index('\tif (!same_output || resume_request_cancelled(serial))')
     finish = helper.index(') {', start) + 1
     variants.append(('stale-open-accepted', helper[:start] + '\t(void)serial; (void)same_output;\n\tif (false)' + helper[finish:]))
     assert helper.count('\t\t\tusleep(150 * 1000);') == 1
     variants.append(('no-cancelled-close-settle', helper.replace('\t\t\tusleep(150 * 1000);', '')))
+    variants.append(('ignored-preopen-command', helper.replace('\tif (resume_request_cancelled(serial)) {', '\tif (false) {')))
 resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
 records = []
 with tempfile.TemporaryDirectory(prefix='sonix-resume-open-') as d:
