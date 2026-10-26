@@ -14,7 +14,6 @@
 #include "src/gui/library/shufflecard.h"
 #include "src/gui/nowplaying/coverflow.h"
 #include "src/gui/nowplaying/historypage.h"
-#include "src/gui/nowplaying/npicons.h"
 #include "src/gui/nowplaying/trackmenu.h"
 #include "src/gui/shell/gridpage.h"
 #include "src/gui/shell/gui.h"
@@ -503,7 +502,7 @@ void music_init(gui_config_t *cfg) {
 
 	settingsrow_title_corner_slots(settingsrow_title(music_screen, cfg, "music"), cfg, 3);
 	trackmenu_queue_button(music_screen, cfg, 1);
-	lv_obj_t *more_btn = corner_button(cfg, 2, &npicon_more);
+	lv_obj_t *more_btn = corner_button(cfg, 2, &icon_ellipsis_vertical);
 	lv_obj_add_event_cb(more_btn, music_more, LV_EVENT_CLICKED, NULL);
 
 	lv_obj_t *search_btn = corner_button(cfg, 0, &icon_search);

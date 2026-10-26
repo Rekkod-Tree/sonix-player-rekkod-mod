@@ -102,7 +102,7 @@ static void motion_states(lv_timer_t *timer) {
 	case 11:
 		assert(player_sheet_is_open() && lv_obj_get_x(player_screen) == 0);
 		player_sheet_close(false);
-		qe_click(find_image(music_screen, &npicon_more));
+		qe_click(find_image(music_screen, &icon_ellipsis_vertical));
 		break;
 	case 12:
 		assert(sx_sheet_is_open() && visible(find_label(lv_layer_top(), tr("music_album_covers"))));
