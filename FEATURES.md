@@ -21,8 +21,10 @@
   Signed-in Zvuk header/search used the host fixture; native checked signed-out
   header/chapters. Bluetooth acoustics, deep suspend and R3 hardware were not
   repeated in this UI wave. Final image extraction and legacy OTA fixtures passed.
-  This R1 acceptance predates the final 72 px edge adjustment. The wider edge
-  passed all five host flows on both panel heights; physical recheck is pending.
+  The final 72 px edge also passed all five host flows on both panel heights and
+  the exact candidate runtime on R1: slow/diagonal edge Back, 71/72 px ownership,
+  vertical scrolling and movement/hold separation. The installed program and
+  settings were restored; the new whole image still needs a manual installation.
 
 ## Touch delivery and resume responsiveness (1.4.2; R1 runtime verified)
 
