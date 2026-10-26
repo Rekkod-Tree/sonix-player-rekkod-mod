@@ -14,6 +14,8 @@ void switch_screen_return_to(lv_obj_t *target_screen);	// discard newer history 
 // No worker, timer, retained media response or persistent write.
 void switcher_browse_bind(const char *source, lv_obj_t *screen, lv_obj_t *root);
 bool switcher_browse_open(const char *source);
+// Start a content deep link at its catalog root, not at the player's opener.
+bool switcher_browse_begin(const char *source);
 void switcher_browse_forget(const char *source);
 // True for a remembered page, optionally replacing the default subtitle.
 bool switcher_browse_description(const char *source, char *out, size_t size);
@@ -44,6 +46,9 @@ bool switcher_back_drag_active(void);
 // LV_EVENT_SCREEN_UNLOADED only once it is off screen.
 bool switcher_nav_anim_running(void);
 void back_btn_cb(lv_event_t *e);
+// Ordinary tap goes Back; a stationary hold goes Home outside the player.
+// Uses the same guarded handler for the global and album chevrons.
+void switcher_bind_back_button(lv_obj_t *button);
 void switch_screen_cb(lv_event_t *e);
 void back_btn_init(gui_config_t *cfg);
 

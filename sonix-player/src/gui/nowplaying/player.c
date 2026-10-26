@@ -127,7 +127,6 @@ static void np_outside_watch(const device_state_t *state);
 static void np_poll(const device_state_t *state);
 static void np_layout_changed(void);
 static void np_mini_from_cover(void);
-static bool repeat_one_from_shuffle; // where the repeat button goes back to after "one"
 static void mode_toast(playback_mode_t mode);
 static bool np_outside(void);
 
@@ -689,28 +688,8 @@ static void apply_playback_status(audio_status_t status) {
 // It reads the queue itself, so it says the same thing whatever filled it --
 // tracks off the card, a podcast's episodes, a Tidal or Qobuz album.
 //
-// The number is the track's place in the LIST, not in the dealt order: under
-// shuffle those are two different things, and the list is the one that means
-// something. Counting the deal gives a number that climbs by one at every
-// track, which reads as a position in an album but is not one, since the
-// tracks are picked at random from all over the card. Outside shuffle the two
-// orders are the same array and the reading is identical.
-//
-// Blank rather than "1/1" when there is nothing to be lost in: a single track,
-// a book (one long file), a stream (no queue at all), or playback that belongs
-// to a phone over DLNA.
-// The number shown. Under shuffle, the place in the list (above). Otherwise
-// the place in the playback order: since 2.0 "Play next" moves a track up the
-// order without moving its stored entry, so the stored index stopped being
-// the position outside shuffle too -- a track sent next from the sixth place
-// read "6/6" while it played second.
-static int shown_queue_position(void) {
-	playback_mode_t mode = playlist_get_mode();
-	if (mode == PLAYBACK_MODE_SHUFFLE || mode == PLAYBACK_MODE_SHUFFLE_REPEAT) {
-		return (int)playlist_current_entry() + 1;
-	}
-	return playlist_current_index() + 1;
-}
+// This counter and the queue page use the same actual playback order.
+static int shown_queue_position(void) { return playlist_current_index() + 1; }
 
 bool player_queue_position(int *position, int *count) {
 	*position = 0;
@@ -3553,46 +3532,11 @@ static void more_btn_event_cb(lv_event_t *e) {
 	trackmenu_open(lv_event_get_current_target(e));
 }
 
-// Steps to the next playback mode: normal, loop the queue, loop the track,
-// shuffle once through, shuffle round and round.
-//
-// 2.0: the button is repeat -- off, all, one, and round again (the handoff's
-// ⟳ / ⟳1) -- and says which in a toast. Shuffle is a switch of its own in the
-// player's menu, and the button cycles repeat without touching it: with
-// shuffle on, off and all are its two shuffled modes, and after "one" it goes
-// back to shuffling. The side key's "change mode" still steps through all five
-// (player_key_cycle_mode).
+// All queue modes are named together; the physical key keeps its cycle.
 static void repeat_btn_event_cb(lv_event_t *e) {
 	(void)e;
-	if (player_sheet_drag_active()) {
-		return;
-	}
-	playback_mode_t next;
-	switch (playlist_get_mode()) {
-	case PLAYBACK_MODE_NORMAL:
-		next = PLAYBACK_MODE_REPEAT_ALL;
-		break;
-	case PLAYBACK_MODE_REPEAT_ALL:
-		next = PLAYBACK_MODE_REPEAT_ONE;
-		repeat_one_from_shuffle = false;
-		break;
-	case PLAYBACK_MODE_SHUFFLE:
-		next = PLAYBACK_MODE_SHUFFLE_REPEAT;
-		break;
-	case PLAYBACK_MODE_SHUFFLE_REPEAT:
-		next = PLAYBACK_MODE_REPEAT_ONE;
-		repeat_one_from_shuffle = true;
-		break;
-	case PLAYBACK_MODE_REPEAT_ONE:
-	default:
-		next = repeat_one_from_shuffle ? PLAYBACK_MODE_SHUFFLE : PLAYBACK_MODE_NORMAL;
-		repeat_one_from_shuffle = false;
-		break;
-	}
-	playlist_set_mode(next);
-	update_repeat_button();
-	player_queue_changed();
-	mode_toast(next);
+	if (!player_sheet_drag_active())
+		player_playback_mode_menu();
 }
 
 static void progress_slider_event_cb(lv_event_t *e) {
@@ -5350,11 +5294,33 @@ void player_shuffle_toggle(void) {
 	} else {
 		next = m == PLAYBACK_MODE_REPEAT_ALL ? PLAYBACK_MODE_SHUFFLE_REPEAT : PLAYBACK_MODE_SHUFFLE;
 	}
-	repeat_one_from_shuffle = false;
 	playlist_set_mode(next);
 	update_repeat_button();
 	player_queue_changed();
 	mode_toast(next);
+}
+
+static void playback_mode_pick(void *user) {
+	playback_mode_t mode = (playback_mode_t)(intptr_t)user;
+	if (podcast_mode || audiobook_mode || live_mode || dlna_owns_playback() || mode == playlist_get_mode())
+		return;
+	playlist_set_mode(mode);
+	update_repeat_button();
+	player_queue_changed();
+	mode_toast(mode);
+}
+
+void player_playback_mode_menu(void) {
+	if (podcast_mode || audiobook_mode || live_mode || dlna_owns_playback())
+		return;
+	static const char *const names[] = {"player_mode_normal", "player_mode_repeat_all", "player_mode_repeat_one", "player_mode_shuffle", "player_mode_shuffle_repeat"};
+	static const lv_image_dsc_t *const icons[] = {&npicon_queue, &icon_repeat_all, &icon_repeat_one, &icon_shuffle, &icon_shuffle_repeat};
+	sx_sheet_item_t items[5];
+	for (int i = 0; i < 5; i++)
+		items[i] = (sx_sheet_item_t){tr(names[i]), icons[i], playlist_get_mode() == (playback_mode_t)i, false, playback_mode_pick, (void *)(intptr_t)i};
+	library_index_spec_t spec;
+	const char *scope = playlist_library_spec(&spec) && spec.kind == LIBRARY_LIST_FAVOURITES ? tr("favourites") : tr("trackmenu_queue");
+	sx_sheet_menu(tr("musicsettings_playback_options"), scope, items, 5);
 }
 
 bool player_lyrics_available(void) {

@@ -50,6 +50,8 @@ static char **paths; // full path per entry, each its own allocation
 // One byte beside each of `paths`: set while that entry is a "play next" that
 // has not come up yet. See pending_take() for what it is for.
 static uint8_t *next_flags;
+// Allocate only for an explicit library-row promise: one bit per index.
+static uint8_t *indexed_next_flags;
 static library_index_t *source_ix;
 // How many entries the handle serves. The rest -- what "add to queue" put
 // there after the fact -- are in `paths`, starting at zero, so a library queue
@@ -312,6 +314,7 @@ void playlist_clear(void) {
 	}
 	free(paths);
 	free(next_flags);
+	free(indexed_next_flags);
 	free(order);
 	library_index_close(source_ix);
 	source_ix = NULL;
@@ -319,6 +322,7 @@ void playlist_clear(void) {
 	path_cache_clear();
 	paths = NULL;
 	next_flags = NULL;
+	indexed_next_flags = NULL;
 	order = NULL;
 	entry_count = 0;
 	capacity = 0;
@@ -515,9 +519,29 @@ static void order_shuffle_upcoming(void) {
 // anybody looks.
 // ---------------------------------------------------------------------------
 
-static bool entry_queued_next(size_t entry) { return next_flags && entry >= ix_count && entry - ix_count < appended_count() && next_flags[entry - ix_count]; }
+static bool indexed_next_prepare(size_t entry) {
+	if (entry >= ix_count || indexed_next_flags)
+		return true;
+	indexed_next_flags = calloc((ix_count + 7) / 8, 1);
+	return indexed_next_flags != NULL;
+}
+
+static bool entry_queued_next(size_t entry) {
+	if (entry < ix_count)
+		return indexed_next_flags && (indexed_next_flags[entry / 8] & (1u << (entry % 8)));
+	return next_flags && entry - ix_count < appended_count() && next_flags[entry - ix_count];
+}
 
 static void entry_mark_queued_next(size_t entry, bool on) {
+	if (entry < ix_count) {
+		if (indexed_next_flags) {
+			if (on)
+				indexed_next_flags[entry / 8] |= 1u << (entry % 8);
+			else
+				indexed_next_flags[entry / 8] &= ~(1u << (entry % 8));
+		}
+		return;
+	}
 	if (next_flags && entry >= ix_count && entry - ix_count < appended_count()) {
 		next_flags[entry - ix_count] = on ? 1 : 0;
 	}
@@ -529,7 +553,7 @@ static void entry_mark_queued_next(size_t entry, bool on) {
 // the case on every queue nobody has queued anything into.
 static size_t pending_take(size_t **out) {
 	*out = NULL;
-	if (!order || !next_flags || appended_count() == 0) {
+	if (!order || (!next_flags && !indexed_next_flags)) {
 		return 0;
 	}
 	size_t n = 0;
@@ -1071,13 +1095,14 @@ static bool rebuild_without(const uint8_t *gone) {
 	size_t *old_order = malloc(total * sizeof(*old_order));
 	uint8_t *was_next = calloc(total, 1);
 	bool ok = stored && old_order && was_next;
+	for (size_t i = 0; ok && i < total; i++)
+		was_next[i] = entry_queued_next(i) ? 1 : 0;
 	if (ok && ix_count > 0) {
 		collect_t c = {stored, ix_count, 0, gone};
 		library_index_window(source_ix, 0, (int)ix_count, collect_cb, &c);
 		ok = c.got == ix_count;
 	}
 	for (size_t i = ix_count; ok && i < total; i++) {
-		was_next[i] = entry_queued_next(i) ? 1 : 0;
 		if (gone && gone[i]) {
 			continue;
 		}
@@ -1272,6 +1297,9 @@ bool playlist_move_next(int index) {
 		return false;
 	}
 	size_t entry = order[index];
+	// OOM must leave the old order intact, before the first memmove.
+	if (!indexed_next_prepare(entry))
+		return false;
 	if ((size_t)index > pos) {
 		// Still to come: the ones between the playing track and it move down
 		// a place.
@@ -1304,6 +1332,7 @@ struct playlist_snapshot {
 	size_t appended;
 	char **paths;	// the appended entries' paths, `appended` of them
 	uint8_t *flags; // their "play next" marks
+	uint8_t *indexed_flags;
 	size_t *order;	// entry_count of them
 	size_t entry_count;
 	size_t pos;
@@ -1324,6 +1353,7 @@ void playlist_snapshot_free(playlist_snapshot_t *snap) {
 	}
 	free(snap->paths);
 	free(snap->flags);
+	free(snap->indexed_flags);
 	free(snap->order);
 	library_index_close(snap->ix);
 	free(snap);
@@ -1373,6 +1403,15 @@ playlist_snapshot_t *playlist_snapshot_take(void) {
 	}
 	snap->ix_count = ix_count;
 	snap->appended = appended_count();
+	if (ok && indexed_next_flags) {
+		size_t bytes = (ix_count + 7) / 8;
+		snap->indexed_flags = malloc(bytes);
+		ok = snap->indexed_flags != NULL;
+		if (ok) {
+			memcpy(snap->indexed_flags, indexed_next_flags, bytes);
+			snap->bytes += bytes;
+		}
+	}
 	if (ok && snap->appended) {
 		snap->paths = calloc(snap->appended, sizeof(*snap->paths));
 		snap->flags = malloc(snap->appended);
@@ -1420,6 +1459,8 @@ bool playlist_snapshot_restore(playlist_snapshot_t *snap, const char *playing_pa
 	source_ix = snap->ix;
 	snap->ix = NULL;
 	ix_count = snap->ix_count;
+	indexed_next_flags = snap->indexed_flags;
+	snap->indexed_flags = NULL;
 	entry_count = snap->ix_count;
 	path_cache_clear();
 	if (snap->appended) {
@@ -1665,16 +1706,38 @@ static void refresh_stale_source(void) {
 		start = (int)order[pos];
 	}
 
-	// The "play next" entries still to come, as additions (their storage index
-	// moves with the number of rows the query now returns).
+	// Remap indexed promises by path and appended promises by their offset.
+	// Storage indices move with the number of rows the query now returns.
 	size_t *pending = NULL;
 	size_t pending_count = pending_take(&pending);
+	uint8_t *fresh_flags = NULL;
+	size_t kept_pending = 0;
 	for (size_t k = 0; k < pending_count; k++) {
-		pending[k] -= ix_count;
+		if (pending[k] >= ix_count) {
+			pending[kept_pending++] = pending[k] - ix_count + (size_t)fresh_count;
+			continue;
+		}
+		const char *path = entry_path(pending[k]);
+		int at = path ? library_index_find_path(fresh, path) : -1;
+		if (at < 0)
+			continue;
+		if (!fresh_flags) {
+			fresh_flags = calloc(((size_t)fresh_count + 7) / 8, 1);
+			if (!fresh_flags) {
+				free(pending);
+				library_index_close(fresh);
+				return; // retry later, retaining the current order and promises
+			}
+		}
+		fresh_flags[(size_t)at / 8] |= 1u << ((size_t)at % 8);
+		pending[kept_pending++] = (size_t)at;
 	}
+	pending_count = kept_pending;
 
 	size_t appended = appended_count();
 	library_index_close(source_ix);
+	free(indexed_next_flags);
+	indexed_next_flags = fresh_flags;
 	source_ix = fresh;
 	ix_count = (size_t)fresh_count;
 	entry_count = ix_count + appended;
@@ -1687,9 +1750,6 @@ static void refresh_stale_source(void) {
 	order_identity(start_entry);
 	if (shuffling()) {
 		order_shuffle_from(start_entry);
-	}
-	for (size_t k = 0; k < pending_count; k++) {
-		pending[k] += ix_count;
 	}
 	pending_place(pending, pending_count);
 	free(pending);

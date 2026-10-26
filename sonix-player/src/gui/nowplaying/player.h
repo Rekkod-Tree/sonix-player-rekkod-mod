@@ -165,8 +165,9 @@ bool player_mini_seek_commit(const player_mini_seek_t *preview, double position)
 // `out`; false while the queue's own track plays.
 bool player_outside_title(char *out, size_t size);
 
-// Shuffle, as a switch of its own (the repeat button cycles repeat only):
-// on/off keeps the repeat that goes with it, and says so in a toast.
+// One shared named choice for queue order/repeat, from the player or menu.
+void player_playback_mode_menu(void);
+// Existing shuffle API retains repeat when changing order.
 bool player_shuffle_on(void);
 void player_shuffle_toggle(void);
 

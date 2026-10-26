@@ -2204,8 +2204,8 @@ void zvukpage_init(gui_config_t *cfg) {
 	zvuk_screen = lv_obj_create(NULL);
 	switcher_browse_bind("zvuk", zvuk_screen, zvuk_screen);
 	lv_obj_add_style(zvuk_screen, &theme_style_screen, 0);
-	settingsrow_title_corner_slots(settingsrow_title(zvuk_screen, cfg, "zvuk"), cfg, 1);
-	trackmenu_queue_button(zvuk_screen, cfg, 0);
+	settingsrow_title_corner_slots(settingsrow_title(zvuk_screen, cfg, "zvuk"), cfg, 2);
+	trackmenu_queue_button(zvuk_screen, cfg, 1);
 	home_search = svcui_header_button(zvuk_screen, cfg, 0, &icon_search, open_search_cb, NULL);
 
 	home_in = svcui_column(zvuk_screen, cfg);

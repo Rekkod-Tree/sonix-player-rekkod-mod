@@ -30,6 +30,7 @@ typedef struct sx_row_data {
 	bool swipe_end_on;
 	void *user;
 	void *press_user;
+	lv_indev_t *press_indev;
 	bool custom;
 	bool compact;
 	bool playing;
@@ -323,7 +324,15 @@ static void hold_fired_cb(lv_timer_t *t) {
 		return;
 	}
 	r->hold_timer = NULL;
-	if (!r->tracking || r->swiping || !r->h.on_long_press) {
+	if (!r->tracking || r->swiping || r->long_pressed || switcher_back_drag_active() || !r->h.on_long_press) {
+		return;
+	}
+	// Recheck at the timer boundary too: a scroll or release may have taken
+	// the pointer since the last event delivered to this particular row.
+	lv_point_t point;
+	lv_indev_get_point(r->press_indev, &point);
+	if (lv_indev_get_state(r->press_indev) != LV_INDEV_STATE_PRESSED || lv_indev_get_scroll_obj(r->press_indev) || LV_ABS(point.x - r->press_at.x) > SX_SWIPE_LOCK_PX || LV_ABS(point.y - r->press_at.y) > SX_SWIPE_LOCK_PX) {
+		r->long_pressed = true;
 		return;
 	}
 	r->long_pressed = true;
@@ -352,13 +361,14 @@ static void content_event_cb(lv_event_t *e) {
 	if (code == LV_EVENT_PRESSED) {
 		lv_anim_delete(r->content, content_x_cb);
 		r->press_at = p;
+		r->press_indev = indev;
 		r->press_user = r->user;
 		r->tracking = true;
 		r->swiping = false;
 		r->long_pressed = false;
 		r->dx = 0;
 		hold_cancel(r);
-		if (r->h.on_long_press) {
+		if (r->h.on_long_press && p.x >= SX_EDGE_BACK_W) {
 			r->hold_timer = lv_timer_create(hold_fired_cb, SX_LONGPRESS_MS, r);
 		}
 		return;
@@ -370,6 +380,12 @@ static void content_event_cb(lv_event_t *e) {
 		}
 		int32_t dx = p.x - r->press_at.x;
 		int32_t dy = p.y - r->press_at.y;
+		// Movement cancels a hold permanently, even if the finger returns
+		// or this row cannot take the requested swipe direction.
+		if (LV_ABS(dx) > SX_SWIPE_LOCK_PX || LV_ABS(dy) > SX_SWIPE_LOCK_PX) {
+			hold_cancel(r);
+			r->long_pressed = true;
+		}
 		if (!r->swiping) {
 			// The list took it as a scroll, or it is a vertical drag: the row
 			// lets go, hold included.
@@ -384,8 +400,9 @@ static void content_event_cb(lv_event_t *e) {
 				return;
 			}
 			bool allowed = dx > 0 ? r->swipe_next_on : left_allowed(r);
-			// A press in the left edge strip is the swipe back's.
-			if (!allowed || r->press_at.x < SX_EDGE_BACK_W) {
+			// Keep row actions away from navigation and the trailing controls.
+			int width = lv_display_get_horizontal_resolution(lv_display_get_default());
+			if (!allowed || r->press_at.x < SX_ROW_SWIPE_INSET || r->press_at.x >= width - SX_ROW_SWIPE_INSET) {
 				r->tracking = false;
 				if (r->custom)
 					r->long_pressed = true;

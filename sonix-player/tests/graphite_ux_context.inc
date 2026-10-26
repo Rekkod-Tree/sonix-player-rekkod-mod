@@ -237,9 +237,12 @@ static void ux_context_states(void) {
 	static int history_count;
 	static int filter_check;
 	static int browse_check;
-	static bool source_check, root_check, service_browse_check;
+	static bool source_check, service_browse_check;
 	static lv_obj_t *browse_view;
 	static int browse_y;
+	static char music_before_book[320];
+	static playbackplace_t music_place_before_book;
+	static int zvuk_header_step;
 	char shot[96];
 	library_history_item_t *events = NULL;
 	switch (step++) {
@@ -369,12 +372,7 @@ static void ux_context_states(void) {
 		back_btn_cb(NULL);
 		break;
 	case 11:
-		if (!root_check) {
-			assert(visible(find_label(lv_screen_active(), "Browse B")));
-			assert(lv_obj_get_scroll_y(browse_view) == browse_y);
-			back_btn_cb(NULL); root_check = true; step--; break;
-		}
-		assert(lv_screen_active() == music_screen);
+		assert(lv_screen_active() == music_screen && !player_sheet_is_open());
 		qe_click(find_image(music_screen, &npicon_queue));
 		break;
 	case 12:
@@ -449,9 +447,45 @@ static void ux_context_states(void) {
 		capture("ux-section-compact-mini");
 		break;
 	case 25: {
-		char message[256];
-		assert(zvuk_sign_in("a1b2c3d4e5f60718293a4b5c6d7e8f90", message, sizeof(message)) == CARDIMPORT_OK);
-		ux_seed_cached_track("1008");
+		if (zvuk_header_step == 0) {
+			char message[256];
+			assert(zvuk_sign_in("a1b2c3d4e5f60718293a4b5c6d7e8f90", message, sizeof(message)) == CARDIMPORT_OK);
+			ux_seed_cached_track("1008");
+			switch_screen(zvuk_screen);
+			zvuk_header_step++;
+			step--;
+			break;
+		}
+		if (zvuk_header_step == 1) {
+			lv_obj_t *search = find_visible_image(zvuk_screen, &icon_search);
+			lv_obj_t *queue = find_visible_image(zvuk_screen, &npicon_queue);
+			assert(search && queue);
+			lv_area_t a, b;
+			lv_obj_get_coords(lv_obj_get_parent(search), &a);
+			lv_obj_get_coords(lv_obj_get_parent(queue), &b);
+			assert(b.x2 < a.x1 && a.x2 < 480 && b.x1 > 100);
+			capture("ux-zvuk-home-header-separated");
+			qe_click(queue);
+			zvuk_header_step++;
+			step--;
+			break;
+		}
+		if (zvuk_header_step == 2) {
+			assert(lv_screen_active() == queue_screen);
+			back_btn_cb(NULL);
+			zvuk_header_step++;
+			step--;
+			break;
+		}
+		if (zvuk_header_step == 3) {
+			assert(lv_screen_active() == zvuk_screen);
+			qe_click(find_visible_image(zvuk_screen, &icon_search));
+			zvuk_header_step++;
+			step--;
+			break;
+		}
+		assert(lv_screen_active() != zvuk_screen && find_field(lv_screen_active()));
+		capture("ux-zvuk-home-search-opens");
 		main_menu_open_search();
 		break;
 	}
@@ -499,6 +533,8 @@ static void ux_context_states(void) {
 		if (!ux_result(lv_screen_active(), "Dogs")) { step--; break; }
 		assert(playlist_revision() == queue_revision);
 		capture("ux-return-zvuk-query-after-browse");
+		back_btn_cb(NULL);
+		assert(lv_screen_active() == zvuk_screen && !player_sheet_is_open());
 		historypage_open(NULL);
 		break;
 	case 32:
@@ -539,10 +575,100 @@ static void ux_context_states(void) {
 	case 38:
 		assert(ux_result(lv_screen_active(), "Time") && playlist_revision() == queue_revision);
 		capture("ux-first-card-entry-origin-fallback");
+		browser_open_dir_public(getenv("SONIX_SD_ROOT"));
+		switch_screen(browser_screen);
+		break;
+	case 39: {
+		grid_entry_t entry;
+		assert(main_menu_get_entry(HOME_MUSIC, &entry) && entry.subtitle);
+		entry.subtitle(music_before_book, sizeof(music_before_book));
+		char expected[320];
+		snprintf(expected, sizeof(expected), tr("home_return_to_place"), tr("music_browse"));
+		assert(!strcmp(music_before_book, expected));
+		assert(playbackplace_get("music", &music_place_before_book));
+		char root[512];
+		snprintf(root, sizeof(root), "%s/Audiobooks", getenv("SONIX_SD_ROOT"));
+		assert(audiobookdb_scan_start(root));
+		break;
+	}
+	case 40:
+		if (audiobookdb_scan_running()) {
+			step--;
+			break;
+		}
+		assert(audiobookdb_count() > 0);
+		audiobooks_play_at(getenv("SONIX_UI_TEST_BOOK"), getenv("SONIX_UI_TEST_BOOK"), 17);
+		break;
+	case 41: {
+		device_state_t state;
+		device_state_get(&state);
+		if (state.status != AUDIO_STATUS_PLAYING || strcmp(state.current_file, getenv("SONIX_UI_TEST_BOOK"))) {
+			step--;
+			break;
+		}
+		assert(audiobook_is_playing());
+		bookresume_note(&state);
+		switch_screen(main_menu_screen);
+		break;
+	}
+	case 42: {
+		grid_entry_t entry;
+		char text[320];
+		assert(main_menu_get_entry(HOME_MUSIC, &entry) && entry.subtitle && entry.action);
+		entry.subtitle(text, sizeof(text));
+		assert(!strcmp(text, music_before_book));
+		assert(visible(find_label(main_menu_screen, text)));
+		playbackplace_t place;
+		assert(playbackplace_get("music", &place) && !strcmp(place.path, music_place_before_book.path));
+		char book[512], file[512];
+		assert(audiobook_current_book(book, sizeof(book), file, sizeof(file)));
+		assert(!strcmp(file, getenv("SONIX_UI_TEST_BOOK")));
+		capture("ux-book-playing-home-music-return-label");
+		entry.action();
+		break;
+	}
+	case 43:
+		assert(lv_screen_active() == browser_screen && audiobook_is_playing());
+		capture("ux-book-playing-music-retains-files");
+		audiobookdb_mark_finished(getenv("SONIX_UI_TEST_BOOK"));
+		switch_screen(main_menu_screen);
+		break;
+	case 44: {
+		char text[320];
+		bookresume_description(text, sizeof(text));
+		assert(!strcmp(text, tr("home_choose_book")));
+		bookresume_play();
+		break;
+	}
+	case 45:
+		assert(lv_screen_active() == audiobooks_screen && !sx_sheet_is_open());
+		assert(visible(find_label(audiobooks_screen, "Home resume")));
+		capture("ux-finished-continue-opens-books");
+		for (int i = 0; i < 5; i++) {
+			char key[32];
+			snprintf(key, sizeof(key), i ? "resume_book_%d" : "resume_book", i);
+			config_set("home", key, "");
+		}
+		switch_screen(main_menu_screen);
+		break;
+	case 46:
+		bookresume_play();
+		break;
+	case 47:
+		assert(lv_screen_active() == audiobooks_screen && !sx_sheet_is_open());
+		assert(visible(find_label(audiobooks_screen, "Home resume")));
+		capture("ux-empty-continue-opens-books");
+		switch_screen(zvuk_screen);
+		break;
+	case 48:
+		assert(!zvuk_logged_in());
+		assert(find_visible_image(zvuk_screen, &npicon_queue));
+		assert(!find_visible_image(zvuk_screen, &icon_search));
+		capture("ux-zvuk-home-signed-out-header");
 		library_close();
 		assert(!switcher_browse_open("music"));
 		assert(!switcher_browse_open("zvuk"));
-		printf("UI_TEST_PASS UX shared query, filters/history, real starts, pause dedup, last Card/Zvuk browsing, explicit source and initial fallback, scroll/Back, stale-card rejection, queue, Home/section mini, service retry/logout\n");
+		printf("UI_TEST_PASS UX shared query, filters/history, real starts, pause dedup, last Card/Zvuk browsing, explicit source and initial fallback, scroll/Back, stale-card rejection, queue, Home/section mini, service retry/logout, book keeps Music destination and origin separate, empty/finished Continue opens books\n");
 		fflush(stdout); exit(0);
 	}
 }

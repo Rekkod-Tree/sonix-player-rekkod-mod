@@ -303,9 +303,8 @@ bool playlist_library_spec(library_index_spec_t *out);
 // will be dealt a fresh shuffle when it comes back: the position in the old
 // deal means nothing in the new one.
 //
-// It is also the number the now playing screen shows, for the same reason: a
-// place in the deal is a random number that happens to go up by one each track,
-// while a place in the list says where on the card the track came from.
+// This is a persistence identity, not the displayed queue position; the
+// player and queue UI both use playlist_current_index().
 size_t playlist_current_entry(void);
 
 // The entries added to a library-backed queue after it was built. They are not

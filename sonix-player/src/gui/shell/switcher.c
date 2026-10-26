@@ -239,6 +239,18 @@ typedef enum { NAV_NONE, NAV_FORWARD, NAV_BACK } nav_dir_t;
 static void load_screen_dir(lv_obj_t *target_screen, nav_dir_t dir);
 static void load_screen(lv_obj_t *target_screen) { load_screen_dir(target_screen, NAV_NONE); }
 
+bool switcher_browse_begin(const char *source) {
+	int index = browse_source(source);
+	lv_obj_t *root = index >= 0 ? browse_contexts[index].root : NULL;
+	if (!root || !lv_obj_is_valid(root))
+		return false;
+	screen_history_reset();
+	if (root != main_menu_screen)
+		history_push(main_menu_screen);
+	load_screen(root);
+	return true;
+}
+
 bool switcher_browse_open(const char *source) {
 	int index = browse_source(source);
 	if (index < 0)
@@ -325,6 +337,8 @@ static bool back_goes_to_player(void) { return player_return_screen && lv_screen
 
 static bool back_drag_click_guard; // suppresses the tap the drag ends with
 static bool back_anim_running;
+static bool back_home_commit;
+static void back_home_go(void);
 static lv_obj_t *back_underlay;		 // full-screen container on the bottom layer
 static lv_draw_buf_t *back_snapshot; // the previous page, rendered once
 
@@ -387,7 +401,7 @@ static void back_underlay_destroy(void) {
 // No dimming veil over it, as iOS has: a translucent layer the size of the
 // screen is exactly what the platform cannot afford to blend on every frame
 // of the drag (handoff, platform limits).
-static void back_underlay_build(void) {
+static void back_underlay_build(bool home) {
 	back_underlay_destroy();
 
 	back_underlay = lv_obj_create(lv_layer_bottom());
@@ -403,7 +417,9 @@ static void back_underlay_build(void) {
 
 	lv_obj_t *target = NULL;
 	bool going_to_player = false;
-	if (lv_screen_active() == browser_screen && browser_can_go_up()) {
+	if (home) {
+		target = main_menu_screen;
+	} else if (lv_screen_active() == browser_screen && browser_can_go_up()) {
 		target = NULL; // parent folder: no ready-made page to show
 	} else if (back_stays_in_page()) {
 		// The step back stays on this same page (a list's internal stack:
@@ -492,7 +508,11 @@ static bool back_load_immediate;
 static void back_anim_commit_done_cb(lv_anim_t *a) {
 	lv_obj_t *screen = (lv_obj_t *)a->var;
 	back_load_immediate = true;
-	back_btn_cb(NULL); // pops history / walks the browser up, loads the page below
+	if (back_home_commit)
+		back_home_go();
+	else
+		back_btn_cb(NULL);
+	back_home_commit = false;
 	back_load_immediate = false;
 	lv_obj_set_x(screen, 0);
 	back_btn_set_drag_offset(0);
@@ -542,11 +562,12 @@ static void edge_take_press(lv_indev_t *indev) {
 	lv_indev_wait_release(indev);
 }
 
-static void edge_release(int dx) {
+static void edge_release(int dx, bool home) {
 	lv_obj_t *screen = lv_screen_active();
 	int width = lv_obj_get_width(screen);
 	int from = dx > 0 ? dx : 0;
 	bool go = dx > SX_EDGE_BACK_PX;
+	back_home_commit = go && home;
 
 	back_anim_running = true;
 	lv_anim_t a;
@@ -573,6 +594,9 @@ static bool edge_candidate; // the press began in the strip and may yet become a
 static bool edge_engaged;	// it has: the page follows the finger
 static lv_point_t edge_start;
 static int edge_last_dx;
+static bool edge_home_ready;
+static lv_point_t edge_hold_at;
+static uint32_t edge_hold_since;
 
 #define EDGE_POLL_MS 10
 
@@ -585,7 +609,7 @@ static void edge_timer_cb(lv_timer_t *t) {
 
 	if (lv_indev_get_state(indev) != LV_INDEV_STATE_PRESSED) {
 		if (edge_engaged) {
-			edge_release(edge_last_dx);
+			edge_release(edge_last_dx, edge_home_ready);
 		}
 		edge_candidate = false;
 		edge_engaged = false;
@@ -603,7 +627,7 @@ static void edge_timer_cb(lv_timer_t *t) {
 			lv_timer_pause(t);
 			return;
 		}
-		if (dx < SX_SWIPE_LOCK_PX || dx <= 2 * LV_ABS(dy)) {
+		if (dx < SX_SWIPE_LOCK_PX || 2 * dx <= 3 * LV_ABS(dy)) {
 			return;
 		}
 		if (lv_indev_get_scroll_obj(indev) || !edge_back_allowed()) {
@@ -614,7 +638,24 @@ static void edge_timer_cb(lv_timer_t *t) {
 		edge_engaged = true;
 		back_drag_click_guard = true;
 		edge_take_press(indev);
-		back_underlay_build();
+		back_underlay_build(false);
+	}
+	// Only this existing contact timer is used. Slow movement restarts the
+	// dwell; a ready Home preview can be cancelled by pulling back again.
+	if (dx < SX_EDGE_HOME_PX - (edge_home_ready ? SX_EDGE_HOME_JITTER_PX : 0)) {
+		edge_hold_since = 0;
+		if (edge_home_ready) {
+			edge_home_ready = false;
+			back_underlay_build(false);
+		}
+	} else if (!edge_home_ready) {
+		if (!edge_hold_since || LV_ABS(p.x - edge_hold_at.x) > SX_EDGE_HOME_JITTER_PX || LV_ABS(p.y - edge_hold_at.y) > SX_EDGE_HOME_JITTER_PX) {
+			edge_hold_at = p;
+			edge_hold_since = lv_tick_get();
+		} else if (lv_tick_elaps(edge_hold_since) >= SX_EDGE_HOME_HOLD_MS) {
+			edge_home_ready = true;
+			back_underlay_build(true);
+		}
 	}
 	int x = dx > 0 ? dx : 0;
 	lv_obj_set_x(lv_screen_active(), x);
@@ -638,6 +679,8 @@ static void edge_pressed_cb(lv_event_t *e) {
 	edge_engaged = false;
 	edge_start = p;
 	edge_last_dx = 0;
+	edge_home_ready = false;
+	edge_hold_since = 0;
 	lv_timer_reset(edge_timer);
 	lv_timer_resume(edge_timer);
 }
@@ -1034,6 +1077,44 @@ void back_btn_cb(lv_event_t *e) {
 	load_screen_dir(previous ? previous : main_menu_screen, NAV_BACK);
 }
 
+// One pointer owns one press. No extra timer or per-button allocation.
+static lv_point_t back_press_at;
+static bool back_press_moved, back_press_consumed;
+
+static void back_home_go(void) {
+	bool (*guard)(void) = active_back_guard();
+	if (guard && !back_stays_in_page() && guard())
+		return;
+	switch_screen(main_menu_screen);
+}
+
+static void back_button_event(lv_event_t *e) {
+	lv_event_code_t code = lv_event_get_code(e);
+	lv_indev_t *indev = lv_indev_active();
+	if (code == LV_EVENT_PRESSED) {
+		back_press_moved = back_press_consumed = false;
+		if (indev)
+			lv_indev_get_point(indev, &back_press_at);
+	} else if (code == LV_EVENT_PRESSING && indev) {
+		lv_point_t p;
+		lv_indev_get_point(indev, &p);
+		back_press_moved |= LV_ABS(p.x - back_press_at.x) > SX_SWIPE_LOCK_PX || LV_ABS(p.y - back_press_at.y) > SX_SWIPE_LOCK_PX;
+	} else if (code == LV_EVENT_PRESS_LOST) {
+		back_press_moved = true;
+	} else if (code == LV_EVENT_LONG_PRESSED) {
+		if (back_press_moved || switcher_back_drag_active() || player_sheet_is_open() || sx_sheet_is_open() || quickpanel_is_open() || nav_anim_running)
+			return;
+		back_press_consumed = true;
+		// Internal list stacks need not be unwound. Service shutdown guards
+		// still get their ordinary confirmation rather than being bypassed.
+		back_home_go();
+	} else if (code == LV_EVENT_CLICKED && !back_press_moved && !back_press_consumed && !switcher_back_drag_active()) {
+		back_btn_cb(e);
+	}
+}
+
+void switcher_bind_back_button(lv_obj_t *button) { lv_obj_add_event_cb(button, back_button_event, LV_EVENT_ALL, NULL); }
+
 void switch_screen_cb(lv_event_t *e) {
 	// A swipe that started on this button is a swipe, not a tap.
 	if (player_sheet_drag_active() || switcher_back_drag_active() || coverflow_drag_active()) {
@@ -1179,7 +1260,7 @@ void back_btn_init(gui_config_t *cfg) {
 	lv_obj_set_style_border_width(back_btn, 0, 0);
 	lv_obj_set_style_shadow_width(back_btn, 0, 0);
 	lv_obj_set_style_pad_all(back_btn, 0, 0);
-	lv_obj_add_event_cb(back_btn, back_btn_cb, LV_EVENT_CLICKED, NULL);
+	switcher_bind_back_button(back_btn);
 	// The target is a fingertip already (SX_HEADER_BTN); a couple of pixels
 	// more above and below reach the edges of the header row.
 	touch_pad(back_btn, 0, 0, 2, 2);

@@ -137,10 +137,15 @@ const lv_image_dsc_t *main_menu_icon(home_item_t item) {
 static void music_description(char *text, size_t size) {
 	if (!gui_card_available())
 		snprintf(text, size, "%s", tr("home_card_unavailable"));
-	else
+	else {
 		shufflecard_tracks_description(text, size);
-	if (gui_card_available() && !switcher_browse_description("music", text, size))
-		playbackplace_description("music", text, size);
+		char place[256] = "";
+		if (!switcher_browse_description("music", place, sizeof(place)))
+			playbackplace_description("music", place, sizeof(place));
+		// This names the tile's destination, not the currently playing source.
+		if (place[0])
+			snprintf(text, size, tr("home_return_to_place"), place);
+	}
 }
 
 static void open_music_place(void) {

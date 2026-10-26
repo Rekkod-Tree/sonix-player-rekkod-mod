@@ -4200,13 +4200,6 @@ static void head_menu_cb(lv_event_t *e) {
 	listacts_album_sheet(p->filter_value, p->album_artist[0] ? p->album_artist : NULL, NULL, extra, n);
 }
 
-static void back_float_cb(lv_event_t *e) {
-	if (switcher_back_drag_active()) {
-		return;
-	}
-	back_btn_cb(e);
-}
-
 // A bare white glyph on the gradient: shuffle, the sheet.
 static lv_obj_t *head_glyph_button(lv_obj_t *parent, const lv_image_dsc_t *glyph, lv_event_cb_t cb, panel_t *p) {
 	lv_obj_t *button = lv_btn_create(parent);
@@ -4292,7 +4285,7 @@ static void head_build(panel_t *p) {
 		lv_obj_set_style_bg_color(p->back_float, lv_color_black(), 0);
 		lv_obj_set_style_bg_opa(p->back_float, 56, 0);
 		lv_obj_set_style_bg_opa(p->back_float, 110, LV_STATE_PRESSED);
-		lv_obj_add_event_cb(p->back_float, back_float_cb, LV_EVENT_CLICKED, NULL);
+		switcher_bind_back_button(p->back_float);
 		lv_obj_t *chevron = lv_image_create(p->back_float);
 		lv_image_set_src(chevron, &icon_chevron_left);
 		lv_obj_add_style(chevron, &sx_style_album_icon, 0);
@@ -4973,6 +4966,8 @@ bool medialist_open_playback_place(void) {
 		return false;
 	if (place.kind == LIBRARY_LIST_ALBUMS || place.kind == LIBRARY_LIST_ARTISTS || place.kind == LIBRARY_LIST_GENRES || place.kind == LIBRARY_LIST_YEARS || place.kind == LIBRARY_LIST_ALBUM_ARTISTS)
 		return false;
+	if (place.filter == LIBRARY_FILTER_ALBUM)
+		medialist_open(tr("albums"), LIBRARY_LIST_ALBUMS, LIBRARY_FILTER_NONE, NULL);
 	opening_playback_place = &place;
 	medialist_open(place.title, (library_list_t)place.kind, (library_filter_t)place.filter, place.a);
 	opening_playback_place = NULL;

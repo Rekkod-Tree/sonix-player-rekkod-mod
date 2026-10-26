@@ -1347,24 +1347,30 @@ static void home_layout_states(void) {
 		device_state_t state;
 		device_state_get(&state);
 		assert(!strcmp(state.current_file, getenv("SONIX_UI_TEST_TRACK")));
+		assert(lv_screen_active() == audiobooks_screen);
 		assert(!rename(moved, book));
 		sx_toast_dismiss();
 		audiobookdb_mark_finished(book);
 		bookresume_play();
 		assert(!sx_sheet_is_open());
-		capture("home-finished-book-resume-requested");
+		assert(lv_screen_active() == audiobooks_screen);
+		capture("home-finished-book-choose-next");
 		break;
 	}
 	case 16: {
 		device_state_t state;
 		device_state_get(&state);
-		assert(!strcmp(state.current_file, book));
-		assert(state.status == AUDIO_STATUS_PLAYING && state.progress_current_secs >= 16);
+		assert(!strcmp(state.current_file, getenv("SONIX_UI_TEST_TRACK")));
+		assert(lv_screen_active() == audiobooks_screen);
 		assert(!sx_sheet_is_open());
-		capture("home-finished-book-resumed");
+		switch_screen(main_menu_screen);
+		capture("home-finished-book-choose-label");
 		main_menu_reset();
 		assert(config_get_copy("home", "resume_book", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE)[0]);
 		main_menu_open_search();
+		lv_obj_t *heading = find_label(lv_screen_active(), tr("search_everywhere"));
+		assert(heading);
+		lv_obj_send_event(heading, LV_EVENT_SHORT_CLICKED, NULL);
 		assert(sx_sheet_is_open());
 		lv_obj_t *scope = find_label(lv_layer_top(), tr("home_search_card"));
 		assert(scope);
@@ -1482,9 +1488,19 @@ static void home_layout_states(void) {
 #include "graphite_pause_wait.inc"
 #include "graphite_ux_context.inc"
 #include "graphite_chrome_edges.inc"
+#include "graphite_queue_modes.inc"
+#include "graphite_gesture_navigation.inc"
 // clang-format on
 
 static void run(lv_timer_t *timer) {
+	if (getenv("SONIX_UI_TEST_QUEUE_MODES")) {
+		queue_mode_states(timer);
+		return;
+	}
+	if (getenv("SONIX_UI_TEST_GESTURE_NAV")) {
+		gesture_navigation_states(timer);
+		return;
+	}
 	if (getenv("SONIX_UI_TEST_CHROME_EDGES")) {
 		chrome_edges_states();
 		return;

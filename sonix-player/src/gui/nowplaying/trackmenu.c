@@ -504,7 +504,17 @@ static void queue_layout(void) {
 	if (queue_next_count > 0) {
 		y += (int32_t)queue_next_count * queue_pitch;
 	} else {
-		y += queue_note_place(queue_note_empty, y, tr("queue_next_empty"));
+		// The end of this pass is not the end of a repeating queue.
+		playback_mode_t mode = playlist_get_mode();
+		char path[512], title[256];
+		if (queue_mode == QUEUE_MODE_QUEUE && (mode == PLAYBACK_MODE_REPEAT_ALL || mode == PLAYBACK_MODE_REPEAT_ONE) && playlist_peek_auto(path, sizeof(path))) {
+			char artist[256];
+			queue_names_of(path, title, sizeof(title), artist, sizeof(artist), NULL, 0);
+			snprintf(text, sizeof(text), "%s · %s", tr(mode == PLAYBACK_MODE_REPEAT_ONE ? "player_mode_repeat_one" : "player_mode_repeat_all"), title);
+			y += queue_note_place(queue_note_empty, y, text);
+		} else {
+			y += queue_note_place(queue_note_empty, y, tr(queue_mode == QUEUE_MODE_QUEUE && mode == PLAYBACK_MODE_SHUFFLE_REPEAT ? "player_mode_shuffle_repeat" : "queue_next_empty"));
+		}
 	}
 
 	if (queue_played_count > 0) {
@@ -553,27 +563,21 @@ void trackmenu_queue_poll(void) {
 	if (!queue_page_up()) {
 		return;
 	}
+	// Do not replace an indexed row under a finger when the deal or current
+	// track changes. Its activation also checks the revision before use.
+	for (lv_indev_t *input = lv_indev_get_next(NULL); input; input = lv_indev_get_next(input)) {
+		if (lv_indev_get_type(input) == LV_INDEV_TYPE_POINTER && lv_indev_get_state(input) == LV_INDEV_STATE_PRESSED)
+			return;
+	}
 	char outside[256];
 	bool has_outside = player_outside_title(outside, sizeof(outside));
 	if (strcmp(outside, queue_seen_outside) != 0) {
-		// A late source title can reflow the note; keep the existing scroll and
-		// leave a row under a finger alone until the gesture has finished.
-		for (lv_indev_t *input = lv_indev_get_next(NULL); input; input = lv_indev_get_next(input)) {
-			if (lv_indev_get_type(input) == LV_INDEV_TYPE_POINTER && lv_indev_get_state(input) == LV_INDEV_STATE_PRESSED)
-				return;
-		}
 		queue_layout();
 		return;
 	}
 	if (playlist_revision() != queue_seen_revision || playlist_current_index() != queue_seen_current || queue_mode_for_outside(has_outside) != queue_seen_mode) {
 		queue_layout();
 	} else if (device_state_metadata_revision() != queue_seen_metadata_revision) {
-		// Do not rebind the row beneath a finger during a queue gesture.
-		for (lv_indev_t *input = lv_indev_get_next(NULL); input; input = lv_indev_get_next(input)) {
-			if (lv_indev_get_type(input) == LV_INDEV_TYPE_POINTER && lv_indev_get_state(input) == LV_INDEV_STATE_PRESSED) {
-				return;
-			}
-		}
 		queue_seen_metadata_revision = device_state_metadata_revision();
 		for (int i = 0; i < QUEUE_POOL; i++) {
 			if (queue_rows[i].index >= 0) {
@@ -623,8 +627,17 @@ static void queue_play(int index) {
 	}
 }
 
+static bool queue_view_current(void) {
+	if (queue_seen_revision == playlist_revision() && queue_seen_current == playlist_current_index() && queue_seen_mode == queue_mode_now())
+		return true;
+	queue_layout_soon();
+	return false;
+}
+
 static void queue_row_tap(lv_obj_t *row, void *user) {
 	(void)row;
+	if (!queue_view_current())
+		return;
 	if (queue_edit_mode) {
 		if (queue_edit_mode == 1)
 			queue_edit_toggle(queue_user_index(user));
@@ -656,19 +669,36 @@ static void queue_remove_index(int index) {
 
 static void queue_row_swiped_out(lv_obj_t *row, void *user) {
 	(void)row;
+	if (!queue_view_current())
+		return;
 	queue_remove_index(queue_user_index(user));
 }
 
 // The row's sheet.
 static int queue_sheet_index;
+static unsigned queue_sheet_revision;
+static queue_mode_t queue_sheet_mode;
+static char queue_sheet_path[512];
+
+static bool queue_sheet_valid(void) {
+	char path[512];
+	if (queue_sheet_revision == playlist_revision() && queue_sheet_mode == queue_mode_now() && queue_path_at(queue_sheet_index, path, sizeof(path)) && !strcmp(path, queue_sheet_path))
+		return true;
+	queue_layout_soon();
+	return false;
+}
 
 static void queue_sheet_play(void *user) {
 	(void)user;
+	if (!queue_sheet_valid())
+		return;
 	queue_play(queue_sheet_index);
 }
 
 static void queue_sheet_next(void *user) {
 	(void)user;
+	if (!queue_sheet_valid())
+		return;
 	static char text[320];
 	char title[256];
 	queue_title_of(queue_sheet_index, title, sizeof(title));
@@ -686,6 +716,8 @@ static void queue_sheet_next(void *user) {
 
 // One place up or down, as 1.2.5's arrows did: among what is still to come.
 static void queue_sheet_move(void *user) {
+	if (!queue_sheet_valid())
+		return;
 	int delta = (int)(intptr_t)user;
 	if (!playlist_move(queue_sheet_index, delta)) {
 		return;
@@ -697,11 +729,15 @@ static void queue_sheet_move(void *user) {
 
 static void queue_sheet_remove(void *user) {
 	(void)user;
+	if (!queue_sheet_valid())
+		return;
 	queue_remove_index(queue_sheet_index);
 }
 
 static void queue_sheet_album(void *user) {
 	(void)user;
+	if (!queue_sheet_valid())
+		return;
 	char path[512];
 	char album[512];
 	if (!queue_path_at(queue_sheet_index, path, sizeof(path)) || !library_track_album_value(path, album, sizeof(album)) || !album[0]) {
@@ -713,6 +749,8 @@ static void queue_sheet_album(void *user) {
 
 static void queue_row_hold(lv_obj_t *row, void *user) {
 	(void)row;
+	if (!queue_view_current())
+		return;
 	if (queue_edit_mode) {
 		if (queue_edit_mode == 1)
 			queue_edit_toggle(queue_user_index(user));
@@ -724,6 +762,9 @@ static void queue_row_hold(lv_obj_t *row, void *user) {
 	if (!queue_path_at(index, path, sizeof(path))) {
 		return;
 	}
+	queue_sheet_revision = playlist_revision();
+	queue_sheet_mode = queue_mode_now();
+	snprintf(queue_sheet_path, sizeof(queue_sheet_path), "%s", path);
 	static char title[256];
 	static char sub[128];
 	char artist[256];
@@ -1587,7 +1628,7 @@ static void sleep_cb(void *user) {
 
 static void shuffle_cb(void *user) {
 	(void)user;
-	player_shuffle_toggle();
+	player_playback_mode_menu();
 }
 
 static void lyrics_cb(void *user) {
@@ -1637,14 +1678,15 @@ static bool trackmenu_open_playback_source(void) {
 	const stream_provider_t *provider = stream_provider_for_path(state.current_file);
 	bool player = player_sheet_is_open();
 	player_sheet_close(false);
+	// Browsing the source is a catalog jump. The mini-player remains the
+	// return point to playback; Back walks the catalog's parents instead.
+	switcher_browse_begin(provider ? provider->id : "music");
 	bool opened = provider ? provider->gui.open_playback_place() : browser_open_playback_place() || medialist_open_playback_place();
 	if (!opened) {
 		if (player)
 			player_sheet_open(false);
 		return false;
 	}
-	if (player && (provider || !medialist_step_back_to_player()))
-		switcher_set_player_return(lv_screen_active());
 	return true;
 }
 
@@ -1694,12 +1736,12 @@ static void open_album_cb(void *user) {
 			snprintf(title, sizeof(title), "%s", now.metadata.album);
 		}
 		player_sheet_close(false);
+		switcher_browse_begin(service->id);
 		lv_obj_t *back_to = service->gui.open_album(service_album, title);
 		if (!back_to) {
 			gui_notify_popup(service->album_failed_key);
 			return;
 		}
-		switcher_set_player_return(back_to);
 		return;
 	}
 
@@ -1710,12 +1752,9 @@ static void open_album_cb(void *user) {
 	}
 
 	player_sheet_close(false);
+	switcher_browse_begin("music");
+	medialist_open(tr("albums"), LIBRARY_LIST_ALBUMS, LIBRARY_FILTER_NONE, NULL);
 	medialist_open(album, LIBRARY_LIST_TRACKS, LIBRARY_FILTER_ALBUM, album);
-	// Over a track list the album takes that list's place on the same page,
-	// and the page brings the list back with the player over it itself.
-	if (!medialist_step_back_to_player()) {
-		switcher_set_player_return(medialist_tracks_screen);
-	}
 }
 
 // "Show artist": the page of whoever the playing track is filed under -- the
@@ -1738,12 +1777,9 @@ static bool open_artist(bool quiet) {
 	}
 
 	player_sheet_close(false);
+	switcher_browse_begin("music");
+	medialist_open(tr("artists"), LIBRARY_LIST_ARTISTS, LIBRARY_FILTER_NONE, NULL);
 	medialist_open_track_artist(state.current_file);
-	// The artist's records or tracks, whichever screen that is: backing out
-	// of it returns to the player, like everything else this menu opens.
-	if (!medialist_step_back_to_player()) {
-		switcher_set_player_return(lv_screen_active());
-	}
 	return true;
 }
 
@@ -1811,7 +1847,7 @@ void trackmenu_open(lv_obj_t *anchor) {
 		items[n++] = (sx_sheet_item_t){tr(podcast ? "trackmenu_show_podcast" : "show_album"), &npicon_album, false, false, open_album_cb, NULL};
 		if (!podcast) {
 			items[n++] = (sx_sheet_item_t){tr("show_artist"), &npicon_artist, false, false, open_artist_cb, NULL};
-			items[n++] = (sx_sheet_item_t){tr("np_shuffle"), &npicon_shuffle, player_shuffle_on(), false, shuffle_cb, NULL};
+			items[n++] = (sx_sheet_item_t){tr("musicsettings_playback_options"), &npicon_shuffle, false, false, shuffle_cb, NULL};
 		}
 		if (player_lyrics_available()) {
 			items[n++] = (sx_sheet_item_t){tr("np_lyrics"), &npicon_lyrics, player_lyrics_shown(), false, lyrics_cb, NULL};

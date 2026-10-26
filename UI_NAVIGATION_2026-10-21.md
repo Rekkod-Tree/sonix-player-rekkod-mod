@@ -14,10 +14,11 @@ label wraps inside the revealed area; the moving card retains its own surface.
 
 ## Continue book
 
-An ordinary tap resumes immediately from the saved checkpoint. It does not open
-the action sheet, including when a book has been marked finished. A matching
-paused book resumes; an already playing book continues. Missing card, file or
-checkpoint reports an error instead of silently starting over.
+An ordinary tap resumes an unfinished available book immediately from its saved
+checkpoint, without an action sheet. A matching paused book resumes; an already
+playing book continues. With no selected book or a finished selection, it opens
+the existing book library to choose the next listen. A missing file or checkpoint
+explains the problem and opens that library; a missing card reports unavailability.
 
 Hold keeps the action sheet and adds a snapshot of chapter/part and time. A loaded
 book uses its live position; an unloaded book uses the saved filename and time
@@ -47,9 +48,10 @@ tests cover overlapping contexts, generations and page numbers in both services.
 The complete application was rendered in both themes at 480x800 and 480x720.
 Real pointer tests cover swipe, Undo, reorder grip, vertical scrolling, global
 edge Back and direct Home/More book taps. Long Russian titles and live/saved book
-headers are readable. The shared Home integration fixture also checks a real
-SQLite checkpoint after a finished-book tap; the existing playback/chapters
-regressions passed on both panel sizes.
+headers are readable. The shared Home integration fixture checks a real SQLite
+checkpoint for direct resume. The 26 October follow-up checks that finished,
+missing and empty selections open the library without starting another book on
+both panel sizes; the existing playback/chapters regressions are separate checks.
 
 Native device, target ABI and image results belong in the final release manifest;
 host fixtures alone do not establish live service or physical-panel acceptance.

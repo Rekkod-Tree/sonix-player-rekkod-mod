@@ -92,11 +92,13 @@ void bookresume_note(const device_state_t *state) {
 	main_menu_refresh();
 }
 void bookresume_description(char *text, size_t size) {
+	char book[512];
+	selected_book(book, sizeof(book));
 	const char *title = config_get_copy("home", "resume_title", "", (char[CONFIG_VALUE_SIZE]){0}, CONFIG_VALUE_SIZE);
-	snprintf(text, size, "%s", title[0] ? title : tr("home_choose_book"));
+	snprintf(text, size, "%s", book[0] && title[0] && !audiobookdb_is_finished(book) ? title : tr("home_choose_book"));
 }
 static void play(const char *book) {
-	if (!book[0]) {
+	if (!book[0] || audiobookdb_is_finished(book)) {
 		switch_screen(audiobooks_screen);
 		return;
 	}
@@ -119,6 +121,7 @@ static void play(const char *book) {
 	double seconds;
 	if (!audiobookdb_get_position(book, file, sizeof(file), &seconds) || access(file, R_OK)) {
 		toast_error("home_book_unavailable");
+		switch_screen(audiobooks_screen);
 		return;
 	}
 	audiobooks_resume_book(book);

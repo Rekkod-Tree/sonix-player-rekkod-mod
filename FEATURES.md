@@ -100,6 +100,8 @@ Release image, hardware coverage and remaining limitations: `RELEASE_1.4.1.md`.
   session; a player-menu action opens the confirmed playback source. A first
   entry without browsing context falls back to that source. Contexts are
   invalidated on a card change; catalog pages retain their existing data.
+  The Music tile labels its remembered destination as "Return to: ...", so a
+  book playing from Audiobooks is not mistaken for the last music folder.
   Returning to a source reuses existing catalog pages and queue state; it does
   not start a replacement wave. Queue shortcuts open the existing queue or book
   chapters, and Back retains the caller's navigation context.
@@ -259,6 +261,8 @@ Release image, hardware coverage and remaining limitations: `RELEASE_1.4.1.md`.
 - Swipe a Home shortcut left to remove it, with Undo that preserves later edits;
   existing card geometry and reorder grips remain intact.
 - Continue Book taps resume directly; hold shows the saved/live chapter and time.
+  With no selected book, a finished book or a missing checkpoint/file, tapping
+  opens the existing book library to choose the next listen.
 - Back in Yandex and Zvuk restores the previous list position with one final bind;
   stale responses do not disturb a newer request.
 - See `UI_NAVIGATION_2026-10-21.md` for contracts and verification scope.
@@ -385,9 +389,10 @@ Release image, hardware coverage and remaining limitations: `RELEASE_1.4.1.md`.
   saved position. Playing/paused books retain their live position; finished or
   unavailable books never silently restart or switch identity. Hiding the tile
   does not forget the book.
-- Selecting a finished book from Home opens its action sheet instead of an
-  error toast. Explicit Continue uses the saved position; merely opening the
-  sheet never starts playback.
+- A finished book or empty Home selection opens the book library instead of
+  replaying the old book. An unavailable checkpoint explains the problem and
+  opens the same library; choosing a book remains an explicit action. The hold
+  sheet still offers details and other book actions.
 - Files hides FAT recovery directories (`FOUND.000` through `FOUND.999` and
   `LOST.DIR`) by default. Show service files restores access without deletion;
   ordinary folders such as `Found.music` remain visible. The music folder
