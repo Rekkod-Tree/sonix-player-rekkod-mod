@@ -1491,9 +1491,14 @@ static void home_layout_states(void) {
 #include "graphite_queue_modes.inc"
 #include "graphite_gesture_navigation.inc"
 #include "graphite_history_chain.inc"
+#include "graphite_motion.inc"
 // clang-format on
 
 static void run(lv_timer_t *timer) {
+	if (getenv("SONIX_UI_TEST_MOTION")) {
+		motion_states(timer);
+		return;
+	}
 	if (getenv("SONIX_UI_TEST_HISTORY_HANDOFF")) {
 		history_handoff_states(timer);
 		return;

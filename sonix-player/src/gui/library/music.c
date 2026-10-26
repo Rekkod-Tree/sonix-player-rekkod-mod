@@ -14,6 +14,7 @@
 #include "src/gui/library/shufflecard.h"
 #include "src/gui/nowplaying/coverflow.h"
 #include "src/gui/nowplaying/historypage.h"
+#include "src/gui/nowplaying/npicons.h"
 #include "src/gui/nowplaying/trackmenu.h"
 #include "src/gui/shell/gridpage.h"
 #include "src/gui/shell/gui.h"
@@ -21,6 +22,7 @@
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/sx_frame.h"
+#include "src/gui/shell/sx_sheet.h"
 #include "src/gui/shell/sx_tokens.h"
 #include "src/gui/shell/theme.h"
 #include "src/system/core/config.h"
@@ -469,6 +471,17 @@ static lv_obj_t *corner_button(gui_config_t *cfg, int slot, const lv_image_dsc_t
 	return button;
 }
 
+static void open_album_covers(void *unused) {
+	(void)unused;
+	coverflow_open();
+}
+
+static void music_more(lv_event_t *e) {
+	(void)e;
+	const sx_sheet_item_t item = {.label = tr("music_album_covers"), .icon = &icon_menu_album, .action = open_album_covers};
+	sx_sheet_menu(tr("music"), NULL, &item, 1);
+}
+
 void music_init(gui_config_t *cfg) {
 	switcher_browse_bind("music", music_screen, music_screen);
 	// Built empty and filled from the saved order. With more tiles than the
@@ -479,9 +492,7 @@ void music_init(gui_config_t *cfg) {
 	gridpage_set_scrolling(grid);
 	music_rebuild_tiles();
 
-	// The pull from the bottom edge that opens the album carousel. It goes on
-	// the grid because that is where a tile's press stops bubbling.
-	coverflow_attach_edge(grid, cfg);
+	// Album covers have an explicit action; upward motion here only scrolls.
 
 	// The bottom slot always holds something on this page -- the mini player,
 	// or the "Shuffle all music" card while nothing has played -- so the last
@@ -490,8 +501,10 @@ void music_init(gui_config_t *cfg) {
 	music_fit_slot();
 	sx_frame_on_body_change(music_fit_slot);
 
-	settingsrow_title_corner_slots(settingsrow_title(music_screen, cfg, "music"), cfg, 2);
+	settingsrow_title_corner_slots(settingsrow_title(music_screen, cfg, "music"), cfg, 3);
 	trackmenu_queue_button(music_screen, cfg, 1);
+	lv_obj_t *more_btn = corner_button(cfg, 2, &npicon_more);
+	lv_obj_add_event_cb(more_btn, music_more, LV_EVENT_CLICKED, NULL);
 
 	lv_obj_t *search_btn = corner_button(cfg, 0, &icon_search);
 	lv_obj_add_event_cb(search_btn, search_cb, LV_EVENT_CLICKED, NULL);

@@ -540,9 +540,11 @@ static bool edge_back_allowed(void) {
 	if (back_gesture_off || back_anim_running || nav_anim_running || chevron_forced_hidden) {
 		return false;
 	}
-	if (player_sheet_is_open() || sx_sheet_is_open() || quickpanel_is_open()) {
+	if (sx_sheet_is_open() || quickpanel_is_open()) {
 		return false;
 	}
+	if (player_sheet_is_open())
+		return player_sheet_edge_back_allowed();
 	// A page that draws its own back button (the album page's floating one)
 	// has no chevron but a way back all the same: the edge goes back there too.
 	lv_obj_t *active = lv_screen_active();
@@ -595,6 +597,7 @@ static bool edge_engaged;	// it has: the page follows the finger
 static lv_point_t edge_start;
 static int edge_last_dx;
 static bool edge_home_ready;
+static bool edge_on_player;
 static lv_point_t edge_hold_at;
 static uint32_t edge_hold_since;
 
@@ -609,7 +612,11 @@ static void edge_timer_cb(lv_timer_t *t) {
 
 	if (lv_indev_get_state(indev) != LV_INDEV_STATE_PRESSED) {
 		if (edge_engaged) {
-			edge_release(edge_last_dx, edge_home_ready);
+			if (edge_on_player) {
+				player_sheet_edge_back_end(edge_last_dx > SX_EDGE_BACK_PX);
+				lv_async_call(back_drag_click_guard_clear_cb, NULL);
+			} else
+				edge_release(edge_last_dx, edge_home_ready);
 		}
 		edge_candidate = false;
 		edge_engaged = false;
@@ -638,7 +645,15 @@ static void edge_timer_cb(lv_timer_t *t) {
 		edge_engaged = true;
 		back_drag_click_guard = true;
 		edge_take_press(indev);
-		back_underlay_build(false);
+		if (edge_on_player)
+			player_sheet_edge_back_begin();
+		else
+			back_underlay_build(false);
+	}
+	if (edge_on_player) {
+		player_sheet_edge_back_update(dx);
+		edge_last_dx = dx;
+		return;
 	}
 	// Only this existing contact timer is used. Slow movement restarts the
 	// dwell; a ready Home preview can be cancelled by pulling back again.
@@ -680,6 +695,7 @@ static void edge_pressed_cb(lv_event_t *e) {
 	edge_start = p;
 	edge_last_dx = 0;
 	edge_home_ready = false;
+	edge_on_player = player_sheet_is_open();
 	edge_hold_since = 0;
 	lv_timer_reset(edge_timer);
 	lv_timer_resume(edge_timer);

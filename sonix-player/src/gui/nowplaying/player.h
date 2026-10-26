@@ -88,6 +88,14 @@ bool player_sheet_is_open(void);
 bool player_sheet_drag_active(void);
 void player_sheet_open(bool animate);
 void player_sheet_close(bool animate);
+// Mini-player pull and left-edge Back reuse the existing sheet and LVGL animations.
+bool player_sheet_pull_begin(int visible_height);
+void player_sheet_pull_update(int up);
+void player_sheet_pull_end(bool open);
+bool player_sheet_edge_back_allowed(void);
+void player_sheet_edge_back_begin(void);
+void player_sheet_edge_back_update(int dx);
+void player_sheet_edge_back_end(bool close);
 
 // Makes `obj` a place the sheet can be dragged from. `opening` false: a
 // surface of the sheet itself, which pulls it down. `opening` true was a page

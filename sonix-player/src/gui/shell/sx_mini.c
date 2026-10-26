@@ -50,6 +50,7 @@ static lv_obj_t *seek_title, *seek_total, *seek_hint, *seek_bubble, *seek_time, 
 static player_mini_seek_t seek_range;
 static double seek_target;
 static bool seek_active, press_moved;
+static bool pull_active;
 
 static bool has_track;
 static bool live;
@@ -129,7 +130,7 @@ void sx_mini_update_visibility(void) {
 	if (want == shown && !changed) {
 		return;
 	}
-	if (!want || changed)
+	if ((!want || changed) && !pull_active)
 		cancel_press();
 	if (changed) {
 		apply_layout();
@@ -268,6 +269,10 @@ static lv_point_t press_at;
 static bool press_tracking;
 
 static void cancel_press(void) {
+	if (pull_active) {
+		pull_active = false;
+		player_sheet_pull_end(false);
+	}
 	lv_indev_t *input = mini_press_indev;
 	press_tracking = false;
 	mini_press_indev = NULL;
@@ -428,7 +433,14 @@ static void slot_event_cb(lv_event_t *e) {
 			seek_paint(p.x);
 		} else if (LV_ABS(dx) >= SX_SWIPE_LOCK_PX || LV_ABS(dy) >= SX_SWIPE_LOCK_PX) {
 			press_moved = true;
+			if (!pull_active && dy < -SX_DRAG_LOCK_PX && -dy > LV_ABS(dx)) {
+				pull_active = true; // Preserve this contact when the mini gives way.
+				if (!player_sheet_pull_begin(sx_mini_slot_height()))
+					pull_active = false;
+			}
 		}
+		if (pull_active)
+			player_sheet_pull_update(-dy);
 		return;
 	}
 	if (code == LV_EVENT_LONG_PRESSED && press_tracking && !press_moved && !live) {
@@ -436,6 +448,10 @@ static void slot_event_cb(lv_event_t *e) {
 		return;
 	}
 	if (code == LV_EVENT_PRESS_LOST) {
+		if (pull_active) {
+			pull_active = false;
+			player_sheet_pull_end(false);
+		}
 		if (seek_active) {
 			cancel_press();
 			return;
@@ -449,6 +465,11 @@ static void slot_event_cb(lv_event_t *e) {
 	}
 	press_tracking = false;
 	mini_press_indev = NULL;
+	if (pull_active) {
+		pull_active = false;
+		player_sheet_pull_end(dy < -SX_MINI_SWIPE_UP_PX && -dy > LV_ABS(dx));
+		return;
+	}
 	if (seek_active) {
 		double target = seek_target;
 		seek_hide();

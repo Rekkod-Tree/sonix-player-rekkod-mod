@@ -152,6 +152,8 @@ static lv_timer_t *sleep_timer;
 // lv_tick_get()'s, which is the same clock the timer is driven by.
 static lv_timer_t *smooth_timer;
 static bool sheet_open; // the player panel is the page on show
+static bool sheet_pull_active, sheet_side_active, sheet_side_close;
+static int sheet_pull_origin;
 
 static bool bar_always;
 static int bar_height; // the status bar's, from the config
@@ -3804,7 +3806,7 @@ static void sheet_move_to(int y, bool animate) {
 
 bool player_sheet_is_open(void) { return sheet_open; }
 
-bool player_sheet_drag_active(void) { return drag_committed; }
+bool player_sheet_drag_active(void) { return drag_committed || sheet_pull_active || sheet_side_active; }
 
 static void bar_over_player_update(void) {
 	if (!sheet_open || !bar_always)
@@ -3847,6 +3849,21 @@ void player_set_statusbar_always(bool on) {
 	bar_over_player_update();
 }
 
+static void sheet_x_cb(void *obj, int32_t x) {
+	lv_obj_set_x(obj, x);
+	back_btn_translate(x);
+}
+
+static void sheet_x_done(lv_anim_t *a) {
+	(void)a;
+	sheet_side_active = false;
+	sheet_x_cb(player_screen, 0);
+	if (sheet_side_close)
+		player_sheet_close(false);
+	else if (!bar_always)
+		topbar_set_hidden(true);
+}
+
 void player_sheet_open(bool animate) {
 	// Nothing to show while another mode owns the sound: the sheet is about a
 	// track this player is playing, and in Bluetooth receiver mode the track is
@@ -3856,6 +3873,9 @@ void player_sheet_open(bool animate) {
 	if (btreceiver_is_active()) {
 		return;
 	}
+	lv_anim_delete(player_screen, sheet_x_cb);
+	sheet_side_active = false;
+	sheet_x_cb(player_screen, 0);
 
 	if (!sheet_open) {
 		// Remember the opener: leaving the player must always land back here,
@@ -3912,6 +3932,9 @@ static void sheet_hidden_anim_ready_cb(lv_anim_t *a) {
 }
 
 void player_sheet_close(bool animate) {
+	lv_anim_delete(player_screen, sheet_x_cb);
+	sheet_side_active = sheet_pull_active = false;
+	sheet_x_cb(player_screen, 0);
 	bool was_open = sheet_open;
 	sheet_open = false;
 	if (!screensaver_is_visible())
@@ -3961,6 +3984,60 @@ void player_sheet_close(bool animate) {
 // Runs from lv_async_call, one tick after the gesture's own events (RELEASED,
 // then CLICKED) have all been delivered: the suppression the flag exists for
 // has happened by then, and nothing later may still be blocked by it.
+bool player_sheet_pull_begin(int visible_height) {
+	if (sheet_open || sx_sheet_is_open() || quickpanel_is_open() || coverflow_drag_active() || btreceiver_is_active())
+		return false;
+	sheet_pull_origin = sheet_height - visible_height;
+	player_sheet_open(false);
+	sheet_pull_active = true;
+	sheet_move_to(sheet_pull_origin, false);
+	topbar_set_hidden(false);
+	return true;
+}
+
+void player_sheet_pull_update(int up) {
+	if (sheet_pull_active)
+		sheet_move_to(sheet_pull_origin - up, false);
+}
+
+void player_sheet_pull_end(bool open) {
+	if (!sheet_pull_active)
+		return;
+	sheet_pull_active = false;
+	if (open)
+		player_sheet_open(true);
+	else
+		player_sheet_close(true);
+}
+
+bool player_sheet_edge_back_allowed(void) { return sheet_open && !sheet_pull_active && !sheet_side_active && !drag_committed && !chain_is_open() && !sx_sheet_is_open() && !quickpanel_is_open(); }
+
+void player_sheet_edge_back_begin(void) {
+	sheet_side_active = true;
+	topbar_set_hidden(false);
+	sx_artview_opaque_overlay(NULL);
+}
+
+void player_sheet_edge_back_update(int dx) {
+	if (sheet_side_active)
+		sheet_x_cb(player_screen, LV_CLAMP(0, dx, (int)lv_obj_get_width(player_screen)));
+}
+
+void player_sheet_edge_back_end(bool close) {
+	if (!sheet_side_active)
+		return;
+	sheet_side_close = close;
+	lv_anim_t a;
+	lv_anim_init(&a);
+	lv_anim_set_var(&a, player_screen);
+	lv_anim_set_exec_cb(&a, sheet_x_cb);
+	lv_anim_set_values(&a, lv_obj_get_x(player_screen), close ? lv_obj_get_width(player_screen) : 0);
+	lv_anim_set_duration(&a, SX_ANIM_NAV_MS);
+	lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+	lv_anim_set_completed_cb(&a, sheet_x_done);
+	lv_anim_start(&a);
+}
+
 static void drag_committed_clear_cb(void *unused) {
 	(void)unused;
 	drag_committed = false;
@@ -4521,10 +4598,28 @@ static bool cover_tap_contains(const lv_point_t *point) {
 	return lv_area_is_point_on(&bounds, point, lv_obj_get_style_radius(art, LV_PART_MAIN));
 }
 
+static void cover_slide_x(void *obj, int32_t x) { lv_obj_set_style_translate_x(obj, x, 0); }
+
+static void cover_slide_finish(int from) {
+	if (!cover_art)
+		return;
+	lv_anim_delete(cover_art, cover_slide_x);
+	cover_slide_x(cover_art, from);
+	lv_anim_t a;
+	lv_anim_init(&a);
+	lv_anim_set_var(&a, cover_art);
+	lv_anim_set_exec_cb(&a, cover_slide_x);
+	lv_anim_set_values(&a, from, 0);
+	lv_anim_set_duration(&a, SX_ANIM_NAV_MS);
+	lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+	lv_anim_start(&a);
+}
+
 static void cover_gesture_cb(lv_event_t *e) {
 	static lv_point_t start;
 	static bool tracking;
 	static bool sideways;
+	static char started_file[512];
 
 	lv_indev_t *indev = lv_indev_active();
 	if (!indev) {
@@ -4535,6 +4630,11 @@ static void cover_gesture_cb(lv_event_t *e) {
 	lv_indev_get_point(indev, &p);
 
 	if (code == LV_EVENT_PRESSED) {
+		device_state_t state;
+		device_state_get(&state);
+		snprintf(started_file, sizeof(started_file), "%s", state.current_file);
+		lv_anim_delete(cover_art, cover_slide_x);
+		cover_slide_x(cover_art, 0);
 		start = p;
 		tracking = true;
 		sideways = false;
@@ -4552,27 +4652,43 @@ static void cover_gesture_cb(lv_event_t *e) {
 			return;
 		}
 		if (!sideways && LV_ABS(dx) >= SX_SWIPE_LOCK_PX && LV_ABS(dx) > LV_ABS(dy)) {
+			if (dx > 0 && start.x < SX_EDGE_BACK_W)
+				return; // The same edge Back dismisses the player, never a track.
 			sideways = true;
 		}
+		if (sideways && !player_sheet_drag_active())
+			cover_slide_x(cover_art, LV_CLAMP(-cover_art_side(), dx, cover_art_side()));
 		return;
 	}
 	if (code == LV_EVENT_PRESS_LOST) {
 		tracking = false;
+		cover_slide_finish(0);
 		return;
 	}
 	// LV_EVENT_RELEASED
 	tracking = false;
 	if (player_sheet_drag_active() || switcher_back_drag_active()) {
+		cover_slide_finish(0);
 		return; // the pull down, or the swipe back
 	}
 	if (sideways) {
+		device_state_t before, after;
+		device_state_get(&before);
+		if (strcmp(before.current_file, started_file)) {
+			cover_slide_finish(0);
+			return;
+		}
+		bool chapter_changed = false;
 		if (audiobook_mode && LV_ABS(dx) >= NP_COVER_SWIPE_PX) {
-			chapters_step(dx < 0 ? 1 : -1);
+			chapter_changed = chapters_step(dx < 0 ? 1 : -1);
 		} else if (dx <= -NP_COVER_SWIPE_PX) {
 			player_screen_next();
 		} else if (dx >= NP_COVER_SWIPE_PX) {
 			player_screen_prev();
 		}
+		device_state_get(&after);
+		bool changed = chapter_changed || strcmp(before.current_file, after.current_file);
+		cover_slide_finish(changed ? (dx < 0 ? cover_art_side() : -cover_art_side()) : LV_CLAMP(-cover_art_side(), dx, cover_art_side()));
 		return;
 	}
 	if (LV_ABS(dx) < SX_SWIPE_LOCK_PX && LV_ABS(dy) < SX_SWIPE_LOCK_PX) {

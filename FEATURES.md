@@ -12,6 +12,17 @@
 - Mixed book/music History and unknown-to-known format layout checks pass in
   the real LVGL application at both panel heights. R1 verification is pending.
 
+## Direct player gestures (1.4.2)
+
+- Pulling the mini-player upward reveals the existing player under the finger;
+  a short cancelled pull returns to the mini-player. Seek-on-hold stays separate.
+- The same 72 px edge Back used by catalogs dismisses the player without
+  changing tracks. Central artwork swipes move the sleeve, then commit once on
+  release; books retain chapter navigation and podcasts their time skips.
+- Album-cover browsing has an explicit Music menu action. The hidden upward
+  gesture on Music tiles is removed, leaving tile scrolling and mini-player
+  opening distinct. No new permanent timers, per-frame image decoding or effects.
+
 ## Navigation, queue and book continuation (1.4.2 UX refinement)
 
 - Edge Back owns the leftmost 72 px; row actions start between 72 px screen
