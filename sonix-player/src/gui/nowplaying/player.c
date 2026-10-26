@@ -4875,7 +4875,9 @@ static void np_chain_refresh(const device_state_t *state) {
 	char text[sizeof(chain_shown)];
 	bool warn = false;
 	np_chain_compose(state, text, sizeof(text), &warn);
-	bool show = text[0] && btline_enabled();
+	// Source/output details arrive after the track selection. Keep their band
+	// reserved while enabled so the seek target never moves as the text settles.
+	bool show = btline_enabled();
 	if (lv_obj_is_hidden(chain_row) == show) {
 		lv_obj_set_hidden(chain_row, !show);
 	}
@@ -4928,7 +4930,7 @@ static void np_chain_build(lv_obj_t *parent) {
 	lv_obj_set_style_image_opa(chain_mark, LV_OPA_70, 0);
 	lv_obj_set_clickable(chain_mark, false);
 	chain_paint_mark();
-	lv_obj_set_hidden(chain_row, true);
+	lv_obj_set_hidden(chain_row, !btline_enabled());
 }
 
 // The block: ФАЙЛ / ПЛЕЕР / ЛИНК / НАУШНИКИ, each a line of what is known.

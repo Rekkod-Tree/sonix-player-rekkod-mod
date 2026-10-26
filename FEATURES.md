@@ -1,5 +1,17 @@
 ﻿# Features
 
+## History handoff and stable player geometry (1.4.2)
+
+- Starting music or a podcast from History refreshes the full player's title,
+  artwork and transport, just like the ordinary catalog routes. Resuming the
+  already-loaded item keeps the existing pause/resume path; books retain their
+  saved checkpoint.
+- The signal-chain line keeps its existing height while details are enabled,
+  even before the decoder reports the source format. Seek and time controls no
+  longer move when that text arrives. No new timer or background work is added.
+- Mixed book/music History and unknown-to-known format layout checks pass in
+  the real LVGL application at both panel heights. R1 verification is pending.
+
 ## Navigation, queue and book continuation (1.4.2 UX refinement)
 
 - Edge Back owns the leftmost 72 px; row actions start between 72 px screen

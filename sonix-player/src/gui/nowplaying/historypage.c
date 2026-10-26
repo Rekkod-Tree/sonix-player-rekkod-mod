@@ -71,6 +71,7 @@ static void play_id(void *unused) {
 			device_state_play_list_ordered_at(paths, 1, 0, podcaststate_resume_point(path));
 		else
 			device_state_play_list(paths, 1, 0);
+		player_refresh_now_playing();
 	}
 	player_sheet_open(true);
 }
