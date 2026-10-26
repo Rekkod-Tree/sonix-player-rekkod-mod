@@ -1,5 +1,25 @@
 ﻿# Features
 
+## Navigation, queue and book continuation (1.4.2 UX refinement)
+
+- Edge Back owns a wider left strip; row actions start centrally. Movement
+  cancels a row hold. A deliberate edge pull and dwell goes Home on release;
+  pulling back cancels it. Holding the visible Back button also goes Home.
+- Opening the playback source restores catalog parents instead of returning
+  Back to the full player. The Music caption explicitly names its destination.
+- Five named playback modes include repeat-list without shuffle. The queue and
+  player counter show actual playback order. Indexed Play Next marks survive
+  mode changes, Undo and index refresh; stale row/menu actions are rejected.
+- Continue resumes an unfinished book immediately. Finished, empty or missing
+  selections open the book library. Zvuk's home reserves separate queue/search slots.
+- Exact target runtime checked on R1: 698-track queue, real Next, natural
+  repeat-list wrap, book continuation/ending, catalog parents, gestures and
+  screen off/wake. Installed program, settings and progress were restored.
+  ASan/UBSan queue tests and five full LVGL flows passed on both panel heights.
+  Signed-in Zvuk header/search used the host fixture; native checked signed-out
+  header/chapters. Bluetooth acoustics, deep suspend and R3 hardware were not
+  repeated in this UI wave. Final image extraction and legacy OTA fixtures passed.
+
 ## Touch delivery and resume responsiveness (1.4.2; R1 runtime verified)
 
 - Queued touchscreen press/release frames are delivered separately instead of
