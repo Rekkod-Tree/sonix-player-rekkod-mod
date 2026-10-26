@@ -10,7 +10,8 @@
   even before the decoder reports the source format. Seek and time controls no
   longer move when that text arrives. No new timer or background work is added.
 - Mixed book/music History and unknown-to-known format layout checks pass in
-  the real LVGL application at both panel heights. R1 verification is pending.
+  the real LVGL application at both panel heights. The exact R1 runtime also
+  switched book to music with correct artwork/transport, then resumed the book.
 
 ## Direct player gestures (1.4.2)
 
@@ -22,6 +23,12 @@
 - Album-cover browsing has an explicit Music menu action. The hidden upward
   gesture on Music tiles is removed, leaving tile scrolling and mini-player
   opening distinct. No new permanent timers, per-frame image decoding or effects.
+- R1 checks include a held opening pull, cancellation, edge Back to the opener,
+  artwork drag with actual queue advancement, and explicit cover-browser entry.
+  Installed program, settings and databases were restored after testing.
+- Short matched screen-off FLAC checks used about 5.5% CPU in both baseline and
+  candidate; paused load stayed near 1.1%, with stable memory. This USB-connected
+  CPU/RSS comparison is not a battery-discharge or autonomy measurement.
 
 ## Navigation, queue and book continuation (1.4.2 UX refinement)
 
