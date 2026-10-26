@@ -30,8 +30,8 @@
 #define SX_BODY_PAD_L 16
 #define SX_BODY_PAD_R 16 // 32 with the A-Z lane
 #define SX_BODY_PAD_R_LANE 32
-#define SX_EDGE_BACK_W 44	  // navigation owns this left-edge strip
-#define SX_ROW_SWIPE_INSET 64 // row actions start inside both screen margins
+#define SX_EDGE_BACK_W 72				  // navigation owns this left-edge strip
+#define SX_ROW_SWIPE_INSET SX_EDGE_BACK_W // row actions stay outside the navigation strip
 #define SX_EDGE_HOME_PX 160	  // a deliberate long pull, then a stationary dwell
 #define SX_EDGE_HOME_HOLD_MS 700
 #define SX_EDGE_HOME_JITTER_PX 12

@@ -2,7 +2,9 @@
 
 ## Navigation, queue and book continuation (1.4.2 UX refinement)
 
-- Edge Back owns a wider left strip; row actions start centrally. Movement
+- Edge Back owns the leftmost 72 px; row actions start between 72 px screen
+  margins, so the two regions never overlap. A stationary row hold is not armed
+  inside the Back strip; taps and vertical scrolling remain available. Movement
   cancels a row hold. A deliberate edge pull and dwell goes Home on release;
   pulling back cancels it. Holding the visible Back button also goes Home.
 - Opening the playback source restores catalog parents instead of returning

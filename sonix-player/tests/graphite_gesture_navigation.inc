@@ -17,6 +17,107 @@ static void gesture_nested_page(void) {
 	switch_screen(music_screen);
 	switch_screen(rows_screen);
 }
+
+// Exercise real pointer dispatch at the physical boundary, including a slow
+// start and a finger returning after motion. No direct row callback shortcuts.
+static bool gesture_boundary_states(void) {
+	enum { NOTHING, BACK, NEXT, LIKE, HOLD, TAP };
+	static const struct {
+		int x, dx, dy, expected;
+		bool slow_start, return_and_hold;
+	} cases[] = {
+		// clang-format off
+		{64, 130, 0, BACK, true, false},
+		{44, 130, 0, BACK, false, false},
+		{54, 130, 0, BACK, false, false},
+		{71, 130, 0, BACK, false, false},
+		{71, 130, 40, BACK, false, false},
+		{71, 15, 110, NOTHING, false, true},
+		{72, 130, 0, NEXT, false, false},
+		{407, -130, 0, LIKE, false, false},
+		{408, -130, 0, NOTHING, false, false},
+		{200, 18, 0, NOTHING, false, true},
+		{200, 0, 18, NOTHING, false, true},
+		{200, -180, 0, NOTHING, false, true},
+		{200, 5, 5, HOLD, false, true},
+		{64, 0, 0, TAP, false, false},
+		{64, 30, 0, NOTHING, false, false},
+		// clang-format on
+	};
+	static unsigned test, phase;
+	static uint32_t since;
+	static lv_obj_t *overflow;
+	if (test == sizeof(cases) / sizeof(cases[0])) {
+		taps = likes = nexts = gesture_holds = 0;
+		switch_screen(rows_screen);
+		return true;
+	}
+	int x = cases[test].x;
+	switch (phase) {
+	case 0:
+		taps = likes = nexts = gesture_holds = 0;
+		screen_history_reset();
+		switch_screen_no_history(main_menu_screen);
+		switch_screen(rows_screen);
+		if (test == 5) {
+			overflow = sx_box(rows_screen);
+			lv_obj_set_size(overflow, 1, 1);
+			lv_obj_set_y(overflow, lv_obj_get_height(rows_screen) + 200);
+			lv_obj_set_scroll_dir(rows_screen, LV_DIR_VER);
+		}
+		printf("GESTURE_BOUNDARY %u start=%d delta=%d,%d\n", test, x, cases[test].dx, cases[test].dy);
+		fflush(stdout);
+		phase++;
+		break;
+	case 1:
+		// Let the normal page animation finish before touching the row.
+		input(x, 180, true);
+		since = lv_tick_get();
+		phase++;
+		break;
+	case 2:
+		if (cases[test].slow_start && lv_tick_elaps(since) < 700)
+			break;
+		assert(!gesture_holds && !taps && !nexts && !likes);
+		input(x + cases[test].dx, 180 + cases[test].dy, true);
+		phase++;
+		break;
+	case 3:
+		if (test == 5)
+			assert(lv_indev_get_scroll_obj(pointer) == rows_screen);
+		if (cases[test].return_and_hold) {
+			input(x, 180, true);
+			since = lv_tick_get();
+		}
+		phase++;
+		break;
+	case 4:
+		if (cases[test].return_and_hold && lv_tick_elaps(since) < 700)
+			break;
+		assert(gesture_holds == (cases[test].expected == HOLD));
+		if (overflow) {
+			lv_obj_delete(overflow);
+			overflow = NULL;
+			lv_obj_scroll_to_y(rows_screen, 0, LV_ANIM_OFF);
+		}
+		input(point.x, point.y, false);
+		phase++;
+		break;
+	case 5:
+		assert(lv_screen_active() == (cases[test].expected == BACK ? main_menu_screen : rows_screen));
+		assert(taps == (cases[test].expected == TAP));
+		assert(nexts == (cases[test].expected == NEXT));
+		assert(likes == (cases[test].expected == LIKE));
+		assert(gesture_holds == (cases[test].expected == HOLD));
+		if (test == 3)
+			capture("gesture-expanded-71px-back");
+		test++;
+		phase = 0;
+		break;
+	}
+	return false;
+}
+
 static void gesture_navigation_states(lv_timer_t *timer) {
 	static int step;
 	static unsigned revision;
@@ -50,6 +151,10 @@ static void gesture_navigation_states(lv_timer_t *timer) {
 		break;
 	}
 	case 2:
+		if (!gesture_boundary_states()) {
+			step--;
+			break;
+		}
 		input(34, 180, true);
 		input(80, 195, true);
 		break;
@@ -66,7 +171,7 @@ static void gesture_navigation_states(lv_timer_t *timer) {
 		switch_screen(rows_screen);
 		break;
 	case 6:
-		input(54, 180, true);
+		input(408, 180, true);
 		input(220, 180, true);
 		input(220, 180, false);
 		break;
@@ -306,7 +411,7 @@ static void gesture_navigation_states(lv_timer_t *timer) {
 	case 44:
 		assert(lv_screen_active() == rows_screen && gesture_guards == 2);
 		assert(!sx_sheet_is_open() && !quickpanel_is_open());
-		puts("UI_TEST_PASS gesture arbitration: expanded edge, neutral margins, central actions, moved hold cancellation, Home holds, album parent, player gestures, edge dwell Home/short/movement/cancel and service guard");
+		puts("UI_TEST_PASS gesture arbitration: 15 boundary cases, 72px edge, central actions, moved hold cancellation, Home holds, album parent, player gestures, edge dwell Home/short/movement/cancel and service guard");
 		fflush(stdout);
 		exit(0);
 	}
