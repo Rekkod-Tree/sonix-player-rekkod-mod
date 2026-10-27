@@ -48,6 +48,35 @@ Secrets, runtime logs, database snapshots and firmware binaries are excluded
 from the source repository. Training and final package acceptance are separate
 from the code-candidate results above.
 
+## Trained build and firmware acceptance
+
+The frozen code was trained on R1 for 1,881 seconds. Thirteen observed scenario
+records and nonzero arc counters in eleven key modules supplement the time
+criterion. The fresh namespace contains 470 GCDA files, 2,768,028 bytes; prior
+accepted profiles were preserved. Local FLAC/MP3, books, history, queue, catalog,
+mini/player gestures, Yandex AAC, LDAC, screen off/wake and pause were exercised.
+Other streaming providers and USB DAC were not separately trained in this run.
+
+Strict USE passed with no unprofiled units, LTO/O3, no fast-math, and actual
+glibc ABI validation. GENERATE took 2,385 seconds; USE took 638.6 seconds.
+The final player is 8,559,724 bytes, SHA-256
+`31263c5f38c02c6b94cd36808753c2d9d6546ac687f701c4b0c7151e6890e1f7`.
+The normal-capability final binary passed native FLAC/LDAC, Next, screen off/wake,
+pause persistence (2:01 = 121.208 seconds, queue index 10), edge Back, direct
+book continuation and mini-player pull. Its short LDAC screen-off sample used
+6.86% application CPU; history saving remained asleep. This is not a matched
+before/after speedup or battery measurement. No fatal, underrun, DB, card-I/O
+or audio errors were found in that smoke run. The installed program and small
+test snapshots were restored, and temporary runtimes removed.
+
+The R1 image passed extraction, executable hashes, OTA-chain/client fixtures and
+resource checks. Only the player and build metadata differ from the prior core9
+image; kernel and resources are preserved. Image size: 49,747,968 bytes, rootfs
+headroom: 274,432 bytes. SHA-256:
+`6f9d05950af4a2c21375e54282c9668035843dc934f8ef8244541f49aba0d0cd`.
+Firmware installation/reboot and post-flash acceptance are not performed by
+this temporary-runtime test.
+
 ## Measurement limits and next work
 
 - The diagnostic queue-save tail fell from 12.117 to 0.343 ms and the position
