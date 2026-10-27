@@ -337,18 +337,134 @@ static bool queue_export_start(const char *name, library_playlist_publish_t mode
 // set at a time, under a card that says so and stays until it is done.
 // ---------------------------------------------------------------------------
 
+// Slots are reserved before a worker starts. Completed payloads remain owned
+// even if the best-effort GUI wake is refused; the main-loop hook consumes them.
+#define BATCH_RESULTS_MAX 4
+typedef struct {
+	void *payload;
+	void (*apply)(void *);
+	void (*dispose)(void *);
+	bool ready;
+} batch_result_t;
+static batch_result_t batch_results[BATCH_RESULTS_MAX];
+static pthread_mutex_t batch_results_lock = PTHREAD_MUTEX_INITIALIZER;
+static atomic_bool batch_results_ready, batch_results_closing;
+static unsigned batch_result_next;
+
+static int batch_result_admit(void *payload, void (*apply)(void *), void (*dispose)(void *)) {
+	pthread_mutex_lock(&batch_results_lock);
+	int slot = -1;
+	if (!atomic_load(&batch_results_closing))
+		for (int i = 0; i < BATCH_RESULTS_MAX; i++)
+			if (!batch_results[i].payload) {
+				batch_results[i] = (batch_result_t){payload, apply, dispose, false};
+				slot = i;
+				break;
+			}
+	pthread_mutex_unlock(&batch_results_lock);
+	return slot;
+}
+
+static void batch_result_refuse(int slot) {
+	pthread_mutex_lock(&batch_results_lock);
+	batch_results[slot] = (batch_result_t){0};
+	pthread_mutex_unlock(&batch_results_lock);
+}
+
+static void batch_result_wakeup(void *unused) {
+	(void)unused;
+	playlistpage_service_completion();
+}
+
+static void batch_result_publish(int slot) {
+	pthread_mutex_lock(&batch_results_lock);
+	batch_result_t result = batch_results[slot];
+	bool closing = atomic_load(&batch_results_closing);
+	if (closing)
+		batch_results[slot] = (batch_result_t){0};
+	else {
+		batch_results[slot].ready = true;
+		atomic_store(&batch_results_ready, true);
+	}
+	pthread_mutex_unlock(&batch_results_lock);
+	if (closing)
+		result.dispose(result.payload);
+	else
+		(void)gui_post(batch_result_wakeup, NULL);
+}
+
+void playlistpage_service_completion(void) {
+	if (!atomic_load(&batch_results_ready) || atomic_load(&batch_results_closing))
+		return;
+	batch_result_t result = {0};
+	pthread_mutex_lock(&batch_results_lock);
+	for (unsigned n = 0; n < BATCH_RESULTS_MAX; n++) {
+		unsigned i = (batch_result_next + n) % BATCH_RESULTS_MAX;
+		if (batch_results[i].ready) {
+			result = batch_results[i];
+			batch_results[i] = (batch_result_t){0};
+			batch_result_next = (i + 1) % BATCH_RESULTS_MAX;
+			break;
+		}
+	}
+	bool pending = false;
+	for (unsigned i = 0; i < BATCH_RESULTS_MAX; i++)
+		pending |= batch_results[i].ready;
+	atomic_store(&batch_results_ready, pending);
+	pthread_mutex_unlock(&batch_results_lock);
+	if (result.payload)
+		result.apply(result.payload);
+}
+
+void playlistpage_shutdown_completions(void) {
+	batch_result_t discarded[BATCH_RESULTS_MAX];
+	unsigned count = 0;
+	pthread_mutex_lock(&batch_results_lock);
+	atomic_store(&batch_results_closing, true);
+	atomic_store(&batch_results_ready, false);
+	for (unsigned i = 0; i < BATCH_RESULTS_MAX; i++)
+		if (batch_results[i].ready) {
+			discarded[count++] = batch_results[i];
+			batch_results[i] = (batch_result_t){0};
+		}
+	pthread_mutex_unlock(&batch_results_lock);
+	for (unsigned i = 0; i < count; i++)
+		discarded[i].dispose(discarded[i].payload);
+	// Running jobs retain their slots and dispose when they publish.
+}
+
 typedef struct {
 	char name[PLAYLIST_NAME_MAX + 1];
 	char **paths;
 	int count;
 	int added;
+	int result_slot;
+	uint64_t toast_owner;
 } batch_t;
 
 static pthread_mutex_t batch_lock = PTHREAD_MUTEX_INITIALIZER;
 
+static void batch_paths_free(batch_t *b) {
+	if (b->paths) {
+		for (int i = 0; i < b->count; i++)
+			free(b->paths[i]);
+		free(b->paths);
+		b->paths = NULL;
+	}
+}
+
+static void batch_free(void *arg) {
+	batch_t *b = arg;
+	batch_paths_free(b);
+	free(b);
+}
+
 static void batch_done_cb(void *arg) {
 	batch_t *b = arg;
-	toast_busy_end();
+	if (!toast_busy_end_owned(b->toast_owner)) {
+		batch_free(b);
+		return;
+	}
 	if (b->added == b->count) {
 		toast_success("playlist_tracks_added");
 	} else if (b->added > 0) {
@@ -356,24 +472,21 @@ static void batch_done_cb(void *arg) {
 	} else {
 		gui_notify_popup("playlist_cannot_add_the_tracks");
 	}
-	for (int i = 0; i < b->count; i++) {
-		free(b->paths[i]);
-	}
-	free(b->paths);
-	free(b);
+	batch_free(b);
 }
 
 static void *batch_worker(void *arg) {
 	batch_t *b = arg;
 	thread_be_low_priority("playlistadd");
 	pthread_mutex_lock(&batch_lock);
-	for (int i = 0; i < b->count; i++) {
+	for (int i = 0; i < b->count && !atomic_load(&batch_results_closing); i++) {
 		if (playlists_add_track(b->name, b->paths[i])) {
 			b->added++;
 		}
 	}
 	pthread_mutex_unlock(&batch_lock);
-	gui_post(batch_done_cb, b);
+	batch_paths_free(b); // Large path sets are released off the UI thread.
+	batch_result_publish(b->result_slot);
 	return NULL;
 }
 
@@ -397,13 +510,20 @@ bool playlistpage_add_tracks_to(const char *name, const char *const *paths, int 
 	for (int i = 0; i < count; i++) {
 		b->paths[b->count] = strdup(paths[i] ? paths[i] : "");
 		if (!b->paths[b->count]) {
-			break;
+			batch_free(b);
+			return false;
 		}
 		b->count++;
 	}
-	toast_busy("playlist_adding_tracks");
+	b->result_slot = batch_result_admit(b, batch_done_cb, batch_free);
+	if (b->result_slot < 0) {
+		batch_free(b);
+		return false;
+	}
+	b->toast_owner = toast_busy_owned("playlist_adding_tracks");
 	pthread_t thread;
 	if (pthread_create(&thread, NULL, batch_worker, b) != 0) {
+		batch_result_refuse(b->result_slot);
 		batch_done_cb(b);
 		return false;
 	}
@@ -425,9 +545,15 @@ static bool batch_start(const char *name) {
 	pending_many = NULL;
 	pending_many_count = 0;
 
-	toast_busy("playlist_adding_tracks");
+	b->result_slot = batch_result_admit(b, batch_done_cb, batch_free);
+	if (b->result_slot < 0) {
+		batch_free(b);
+		return false;
+	}
+	b->toast_owner = toast_busy_owned("playlist_adding_tracks");
 	pthread_t thread;
 	if (pthread_create(&thread, NULL, batch_worker, b) != 0) {
+		batch_result_refuse(b->result_slot);
 		batch_done_cb(b);
 		return false;
 	}
@@ -450,11 +576,31 @@ typedef struct {
 	char **paths;
 	int count;
 	int starred;
+	int result_slot;
+	uint64_t toast_owner;
 } fav_batch_t;
+
+static void fav_paths_free(fav_batch_t *b) {
+	if (b->paths) {
+		for (int i = 0; i < b->count; i++)
+			free(b->paths[i]);
+		free(b->paths);
+		b->paths = NULL;
+	}
+}
+
+static void fav_free(void *arg) {
+	fav_batch_t *b = arg;
+	fav_paths_free(b);
+	free(b);
+}
 
 static void fav_done_cb(void *arg) {
 	fav_batch_t *b = arg;
-	toast_busy_end();
+	if (!toast_busy_end_owned(b->toast_owner)) {
+		fav_free(b);
+		return;
+	}
 	if (b->starred == b->count) {
 		toast_success("favourites_tracks_added");
 	} else if (b->starred > 0) {
@@ -462,11 +608,7 @@ static void fav_done_cb(void *arg) {
 	} else {
 		gui_notify_popup("favourites_cannot_add_the_tracks");
 	}
-	for (int i = 0; i < b->count; i++) {
-		free(b->paths[i]);
-	}
-	free(b->paths);
-	free(b);
+	fav_free(b);
 }
 
 static void *fav_worker(void *arg) {
@@ -478,7 +620,7 @@ static void *fav_worker(void *arg) {
 	char (*artists)[256] = malloc(FAV_CHUNK * sizeof(*artists));
 
 	pthread_mutex_lock(&batch_lock);
-	for (int first = 0; rows && titles && artists && first < b->count; first += FAV_CHUNK) {
+	for (int first = 0; rows && titles && artists && first < b->count && !atomic_load(&batch_results_closing); first += FAV_CHUNK) {
 		int n = b->count - first < FAV_CHUNK ? b->count - first : FAV_CHUNK;
 		for (int i = 0; i < n; i++) {
 			const char *path = b->paths[first + i];
@@ -492,7 +634,8 @@ static void *fav_worker(void *arg) {
 	free(rows);
 	free(titles);
 	free(artists);
-	gui_post(fav_done_cb, b);
+	fav_paths_free(b);
+	batch_result_publish(b->result_slot);
 	return NULL;
 }
 
@@ -512,14 +655,23 @@ void playlistpage_add_favourites(const char *const *paths, int count) {
 	for (int i = 0; i < count; i++) {
 		b->paths[b->count] = strdup(paths[i] ? paths[i] : "");
 		if (!b->paths[b->count]) {
-			break;
+			fav_free(b);
+			gui_notify_popup("favourites_cannot_add_the_tracks");
+			return;
 		}
 		b->count++;
 	}
 
-	toast_busy("favourites_adding_tracks");
+	b->result_slot = batch_result_admit(b, fav_done_cb, fav_free);
+	if (b->result_slot < 0) {
+		fav_free(b);
+		gui_notify_popup("favourites_cannot_add_the_tracks");
+		return;
+	}
+	b->toast_owner = toast_busy_owned("favourites_adding_tracks");
 	pthread_t thread;
 	if (pthread_create(&thread, NULL, fav_worker, b) != 0) {
+		batch_result_refuse(b->result_slot);
 		fav_done_cb(b);
 		return;
 	}

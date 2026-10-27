@@ -1,5 +1,27 @@
 ﻿# Features
 
+## Bounded work and persistence (1.4.2 performance refinement)
+
+- The GUI bridge yields after eight callbacks or four milliseconds, preserving
+  pending work without starving input. File and playlist completions retain an
+  owner until the GUI consumes them, even when its ordinary callback queue is full.
+- A failed file-worker start reports an error without running disk work or
+  changing the UI thread's scheduling priority. File mutations retain the exact
+  mounted-card identity and directory descriptors through completion and cleanup.
+- History and frequent playback-position checkpoints use bounded, sleeping
+  workers. Closing the library ends imports before draining accepted history;
+  position-only updates after reopen verify the current queue entry in SQLite.
+  Full queue/configuration writes are not all asynchronous yet.
+- Player motion reuses existing artwork surfaces and avoids repeated grayscale
+  conversions and unchanged background invalidations. Cover work applies the
+  current requested priority after waking, rather than a stale pre-wait priority.
+- External PCM recovery has a bounded no-progress window and one same-format
+  reopen, retaining live conversion buffers and allowing stop requests to finish.
+- Sanitized tests, negative controls, full LVGL flows at both panel heights and
+  real R1 checks cover these changes. Short matched CPU samples show no material
+  screen-off increase; they do not establish longer battery life or eliminate
+  the separate rare reboot/Bluetooth investigations.
+
 ## History handoff and stable player geometry (1.4.2)
 
 - Starting music or a podcast from History refreshes the full player's title,

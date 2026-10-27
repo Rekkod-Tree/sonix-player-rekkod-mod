@@ -1,3 +1,74 @@
+#include "src/gui/shell/artview.h"
+
+static unsigned motion_style_invalidations;
+static void motion_style_invalidated(lv_event_t *event) {
+	(void)event;
+	motion_style_invalidations++;
+}
+
+static void motion_artwork_policy(void) {
+	lv_obj_t *previous = lv_screen_active();
+	lv_obj_t *screen = lv_obj_create(NULL);
+	lv_screen_load(screen);
+	// A stable background must not invalidate the whole player on every track.
+	lv_color_t background = lv_color_hex(0x182124);
+	sx_set_bg_color(screen, background);
+	lv_style_value_t local;
+	assert(lv_obj_get_local_style_prop(screen, LV_STYLE_BG_COLOR, &local, 0) == LV_STYLE_RES_FOUND);
+	assert(lv_color_eq(local.color, background));
+	lv_refr_now(NULL);
+	lv_display_t *display = lv_display_get_default();
+	lv_display_add_event_cb(display, motion_style_invalidated, LV_EVENT_INVALIDATE_AREA, NULL);
+	motion_style_invalidations = 0;
+	for (int i = 0; i < 100; i++)
+		sx_set_bg_color(screen, background);
+	assert(motion_style_invalidations == 0);
+	sx_set_bg_color(screen, lv_color_hex(0x253034));
+	assert(motion_style_invalidations > 0);
+	lv_display_remove_event_cb_with_user_data(display, motion_style_invalidated, NULL);
+	puts("UI_STATIC_BACKGROUND_PASS 100 unchanged refreshes without invalidation; changed role repaints");
+	lv_obj_t *overlay = lv_obj_create(lv_layer_top());
+	int height = lv_display_get_vertical_resolution(lv_display_get_default());
+	lv_obj_set_size(overlay, 480, height);
+	lv_obj_set_y(overlay, height);
+	uint16_t pixels[16 * 16];
+	for (unsigned i = 0; i < 16 * 16; i++)
+		pixels[i] = i % 2 ? 0xf800 : 0x07e0;
+	lv_image_dsc_t source = {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_RGB565, .w = 16, .h = 16, .stride = 32}, .data_size = sizeof(pixels), .data = (void *)pixels};
+	lv_obj_t *under = lv_image_create(screen), *over = lv_image_create(overlay);
+	lv_obj_set_pos(under, 40, 40);
+	lv_obj_set_pos(over, 40, 40);
+	assert(sx_artview_bind(under, &source, cover_new_display_generation()));
+	assert(sx_artview_bind(over, &source, cover_new_display_generation()));
+	lv_obj_update_layout(screen);
+	lv_obj_update_layout(lv_layer_top());
+	sx_artview_opaque_overlay(NULL);
+	assert(sx_artview_mode(true));
+	sx_artview_overlay_will_show(overlay);
+	assert(((const lv_image_dsc_t *)lv_image_get_src(over))->data != source.data);
+	lv_obj_set_y(overlay, 0);
+	sx_artview_opaque_overlay(overlay);
+	assert(((const lv_image_dsc_t *)lv_image_get_src(under))->data == source.data);
+	// Closing/dragging a previously opaque player prepares both surfaces once.
+	sx_artview_overlay_will_show(overlay);
+	assert(((const lv_image_dsc_t *)lv_image_get_src(under))->data != source.data);
+	const void *kept = ((const lv_image_dsc_t *)lv_image_get_src(over))->data;
+	unsigned conversions = sx_artview_stats().conversions;
+	for (int i = 0; i < 50; i++) {
+		lv_obj_set_y(overlay, height - i * 4);
+		sx_artview_overlay_will_show(overlay);
+		assert(((const lv_image_dsc_t *)lv_image_get_src(over))->data == kept);
+		assert(sx_artview_stats().conversions == conversions);
+	}
+	lv_obj_set_hidden(overlay, true);
+	sx_artview_opaque_overlay(NULL);
+	lv_obj_delete(overlay);
+	lv_screen_load(previous);
+	lv_obj_delete(screen);
+	assert(sx_artview_mode(false));
+	puts("UI_MOTION_ARTWORK_PASS both surfaces retained during 50 held positions, no repeated conversions");
+}
+
 static lv_obj_t *motion_art(lv_obj_t *root) {
 	int w = lv_obj_get_width(root);
 	if (w > 200 && w < 480 && lv_obj_get_height(root) == w)
@@ -17,6 +88,7 @@ static void motion_states(lv_timer_t *timer) {
 	device_state_get(&state);
 	switch (step++) {
 	case 0:
+		motion_artwork_policy();
 		hc_setup(timer);
 		break;
 	case 1: {

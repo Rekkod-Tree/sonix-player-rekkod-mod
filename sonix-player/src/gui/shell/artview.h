@@ -26,6 +26,7 @@ void sx_artview_release_cover(cover_image_t *cover);
 bool sx_artview_mode(bool on);
 bool sx_artview_refresh(void);
 void sx_artview_screen_will_show(lv_obj_t *screen);
+// Begin/continue a moving overlay: keep both surfaces ready until commit/cancel.
 void sx_artview_overlay_will_show(lv_obj_t *overlay);
 void sx_artview_opaque_overlay(lv_obj_t *overlay);
 sx_artview_stats_t sx_artview_stats(void);

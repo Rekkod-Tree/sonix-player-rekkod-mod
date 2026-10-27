@@ -1,9 +1,11 @@
 #include "filespage.h"
 
 #include <dirent.h>
+#include <errno.h>
 #include <pthread.h>
-#include <stdio.h>
+#include <stdatomic.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -25,15 +27,16 @@
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/sx_mini.h"
 #include "src/gui/shell/sx_palette.h"
+#include "src/gui/shell/sx_sheet.h"
 #include "src/gui/shell/sx_styles.h"
 #include "src/gui/shell/sx_tokens.h"
 #include "src/gui/shell/theme.h"
 #include "src/gui/shell/toast.h"
 #include "src/gui/shell/touch.h"
-#include "src/system/core/lang.h"
 #include "src/system/core/config.h"
-#include "src/gui/shell/sx_sheet.h"
+#include "src/system/core/lang.h"
 #include "src/system/core/utils.h"
+#include "src/system/device/fileops.h"
 #include "src/system/device/system.h"
 #include "src/system/library/library.h"
 #include "src/system/playback/playlist.h"
@@ -54,7 +57,7 @@ static bool gesture_not_tap(void) {
 // list. What the cap leaves out goes in the log, because a file manager that
 // drops entries without saying so is worse than one with a limit.
 #define MAX_ENTRIES 2000
-#define PATH_MAX_LEN 640
+#define PATH_MAX_LEN FILEOP_ROOT_MAX
 
 // The listing is built a screenful at a time, for the reason the chapter list
 // gives in ebookreader.c: every row is a card with a glyph and two labels, and
@@ -120,6 +123,9 @@ static keyboard_t *name_keyboard;
 
 // What the dialog is naming: a folder being created, or the entry below.
 static bool naming_new_folder;
+static storage_card_token_t list_card, action_card;
+static unsigned list_database_epoch, action_database_epoch;
+static char action_path[PATH_MAX_LEN], action_root[PATH_MAX_LEN];
 static char acting_on[NAME_MAX + 1];
 
 // ---------------------------------------------------------------------------
@@ -131,31 +137,36 @@ static char acting_on[NAME_MAX + 1];
 //
 // And both can take a while. A copy is bounded by how big the file is, which on
 // a music card is half a gigabyte often enough, and a move across the card is a
-// rename and instant -- until it is not, and then it is a copy. So the work
-// happens on a thread with the modal up, and the page hears about it through
-// gui_post(): the alternative is an interface frozen for a minute, which on a
-// single core is what doing it here would mean.
+// rename. All mutations happen on one worker with the modal up. The page owns
+// its completion even when gui_post() cannot accept the wake-up.
 // ---------------------------------------------------------------------------
 
 typedef enum {
 	OP_NONE = 0,
 	OP_MOVE,
 	OP_COPY,
+	OP_DELETE,
+	OP_RENAME,
+	OP_MKDIR,
 } op_t;
 
 static op_t pending_op;
 static char op_source[PATH_MAX_LEN + NAME_MAX + 2];	 // what is being moved or copied
 static char op_target[PATH_MAX_LEN + NAME_MAX + 2];	 // where it is going, name and all
 static bool op_ok;
+static int op_error;
+static fileop_request_t op_request;
+static unsigned op_database_epoch;
+static bool op_running; // GUI owner; released only after terminal consumption.
+static atomic_bool op_ready, op_closing;
 
 // How far along it is, in bytes rather than in files: a folder holding one
 // album and a hundred cover thumbnails would otherwise stand at 1% and then
 // jump to the end.
 //
 // The total is counted by the worker and not by op_start(), because a move
-// within the card is a rename and has no length worth counting -- it is only
-// when the rename fails and the move becomes a copy that there is anything to
-// measure. A total of zero means "no bar", which is exactly right for both the
+// within the card is a rename and has no length worth counting. Only copies
+// need a byte total. A total of zero means "no bar", which is right for both the
 // rename and the moment before the walk has finished.
 static pthread_mutex_t op_lock = PTHREAD_MUTEX_INITIALIZER;
 static uint64_t op_total_bytes;
@@ -304,6 +315,12 @@ static bool service_hidden(const char *name) {
 
 static void read_folder(void) {
 	entries_free();
+	list_card = (storage_card_token_t){0};
+	list_database_epoch = 0;
+	storage_card_token_t reading;
+	char admitted[PATH_MAX_LEN];
+	if (!storage_card_try_admit(&reading, admitted, sizeof(admitted)) || strcmp(admitted, root_path))
+		return;
 
 	DIR *dir = opendir(path);
 	if (!dir) {
@@ -356,172 +373,87 @@ static void read_folder(void) {
 		fprintf(stderr, "files: '%s' holds more than %d entries, %d not listed\n", path, MAX_ENTRIES, skipped);
 	}
 
+	if (storage_card_try_check(&reading) != 0) {
+		entries_free();
+		return;
+	}
+	list_card = reading;
+	list_database_epoch = library_database_epoch();
 	qsort(entries, (size_t)entry_count, sizeof(*entries), entry_cmp);
 }
 
-// ---------------------------------------------------------------------------
-// the actions
-// ---------------------------------------------------------------------------
-
-// Deletes a folder and everything in it. Written out rather than shelling out
-// to `rm -rf`: there is no shell on the device worth trusting with a path the
-// user typed, and this way a name with a quote in it is just a name.
-static bool remove_tree(const char *target) {
-	struct stat st;
-	if (lstat(target, &st) != 0) {
+// Filesystem work is isolated behind the original card token and directory FDs.
+// Menu/dialog/picker state is copied once, before the worker can start.
+static bool capture_action(void) {
+	if (op_running || atomic_load(&op_closing) || storage_card_try_check(&list_card)) {
+		gui_notify_popup("card_write_failed");
 		return false;
 	}
-	if (!S_ISDIR(st.st_mode)) {
-		return unlink(target) == 0;
-	}
+	action_card = list_card;
+	action_database_epoch = list_database_epoch;
+	snprintf(action_path, sizeof(action_path), "%s", path);
+	snprintf(action_root, sizeof(action_root), "%s", root_path);
+	return true;
+}
 
-	DIR *dir = opendir(target);
-	if (!dir) {
+static bool action_current(void) {
+	if (op_running || atomic_load(&op_closing) || storage_card_try_check(&action_card)) {
+		gui_notify_popup("card_write_failed");
 		return false;
 	}
-	bool ok = true;
-	struct dirent *de;
-	while ((de = readdir(dir)) != NULL) {
-		if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0) {
-			continue;
-		}
-		char child[PATH_MAX_LEN + NAME_MAX + 2];
-		snprintf(child, sizeof(child), "%s/%s", target, de->d_name);
-		if (!remove_tree(child)) {
-			ok = false;
-		}
-	}
-	closedir(dir);
-	return rmdir(target) == 0 && ok;
+	return true;
 }
 
-// ---------------------------------------------------------------------------
-// copying
-// ---------------------------------------------------------------------------
-
-#define COPY_CHUNK (64 * 1024)
-
-// What the whole job amounts to. lstat, not stat: a symlink counts as the few
-// bytes of its own name and not as whatever it points at, which is also how it
-// will be copied.
-static uint64_t tree_bytes(const char *target) {
-	struct stat st;
-	if (lstat(target, &st) != 0) {
-		return 0;
-	}
-	if (!S_ISDIR(st.st_mode)) {
-		return (uint64_t)st.st_size;
-	}
-
-	DIR *dir = opendir(target);
-	if (!dir) {
-		return 0;
-	}
-	uint64_t total = 0;
-	struct dirent *de;
-	while ((de = readdir(dir)) != NULL) {
-		if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0) {
-			continue;
-		}
-		char child[PATH_MAX_LEN + NAME_MAX + 2];
-		int wrote = snprintf(child, sizeof(child), "%s/%s", target, de->d_name);
-		if (wrote < 0 || (size_t)wrote >= sizeof(child)) {
-			continue; // too deep to name: copy_tree will not copy it either
-		}
-		total += tree_bytes(child);
-	}
-	closedir(dir);
-	return total;
+static bool action_child(const char *name, char *out, size_t size) {
+	int n = snprintf(out, size, "%s/%s", action_path, name);
+	return n >= 0 && (size_t)n < size;
 }
 
-static void op_advance(size_t bytes) {
+static const char *op_title(void) {
+	switch (pending_op) {
+	case OP_MOVE:
+		return "moving";
+	case OP_COPY:
+		return "copying";
+	case OP_DELETE:
+		return "delete";
+	case OP_RENAME:
+		return "rename";
+	default:
+		return "files_new_folder";
+	}
+}
+
+static const char *op_failure(void) {
+	if (op_error == EEXIST)
+		return "files_name_taken";
+	if (op_error == ESTALE || op_error == EAGAIN || op_error == EBUSY || op_error == ENODEV || op_error == EROFS)
+		return "card_write_failed";
+	switch (pending_op) {
+	case OP_MOVE:
+		return "files_could_not_move_it";
+	case OP_COPY:
+		return "files_could_not_copy_it";
+	case OP_DELETE:
+		return "files_could_not_delete_it";
+	case OP_RENAME:
+		return "files_could_not_rename_it";
+	default:
+		return "files_create_failed";
+	}
+}
+
+static void op_progress(uint64_t done, uint64_t total, void *unused) {
+	(void)unused;
 	pthread_mutex_lock(&op_lock);
-	op_done_bytes += bytes;
+	op_done_bytes = done;
+	op_total_bytes = total;
 	pthread_mutex_unlock(&op_lock);
 }
 
-static bool copy_file(const char *from, const char *to) {
-	FILE *in = fopen(from, "rb");
-	if (!in) {
-		return false;
-	}
-	FILE *out = fopen(to, "wb");
-	if (!out) {
-		fclose(in);
-		return false;
-	}
-
-	char *buffer = malloc(COPY_CHUNK);
-	if (!buffer) {
-		fclose(in);
-		fclose(out);
-		unlink(to);
-		return false;
-	}
-
-	bool ok = true;
-	size_t got;
-	while ((got = fread(buffer, 1, COPY_CHUNK, in)) > 0) {
-		if (fwrite(buffer, 1, got, out) != got) {
-			ok = false;
-			break;
-		}
-		op_advance(got);
-	}
-	if (ferror(in)) {
-		ok = false;
-	}
-
-	free(buffer);
-	fclose(in);
-	if (fclose(out) != 0) {
-		ok = false;
-	}
-	// A half-written copy is worse than none: it looks like a file and plays
-	// like a corrupt one.
-	if (!ok) {
-		unlink(to);
-	}
-	return ok;
-}
-
-static bool copy_tree(const char *from, const char *to) {
-	struct stat st;
-	if (lstat(from, &st) != 0) {
-		return false;
-	}
-	if (!S_ISDIR(st.st_mode)) {
-		return copy_file(from, to);
-	}
-
-	if (mkdir(to, 0777) != 0) {
-		return false;
-	}
-
-	DIR *dir = opendir(from);
-	if (!dir) {
-		return false;
-	}
-	bool ok = true;
-	struct dirent *de;
-	while ((de = readdir(dir)) != NULL) {
-		if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0) {
-			continue;
-		}
-		char child_from[PATH_MAX_LEN + NAME_MAX + 2];
-		char child_to[PATH_MAX_LEN + NAME_MAX + 2];
-		int a = snprintf(child_from, sizeof(child_from), "%s/%s", from, de->d_name);
-		int b = snprintf(child_to, sizeof(child_to), "%s/%s", to, de->d_name);
-		if (a < 0 || (size_t)a >= sizeof(child_from) || b < 0 || (size_t)b >= sizeof(child_to)) {
-			ok = false; // too deep to name, so too deep to copy
-			continue;
-		}
-		if (!copy_tree(child_from, child_to)) {
-			ok = false;
-		}
-	}
-	closedir(dir);
-	return ok;
+static bool op_cancelled(void *unused) {
+	(void)unused;
+	return atomic_load(&op_closing);
 }
 
 // ---------------------------------------------------------------------------
@@ -556,73 +488,100 @@ static void op_progress_stop(void) {
 
 static void op_finished(void *user) {
 	(void)user;
-
 	op_progress_stop();
 	gui_modal_hide();
-	if (op_ok) {
-		toast_success(pending_op == OP_MOVE ? "files_moved" : "files_copied");
-	} else {
-		gui_notify_popup(pending_op == OP_MOVE ? "files_could_not_move_it" : "files_could_not_copy_it");
-	}
+	if (!op_ok)
+		gui_notify_popup(op_failure());
+	else if (pending_op == OP_MOVE)
+		toast_success("files_moved");
+	else if (pending_op == OP_COPY)
+		toast_success("files_copied");
+	else if (pending_op == OP_DELETE)
+		toast_success("files_deleted");
 	pending_op = OP_NONE;
-	storage_card_files_recheck(); // a database may have been moved away
+	storage_card_files_recheck();
 	rebuild();
+}
+
+void filespage_service_completion(void) {
+	if (atomic_load(&op_closing) || !atomic_exchange(&op_ready, false))
+		return;
+	op_running = false;
+	op_finished(NULL);
+}
+
+void filespage_shutdown_completions(void) {
+	atomic_store(&op_closing, true);
+	atomic_store(&op_ready, false);
+}
+
+static void op_completion_wakeup(void *unused) {
+	(void)unused;
+	filespage_service_completion();
 }
 
 static void *op_worker(void *arg) {
 	(void)arg;
 	thread_be_background("filesop");
-
-	if (pending_op == OP_MOVE) {
-		// Within one card a move is a rename and costs nothing. Across a
-		// boundary the kernel says EXDEV and there is no shortcut: it becomes a
-		// copy and then a delete, in that order, so a failure halfway leaves the
-		// original where it was.
-		op_ok = rename(op_source, op_target) == 0;
-		if (!op_ok) {
-			// Only now is there anything to count, and the count is worth its
-			// own walk of the tree: without it the bar has no scale, and a walk
-			// costs one stat per file against a read and a write of every byte.
-			uint64_t total = tree_bytes(op_source);
-			pthread_mutex_lock(&op_lock);
-			op_total_bytes = total;
-			pthread_mutex_unlock(&op_lock);
-
-			op_ok = copy_tree(op_source, op_target) && remove_tree(op_source);
+	op_error = fileop_run(&op_request, op_progress, op_cancelled, NULL);
+	op_ok = op_error == 0;
+	// Partial deletion still needs pruning, but a late result cannot touch the
+	// database that replaced the card this menu originally described.
+	if (op_request.kind == FILEOP_DELETE) {
+		// The mutation has released every FD. A worker may now wait for a busy
+		// supervisor, then pin this exact card while checking the old DB epoch.
+		// A one-shot try_check would silently skip pruning on transient EAGAIN.
+		int card_fd = storage_pin_card_if(&op_request.card);
+		if (card_fd >= 0) {
+			const char *gone[] = {op_request.source};
+			library_forget_deleted_at(op_database_epoch, gone, 1);
+			close(card_fd);
 		}
-	} else {
-		uint64_t total = tree_bytes(op_source);
-		pthread_mutex_lock(&op_lock);
-		op_total_bytes = total;
-		pthread_mutex_unlock(&op_lock);
-
-		op_ok = copy_tree(op_source, op_target);
 	}
-
-	if (!gui_post(op_finished, NULL)) {
-		// The queue was full, which leaves the modal up over a finished job.
-		// Nothing else can take it down, so it is taken down from here and the
-		// list is left to the next thing that rebuilds it.
-		op_ok = false;
-		pending_op = OP_NONE;
+	if (!atomic_load(&op_closing)) {
+		atomic_store(&op_ready, true);
+		(void)gui_post(op_completion_wakeup, NULL);
 	}
 	return NULL;
 }
 
 static void op_start(void) {
+	if (!action_current()) {
+		pending_op = OP_NONE;
+		return;
+	}
+	static const fileop_kind_t kinds[] = {FILEOP_COPY, FILEOP_MOVE, FILEOP_COPY, FILEOP_DELETE, FILEOP_RENAME, FILEOP_MKDIR};
+	if (pending_op <= OP_NONE || pending_op > OP_MKDIR)
+		return;
+	if (strlen(op_source) >= sizeof(op_request.source) || strlen(op_target) >= sizeof(op_request.target)) {
+		pending_op = OP_NONE;
+		gui_notify_popup("files_too_deep");
+		return;
+	}
+	op_request = (fileop_request_t){.kind = kinds[pending_op], .card = action_card};
+	snprintf(op_request.root, sizeof(op_request.root), "%s", action_root);
+	memcpy(op_request.source, op_source, strlen(op_source) + 1);
+	memcpy(op_request.target, op_target, strlen(op_target) + 1);
+	op_database_epoch = action_database_epoch;
+	op_error = 0;
+	op_running = true;
 	pthread_mutex_lock(&op_lock);
 	op_total_bytes = 0;
 	op_done_bytes = 0;
 	pthread_mutex_unlock(&op_lock);
 
-	gui_modal_show(NULL, theme()->accent, pending_op == OP_MOVE ? "moving" : "copying", NULL);
+	gui_modal_show(NULL, theme()->accent, op_title(), NULL);
 
 	pthread_t thread;
 	if (pthread_create(&thread, NULL, op_worker, NULL) != 0) {
-		// No thread to be had: do it here rather than not at all, and accept
-		// the pause. No timer either: nothing would run it, since the interface
-		// thread is the one inside the copy.
-		op_worker(NULL);
+		// A worker changes its scheduler policy and performs blocking I/O.
+		// Running it on this caller would leave the GUI in SCHED_IDLE.
+		const char *failure = op_failure();
+		pending_op = OP_NONE;
+		op_running = false;
+		op_progress_stop();
+		gui_modal_hide();
+		gui_notify_popup(failure);
 		return;
 	}
 	pthread_detach(thread);
@@ -633,33 +592,16 @@ static void op_start(void) {
 
 static void delete_confirmed(void *user) {
 	(void)user;
-	if (!acting_on[0]) {
+	if (!acting_on[0] || !action_current())
+		return;
+	if (!action_child(acting_on, op_source, sizeof(op_source))) {
+		gui_notify_popup("files_too_deep");
 		return;
 	}
-
-	char full[PATH_MAX_LEN + NAME_MAX + 2];
-	bool named = child_path(acting_on, full, sizeof(full));
-	bool ok = named && remove_tree(full);
+	op_target[0] = '\0';
+	pending_op = OP_DELETE;
 	acting_on[0] = '\0';
-
-	// Music that was in the library leaves it with the files, at once, rather
-	// than at the next look for changes. Asked even after a failure: what did
-	// go, went. Only tracks the index holds are touched, which means only what
-	// is in the folders chosen for the scan.
-	if (named) {
-		const char *const gone[] = {full};
-		library_forget_deleted(gone, 1);
-	}
-
-	if (ok) {
-		toast_success("files_deleted");
-	} else {
-		gui_notify_popup("files_could_not_delete_it");
-	}
-	// Whatever was deleted, if it was one of the player's databases -- or the
-	// folder holding them -- the open copy has to let go of it.
-	storage_card_files_recheck();
-	rebuild();
+	op_start();
 }
 
 static void menu_delete_action(void *user) {
@@ -699,6 +641,11 @@ static void name_layer_hide(void) {
 
 static void pick_rebuild(void);
 
+static void pick_row_deleted(lv_event_t *e) {
+	if (lv_event_get_target(e) == lv_event_get_current_target(e))
+		free(lv_event_get_user_data(e));
+}
+
 static void pick_row_cb(lv_event_t *e) {
 	if (gesture_not_tap()) {
 		return;
@@ -719,6 +666,8 @@ static void pick_row_cb(lv_event_t *e) {
 // the card would bury the three folders that can.
 static void pick_rebuild(void) {
 	lv_obj_clean(pick_list);
+	if (!action_current())
+		return;
 
 	const char *slash = strrchr(pick_path, '/');
 	lv_label_set_text(pick_title, strcmp(pick_path, root_path) == 0 ? tr("file_explorer") : (slash ? slash + 1 : pick_path));
@@ -753,7 +702,8 @@ static void pick_rebuild(void) {
 	}
 	closedir(dir);
 
-	if (!names) {
+	if (!names || storage_card_try_check(&action_card)) {
+		free(names);
 		return;
 	}
 
@@ -784,8 +734,10 @@ static void pick_rebuild(void) {
 		// before the first tap can happen.
 		char *kept = strdup(names[i]);
 		if (!kept) {
+			lv_obj_delete(row);
 			break;
 		}
+		lv_obj_add_event_cb(row, pick_row_deleted, LV_EVENT_DELETE, kept);
 		lv_obj_add_event_cb(row, pick_row_cb, LV_EVENT_CLICKED, kept);
 
 		entry_art(row, &icon_folder, names[i]);
@@ -803,6 +755,7 @@ static void pick_rebuild(void) {
 
 static void pick_hide(void) {
 	lv_obj_set_hidden(pick_layer, true);
+	sx_mini_input_overlay(filespage_screen, false);
 	pending_op = OP_NONE;
 	acting_on[0] = '\0';
 }
@@ -825,19 +778,19 @@ static bool path_is_within(const char *inner, const char *outer) {
 
 static void pick_here_cb(lv_event_t *e) {
 	(void)e;
-	if (pending_op == OP_NONE || !acting_on[0]) {
+	if (pending_op == OP_NONE || !acting_on[0] || !action_current()) {
 		return;
 	}
 
 	char source[PATH_MAX_LEN + NAME_MAX + 2];
 	char target[PATH_MAX_LEN + NAME_MAX + 2];
 	int wrote = snprintf(target, sizeof(target), "%s/%s", pick_path, acting_on);
-	if (!child_path(acting_on, source, sizeof(source)) || wrote < 0 || (size_t)wrote >= sizeof(target)) {
+	if (!action_child(acting_on, source, sizeof(source)) || wrote < 0 || (size_t)wrote >= sizeof(target)) {
 		gui_notify_popup("files_too_deep");
 		return;
 	}
 
-	if (strcmp(pick_path, path) == 0) {
+	if (strcmp(pick_path, action_path) == 0) {
 		gui_notify_popup("files_it_is_already_there");
 		return;
 	}
@@ -845,26 +798,24 @@ static void pick_here_cb(lv_event_t *e) {
 		gui_notify_popup("files_move_into_itself");
 		return;
 	}
-	struct stat st;
-	if (lstat(target, &st) == 0) {
-		gui_notify_popup("files_name_taken");
-		return;
-	}
-
 	snprintf(op_source, sizeof(op_source), "%s", source);
 	snprintf(op_target, sizeof(op_target), "%s", target);
 
 	lv_obj_set_hidden(pick_layer, true);
+	sx_mini_input_overlay(filespage_screen, false);
 	acting_on[0] = '\0';
 	op_start();
 }
 
 static void pick_show(op_t op) {
+	if (!action_current())
+		return;
 	pending_op = op;
-	snprintf(pick_path, sizeof(pick_path), "%s", root_path);
+	snprintf(pick_path, sizeof(pick_path), "%s", action_root);
 	pick_rebuild();
 	lv_obj_scroll_to_y(pick_list, 0, LV_ANIM_OFF);
 	lv_obj_set_hidden(pick_layer, false);
+	sx_mini_input_overlay(filespage_screen, true);
 	lv_obj_move_foreground(pick_layer);
 }
 
@@ -893,6 +844,8 @@ static void menu_rename_action(void *user) {
 
 static void newdir_btn_cb(lv_event_t *e) {
 	(void)e;
+	if (!capture_action())
+		return;
 	acting_on[0] = '\0';
 	naming_new_folder = true;
 	name_layer_show("files_new_folder", NULL);
@@ -907,47 +860,21 @@ static bool name_is_usable(const char *name) {
 
 static void name_accept_cb(lv_event_t *e) {
 	(void)e;
-
+	if (!action_current())
+		return;
 	const char *name = lv_textarea_get_text(name_field);
-	if (!name_is_usable(name)) {
+	if (!name_is_usable(name) || !action_child(name, op_target, sizeof(op_target))) {
 		gui_notify_popup("files_name_invalid");
 		return;
 	}
-
-	char target[PATH_MAX_LEN + NAME_MAX + 2];
-	if (!child_path(name, target, sizeof(target))) {
-		gui_notify_popup("files_name_invalid");
+	pending_op = naming_new_folder ? OP_MKDIR : OP_RENAME;
+	op_source[0] = '\0';
+	if (!naming_new_folder && !action_child(acting_on, op_source, sizeof(op_source))) {
+		gui_notify_popup("files_too_deep");
 		return;
 	}
-
-	// Neither a rename nor a new folder may quietly take the place of something
-	// that is already there, which for a rename would be a file deleted by
-	// typing.
-	struct stat st;
-	if (lstat(target, &st) == 0) {
-		gui_notify_popup("files_name_taken");
-		return;
-	}
-
-	bool ok;
-	if (naming_new_folder) {
-		ok = mkdir(target, 0777) == 0;
-		if (!ok) {
-			gui_notify_popup("files_create_failed");
-		}
-	} else {
-		char from[PATH_MAX_LEN + NAME_MAX + 2];
-		ok = child_path(acting_on, from, sizeof(from)) && rename(from, target) == 0;
-		if (!ok) {
-			gui_notify_popup("files_could_not_rename_it");
-		}
-	}
-
 	name_layer_hide();
-	if (ok) {
-		storage_card_files_recheck(); // a renamed database is a missing one
-		rebuild();
-	}
+	op_start();
 }
 
 static void name_cancel_cb(lv_event_t *e) {
@@ -965,6 +892,12 @@ static void entry_menu_cb(lv_event_t *e) {
 	}
 	int index = (int)(intptr_t)lv_event_get_user_data(e);
 	if (index < 0 || index >= entry_count) {
+		return;
+	}
+	if (!capture_action())
+		return;
+	if (strlen(entries[index].name) >= sizeof(acting_on)) {
+		gui_notify_popup("files_too_deep");
 		return;
 	}
 	snprintf(acting_on, sizeof(acting_on), "%s", entries[index].name);
@@ -1199,10 +1132,19 @@ static void view_menu_cb(lv_event_t *e) {
 
 static void loaded_cb(lv_event_t *e) {
 	(void)e;
+	// Another page may have used the shared overlay slot while this picker
+	// stayed open behind Home. Naming forms are covered by keyboard visibility.
+	sx_mini_input_overlay(filespage_screen, pick_layer && !lv_obj_is_hidden(pick_layer));
 	rebuild();
 }
 
 void filespage_open(void) {
+	storage_card_token_t opening;
+	char root[PATH_MAX_LEN];
+	// Explicit entry is a new browse intent. Existing dialogs/jobs retain the
+	// action snapshot they captured before any card replacement.
+	if (storage_card_try_admit(&opening, root, sizeof(root)))
+		snprintf(root_path, sizeof(root_path), "%s", root);
 	snprintf(path, sizeof(path), "%s", root_path);
 	switch_screen(filespage_screen);
 }

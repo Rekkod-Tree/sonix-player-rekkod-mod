@@ -49,6 +49,7 @@
 #include "src/system/library/library.h"
 #include "src/system/library/playlists.h"
 #include "src/system/playback/device_state.h"
+#include "src/system/playback/playhistory.h"
 #include "src/system/remote/dlna.h"
 #include "src/system/streaming/cardimport.h"
 #include "src/system/streaming/podcastcache.h"
@@ -480,6 +481,10 @@ static const char *pick_sd_device(const storage_config_t *storage_cfg) {
 // if need be).
 static const char *pick_sd_root(const storage_config_t *storage_cfg) {
 	size_t count = sizeof(SD_ROOT_CANDIDATES) / sizeof(SD_ROOT_CANDIDATES[0]);
+	// An unmanaged, explicit root belongs to the caller (including the SDL
+	// simulator). A different mounted device must not override that choice.
+	if (storage_cfg->mount_point && storage_cfg->mount_point[0] && !storage_cfg->manage_mount)
+		return storage_cfg->mount_point;
 
 	if (storage_cfg->mount_point && is_mounted(storage_cfg->mount_point)) {
 		return storage_cfg->mount_point;
@@ -860,6 +865,8 @@ static void card_databases_detach(void) {
 
 	logging_suspend_for_usb(); // closes the on-card log file
 	btlog_card_release();
+	library_prepare_close();
+	playhistory_flush();
 	library_close();
 	audiobookdb_close();
 	radio_store_close();

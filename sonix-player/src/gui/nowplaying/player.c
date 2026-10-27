@@ -58,6 +58,7 @@
 #include "src/system/core/lang.h"
 #include "src/system/core/utils.h"
 #include "src/system/device/led.h"
+#include "src/system/device/perfstat.h"
 #include "src/system/device/power.h"
 #include "src/system/gearboy/gearboy.h"
 #include "src/system/library/covertone.h"
@@ -2492,6 +2493,7 @@ static void update_service_badge(void);
 // device state and resets the per-track length cache. Used both when the user
 // picks a file and when playback auto-advances to a new track.
 static void refresh_now_playing(void) {
+	perfstat_phase("refresh.begin");
 	current_total_length = 0; // unknown until the playback thread reports it
 
 	// The library lists carry an accent mark on the playing track (and on the
@@ -2510,6 +2512,7 @@ static void refresh_now_playing(void) {
 	device_state_get(&state);
 
 	// The 2.0 palette is drawn from the cover's hue (sx_palette.h): a new
+	perfstat_phase("refresh.listeners_state_done");
 	// album recolours the interface here, before anything below paints.
 	if (state.live) {
 		sx_palette_track_changed(NULL, state.metadata.title);
@@ -2522,6 +2525,7 @@ static void refresh_now_playing(void) {
 		sx_mini_set_track(state.current_file[0] ? shown : NULL, state.current_file[0] ? state.current_file : NULL, state.metadata.artist, false);
 	}
 	sx_mini_set_playing(state.status == AUDIO_STATUS_PLAYING);
+	perfstat_phase("refresh.palette_mini_done");
 	// The album the track belongs to, for its thumbnails (the mini player's
 	// 56 px, the 240 px that stands in for the artwork), and the page's two
 	// gradients in its colour -- made again only when the colour moved.
@@ -2529,10 +2533,12 @@ static void refresh_now_playing(void) {
 	np_paint_backgrounds();
 
 	apply_live_mode(state.live);
+	perfstat_phase("refresh.album_background_done");
 	apply_connecting();
 	// What comes next, and the chain, for the new track.
 	upnext_update();
 	np_chain_refresh(&state);
+	perfstat_phase("refresh.upnext_chain_done");
 	// Before anything is drawn: which arrangement this source gets decides
 	// where the title goes and what colour everything is.
 	update_layout(&state);
@@ -2542,6 +2548,7 @@ static void refresh_now_playing(void) {
 	// a song.
 	apply_audiobook_mode(!state.live && audiobook_is_playing(), !state.live && podcastcache_is_episode(state.current_file));
 	chapters_refresh();
+	perfstat_phase("refresh.layout_chapters_done");
 
 	if (state.live) {
 		// The station on top, what it says is on air underneath -- the same
@@ -2569,10 +2576,12 @@ static void refresh_now_playing(void) {
 	update_fav_button();
 	update_format_label(&state);
 	update_service_badge();
+	perfstat_phase("refresh.texts_done");
 
 	lyrics_request(&state);
 
 	refresh_cover(file);
+	perfstat_phase("refresh.end");
 }
 
 // The parts of the now-playing display a live stream changes while it runs:
@@ -3082,6 +3091,7 @@ static void track_end_hook(void) { gui_post_latest(track_end_async, NULL); }
 // single point that keeps the play/pause button and the progress bar from
 // going stale once a track finishes on its own.
 static void update_progress(void) {
+	perfstat_phase("update.begin");
 	// Auto-advance or loop the folder when the track has played through.
 	if (device_state_take_completion()) {
 		handle_track_finished();
@@ -3098,10 +3108,12 @@ static void update_progress(void) {
 	bool heard_ready = audio_get_listening_progress(&heard_position, &heard_length, &heard_serial);
 	if (heard_ready && !state.live && state.status == AUDIO_STATUS_PLAYING) {
 		playhistory_heard(state.current_file);
+		perfstat_phase("update.history_done");
 		playbackplace_heard(state.current_file);
 	} else
 		playhistory_poll();
 	audiobook_listen_progress(heard_position, heard_length, heard_ready && !state.live && state.status == AUDIO_STATUS_PLAYING, heard_serial);
+	perfstat_phase("update.place_book_done");
 
 	// The live source moves under the player: the station's own name comes
 	// with the connection, the on-air title arrives later and keeps changing,
@@ -3182,6 +3194,7 @@ static void update_progress(void) {
 	apply_audiobook_mode(!state.live && audiobook_is_playing(), !state.live && podcastcache_is_episode(state.current_file));
 	update_format_label(&state); // the rate/bits settle shortly after the start
 	np_poll(&state);			 // 2.0: "Up next", the chain, sources outside the queue
+	perfstat_phase("update.presentation_done");
 
 	// The status LED follows playback promptly from here (the battery poll
 	// only comes round once a minute). Only writes when the colour changes.
@@ -3222,6 +3235,7 @@ static void update_progress(void) {
 	// the power menu and the automatic shutdown have to do the same thing on
 	// their way out, and neither of them comes through here.
 	device_state_remember_note();
+	perfstat_phase("update.end");
 }
 
 static void play_btn_event_cb(lv_event_t *e) {
@@ -3788,8 +3802,16 @@ static void sheet_move_to(int y, bool animate) {
 		lv_obj_set_y(player_screen, y);
 		back_btn_translate_y(y >= sheet_height ? 0 : y);
 		topbar_hold_backdrop_blur(y != 0); // a drag: as in sheet_anim_y_cb
-		if (!screensaver_is_visible())
-			sx_artview_opaque_overlay(y == 0 && sheet_open ? player_screen : NULL);
+		if (!screensaver_is_visible()) {
+			if (y > 0 && y < sheet_height)
+				sx_artview_overlay_will_show(player_screen);
+			else
+				sx_artview_opaque_overlay(y == 0 && sheet_open ? player_screen : NULL);
+		}
+		return;
+	}
+	if (lv_obj_get_y(player_screen) == y) {
+		sheet_artwork_opened(NULL);
 		return;
 	}
 
@@ -3860,11 +3882,14 @@ static void sheet_x_done(lv_anim_t *a) {
 	sheet_x_cb(player_screen, 0);
 	if (sheet_side_close)
 		player_sheet_close(false);
-	else if (!bar_always)
-		topbar_set_hidden(true);
+	else {
+		sheet_artwork_opened(NULL);
+		if (!bar_always)
+			topbar_set_hidden(true);
+	}
 }
 
-void player_sheet_open(bool animate) {
+static void player_sheet_open_at(int y, bool animate) {
 	// Nothing to show while another mode owns the sound: the sheet is about a
 	// track this player is playing, and in Bluetooth receiver mode the track is
 	// on somebody else's machine. Refusing to open is the honest answer -- an
@@ -3915,14 +3940,19 @@ void player_sheet_open(bool animate) {
 		topbar_set_hidden(true);
 	}
 
-	sx_artview_overlay_will_show(player_screen);
-	sheet_move_to(0, animate);
+	if (!screensaver_is_visible())
+		sx_artview_overlay_will_show(player_screen);
+	sheet_move_to(y, animate);
 }
+
+void player_sheet_open(bool animate) { player_sheet_open_at(0, animate); }
 
 static void sheet_hidden_anim_ready_cb(lv_anim_t *a) {
 	(void)a;
 	if (!sheet_open) {
 		lv_obj_set_hidden(player_screen, true);
+		if (!screensaver_is_visible())
+			sx_artview_opaque_overlay(NULL);
 		sx_artview_refresh();
 	}
 	// Whatever page the close landed on, the chevron's visibility is settled
@@ -3937,8 +3967,12 @@ void player_sheet_close(bool animate) {
 	sheet_x_cb(player_screen, 0);
 	bool was_open = sheet_open;
 	sheet_open = false;
-	if (!screensaver_is_visible())
-		sx_artview_opaque_overlay(NULL);
+	if (!screensaver_is_visible()) {
+		if (animate)
+			sx_artview_overlay_will_show(player_screen);
+		else
+			sx_artview_opaque_overlay(NULL);
+	}
 	chain_set_open(false); // the block is the player's, and does not wait for it
 	if (smooth_timer) {
 		lv_timer_pause(smooth_timer); // nothing of it shows under the page
@@ -3988,9 +4022,10 @@ bool player_sheet_pull_begin(int visible_height) {
 	if (sheet_open || sx_sheet_is_open() || quickpanel_is_open() || coverflow_drag_active() || btreceiver_is_active())
 		return false;
 	sheet_pull_origin = sheet_height - visible_height;
-	player_sheet_open(false);
+	// Prepare at the actual pull position, never briefly make it opaque and
+	// evict the underlying page's artwork only to recreate it immediately.
+	player_sheet_open_at(sheet_pull_origin, false);
 	sheet_pull_active = true;
-	sheet_move_to(sheet_pull_origin, false);
 	topbar_set_hidden(false);
 	return true;
 }
@@ -4015,7 +4050,8 @@ bool player_sheet_edge_back_allowed(void) { return sheet_open && !sheet_pull_act
 void player_sheet_edge_back_begin(void) {
 	sheet_side_active = true;
 	topbar_set_hidden(false);
-	sx_artview_opaque_overlay(NULL);
+	if (!screensaver_is_visible())
+		sx_artview_overlay_will_show(player_screen);
 }
 
 void player_sheet_edge_back_update(int dx) {
@@ -4306,10 +4342,10 @@ static void np_paint_backgrounds(void) {
 	if (!player_screen || !player_menu)
 		return;
 	const sx_palette_t *pal = sx_pal();
-	lv_obj_set_style_bg_color(player_screen, pal->np_bg, 0);
-	lv_obj_set_style_bg_color(player_menu, pal->np_bg, 0);
+	sx_set_bg_color(player_screen, pal->np_bg);
+	sx_set_bg_color(player_menu, pal->np_bg);
 	if (cover_panel)
-		lv_obj_set_style_bg_color(cover_panel, pal->np_bg, 0);
+		sx_set_bg_color(cover_panel, pal->np_bg);
 	if (upnext_lead)
 		lv_obj_set_style_text_color(upnext_lead, pal->np_text2, 0);
 	cover_art_layout();
@@ -4605,6 +4641,8 @@ static void cover_slide_finish(int from) {
 		return;
 	lv_anim_delete(cover_art, cover_slide_x);
 	cover_slide_x(cover_art, from);
+	if (!from)
+		return; // No movement: do not run a zero-distance settle animation.
 	lv_anim_t a;
 	lv_anim_init(&a);
 	lv_anim_set_var(&a, cover_art);

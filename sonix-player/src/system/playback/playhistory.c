@@ -7,11 +7,12 @@
 #include <time.h>
 
 #include "src/system/audio/audio.h"
+#include "src/system/core/utils.h"
 #include "src/system/device/clock.h"
 #include "src/system/library/library.h"
 
-// Only deferred records consume a queue. One clean current event stays available
-// for lazy metadata; clean departed events are freed. No worker or timer is added.
+// One bounded queue serves both immediate history reads and background saves.
+// The writer starts only when needed and sleeps without a periodic timer.
 #define DEFERRED_MAX 64
 #define FLUSH_BATCH 4
 #define WRITE_RETRY_MS 30000
@@ -35,6 +36,11 @@ static unsigned queued, revision, epoch;
 static long long token = -1;
 static long long retry_at;
 static bool write_failed, dropped;
+static pthread_t writer;
+static pthread_cond_t writer_wakeup = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t writer_idle = PTHREAD_COND_INITIALIZER;
+static bool writer_started, writer_requested, writer_busy, writer_stopping;
+static unsigned writer_saved;
 // Keep published temporary IDs usable after the deferred nodes are freed.
 static struct {
 	long long token, id;
@@ -77,13 +83,15 @@ static void sync_epoch_locked(void) {
 	revision++;
 }
 
-// Lock order is live_lock -> db_lock; no library operation calls back here.
-// Foreign transactions are only inspected, never joined or rolled back.
-static void flush_locked(void) {
+// The writer owns one immutable snapshot while SQLite works. Never hold the
+// live/history lock across a card write: playback and metadata must stay usable.
+// Epoch checks inside the library keep an old save out of a newly opened card.
+static unsigned flush_batch_locked(void) {
 	sync_epoch_locked();
 	if (!epoch || (retry_at && monotonic_ms() < retry_at))
-		return;
+		return 0;
 	unsigned budget = FLUSH_BATCH;
+	unsigned saved = 0;
 	history_pending_t **link = &first;
 	while (*link && budget) {
 		history_pending_t *entry = *link;
@@ -95,15 +103,30 @@ static void flush_locked(void) {
 			link = &entry->next;
 			continue;
 		}
-		long long result = entry->id > 0 ? library_history_update_at(entry->epoch, entry->id, entry->path, entry->title, entry->artist) : library_history_record_at(entry->epoch, entry->path, entry->title, entry->artist, entry->when);
+		history_pending_t writing = *entry;
+		pthread_mutex_unlock(&live_lock);
+		long long result = writing.id > 0 ? library_history_update_at(writing.epoch, writing.id, writing.path, writing.title, writing.artist) : library_history_record_at(writing.epoch, writing.path, writing.title, writing.artist, writing.when);
+		pthread_mutex_lock(&live_lock);
+		budget--;
+		sync_epoch_locked();
+		// The old node may have been evicted or the whole card replaced while
+		// the lock was released. Find it again; never retain a borrowed pointer.
+		link = &first;
+		while (*link && (*link)->token != writing.token)
+			link = &(*link)->next;
+		if (!*link || epoch != writing.epoch) {
+			link = &first;
+			continue;
+		}
+		entry = *link;
 		if (result < 0)
-			return; // A later existing player/UI event retries this cheap guard.
+			return saved; // A foreign transaction is retried by an existing poll.
 		if (!result) {
 			if (!write_failed)
 				fprintf(stderr, "history: save deferred after a storage failure\n");
 			write_failed = true;
 			retry_at = monotonic_ms() + WRITE_RETRY_MS;
-			return;
+			return saved;
 		}
 		if (entry->id <= 0) {
 			entry->id = result;
@@ -113,16 +136,95 @@ static void flush_locked(void) {
 				alias_next = (alias_next + 1) % DEFERRED_MAX;
 			}
 		}
-		entry->dirty = false;
+		// Lazy metadata may have arrived during the write. Keep that newer
+		// version dirty, but retain the inserted id so it is updated, not added.
+		entry->dirty = strcmp(entry->title, writing.title) || strcmp(entry->artist, writing.artist);
 		write_failed = false;
 		retry_at = 0;
 		revision++;
-		budget--;
-		if (entry != live.event)
+		saved++;
+		if (entry != live.event && !entry->dirty)
 			unlink_locked(link);
 		else
 			link = &entry->next;
 	}
+	return saved;
+}
+
+static bool dirty_locked(void) {
+	bool dirty = false;
+	history_pending_t **link = &first;
+	while (*link) {
+		history_pending_t *entry = *link;
+		if (!entry->dirty && entry->id > 0 && entry != live.event) {
+			unlink_locked(link);
+			continue;
+		}
+		dirty |= entry->dirty || entry->id <= 0;
+		link = &entry->next;
+	}
+	return dirty;
+}
+
+static void *history_writer(void *unused) {
+	(void)unused;
+	thread_be_low_priority("history save");
+	pthread_mutex_lock(&live_lock);
+	for (;;) {
+		while (!writer_requested && !writer_stopping)
+			pthread_cond_wait(&writer_wakeup, &live_lock);
+		if (writer_stopping)
+			break;
+		writer_requested = false;
+		writer_busy = true;
+		writer_saved = flush_batch_locked();
+		writer_busy = false;
+		pthread_cond_broadcast(&writer_idle);
+	}
+	pthread_mutex_unlock(&live_lock);
+	return NULL;
+}
+
+static void request_flush_locked(void) {
+	sync_epoch_locked();
+	if (writer_stopping || writer_busy || writer_requested || !epoch || !dirty_locked() || (retry_at && monotonic_ms() < retry_at))
+		return;
+	if (!writer_started) {
+		if (pthread_create(&writer, NULL, history_writer, NULL) != 0) {
+			write_failed = true;
+			retry_at = monotonic_ms() + WRITE_RETRY_MS;
+			return; // Never perform the write inline on a failed worker start.
+		}
+		writer_started = true;
+	}
+	writer_requested = true;
+	pthread_cond_signal(&writer_wakeup);
+}
+
+// A consistency barrier for an explicit history read or storage/power exit.
+// Ordinary playback only requests a write and never waits for this worker.
+void playhistory_flush(void) {
+	pthread_mutex_lock(&live_lock);
+	for (unsigned n = 0; n <= DEFERRED_MAX / FLUSH_BATCH; n++) {
+		request_flush_locked();
+		bool requested = writer_busy || writer_requested;
+		while (writer_busy || writer_requested)
+			pthread_cond_wait(&writer_idle, &live_lock);
+		if (!requested || !writer_saved || !dirty_locked())
+			break;
+	}
+	pthread_mutex_unlock(&live_lock);
+}
+
+void playhistory_shutdown(void) {
+	playhistory_flush();
+	pthread_mutex_lock(&live_lock);
+	writer_stopping = true;
+	bool started = writer_started;
+	pthread_cond_signal(&writer_wakeup);
+	pthread_mutex_unlock(&live_lock);
+	if (started)
+		pthread_join(writer, NULL);
 }
 
 static void heard_locked(const char *path) {
@@ -184,7 +286,7 @@ void playhistory_started(const char *path, const char *title, const char *artist
 	snprintf(live.title, sizeof(live.title), "%s", shown);
 	snprintf(live.artist, sizeof(live.artist), "%s", artist ? artist : "");
 	revision++;
-	flush_locked();
+	request_flush_locked();
 	pthread_mutex_unlock(&live_lock);
 }
 
@@ -197,13 +299,13 @@ void playhistory_resumed(void) {
 void playhistory_heard(const char *path) {
 	pthread_mutex_lock(&live_lock);
 	heard_locked(path);
-	flush_locked();
+	request_flush_locked();
 	pthread_mutex_unlock(&live_lock);
 }
 
 void playhistory_poll(void) {
 	pthread_mutex_lock(&live_lock);
-	flush_locked();
+	request_flush_locked();
 	pthread_mutex_unlock(&live_lock);
 }
 
@@ -249,7 +351,7 @@ void playhistory_left(void) {
 	live.active = false;
 	live.event = NULL;
 	revision++;
-	flush_locked();
+	request_flush_locked();
 	pthread_mutex_unlock(&live_lock);
 }
 
@@ -283,8 +385,13 @@ int playhistory_items(library_history_item_t **out) {
 	if (!out)
 		return 0;
 	*out = NULL;
+	// Preserve a coherent DB + pending view even if an INSERT just finished
+	// and its temporary id has not yet been acknowledged under live_lock.
+	playhistory_flush();
 	pthread_mutex_lock(&live_lock);
-	flush_locked();
+	while (writer_busy || writer_requested)
+		pthread_cond_wait(&writer_idle, &live_lock);
+	sync_epoch_locked();
 	int count = library_history_items(out);
 	unsigned pending = 0;
 	for (history_pending_t *entry = first; entry; entry = entry->next)

@@ -205,6 +205,14 @@ void sx_set_src(lv_obj_t *img, const void *src) {
 	}
 }
 
+void sx_set_bg_color(lv_obj_t *obj, lv_color_t color) {
+	if (!obj)
+		return;
+	lv_style_value_t value;
+	if (lv_obj_get_local_style_prop(obj, LV_STYLE_BG_COLOR, &value, 0) != LV_STYLE_RES_FOUND || !lv_color_eq(value.color, color))
+		lv_obj_set_style_bg_color(obj, color, 0);
+}
+
 void sx_set_recolor(lv_obj_t *img, lv_color_t color) {
 	if (!img) {
 		return;

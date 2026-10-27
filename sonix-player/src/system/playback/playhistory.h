@@ -9,7 +9,7 @@
 // A real first PCM block confirms a listening event, independently of play
 // counts. Seek/pause/resume keep the event; leaving and starting again creates
 // another. Deferred writes are bounded and tied to the original database epoch.
-// Safe from workers too; no new worker or periodic timer belongs to this module.
+// Safe from workers too. One lazy writer sleeps when idle; no periodic timer.
 
 // A track has been loaded. `title` and `artist` are what it is to be shown by;
 // `kept_out` says it is not to go into the history. With `waiting`, it only
@@ -24,6 +24,11 @@ void playhistory_heard(const char *path);
 long long playhistory_current_id(void);
 unsigned playhistory_revision(void);
 void playhistory_poll(void);
+// Wait for accepted saves on explicit history reads and normal storage/power
+// exits. Playback callbacks use poll/heard and never wait for this barrier.
+void playhistory_flush(void);
+// Main-thread process exit only; flushes and joins the lazy writer.
+void playhistory_shutdown(void);
 bool playhistory_unsaved(void);
 // The bounded persistent history plus not-yet-saved events, oldest first.
 int playhistory_items(library_history_item_t **out);

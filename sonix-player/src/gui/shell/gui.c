@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/eventfd.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "src/gui/audio/dacpage.h"
@@ -103,7 +104,7 @@
 #include "lvgl/src/display/lv_display_private.h"
 #include "src/system/core/lang.h"
 
-// GUI-thread-only, process-lifetime completion ownership. The three modules
+// GUI-thread-only, process-lifetime completion ownership. The modules
 // have static locks/default-null jobs, so idle service does not build lazy pages.
 static bool completions_closing;
 
@@ -113,6 +114,8 @@ void gui_service_completions(void) {
 	gearboypage_service_completion();
 	ebookcovers_service_completion();
 	peqautoeq_service_completion();
+	filespage_service_completion();
+	playlistpage_service_completion();
 }
 
 void gui_shutdown_completions(void) {
@@ -122,6 +125,8 @@ void gui_shutdown_completions(void) {
 	gearboypage_shutdown_completions();
 	ebookcovers_shutdown_completions();
 	peqautoeq_shutdown_completions();
+	filespage_shutdown_completions();
+	playlistpage_shutdown_completions();
 }
 
 // Long enough for a whole sentence: a notice truncated mid-word is a puzzle
@@ -158,7 +163,20 @@ static int post_head;
 static int post_count;
 #define GUI_LATEST_MAX 4
 static gui_post_t post_latest[GUI_LATEST_MAX];
+static int post_latest_next;
+static bool post_prefer_latest = true;
 static lv_timer_t *post_timer;
+
+// Leave time for input and rendering even when callbacks keep posting work.
+// A callback is not preemptible: the elapsed budget is checked after each one.
+#define POST_DRAIN_MAX 8
+#define POST_DRAIN_US 4000
+
+static uint64_t post_clock_us(void) {
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	return (uint64_t)now.tv_sec * 1000000 + now.tv_nsec / 1000;
+}
 
 // ---------------------------------------------------------------------------
 // The doorbell
@@ -280,32 +298,53 @@ static void post_drain_cb(lv_timer_t *timer) {
 		(void)ignored;
 	}
 
-	for (;;) {
+	uint64_t started = post_clock_us();
+	for (int ran = 0; ran < POST_DRAIN_MAX; ran++) {
 		pthread_mutex_lock(&post_lock);
-		gui_post_t latest = {0};
+		int latest = -1;
 		for (int i = 0; i < GUI_LATEST_MAX; i++) {
-			if (post_latest[i].cb) {
-				latest = post_latest[i];
-				post_latest[i] = (gui_post_t){0};
+			int slot = (post_latest_next + i) % GUI_LATEST_MAX;
+			if (post_latest[slot].cb) {
+				latest = slot;
 				break;
 			}
 		}
-		if (latest.cb) {
-			pthread_mutex_unlock(&post_lock);
-			latest.cb(latest.user);
-			continue;
-		}
-		if (post_count == 0) {
+		if (latest < 0 && post_count == 0) {
 			pthread_mutex_unlock(&post_lock);
 			return;
 		}
-		gui_post_t entry = post_ring[post_head];
-		post_head = (post_head + 1) % GUI_POST_MAX;
-		post_count--;
+		gui_post_t entry;
+		if (latest >= 0 && (post_prefer_latest || !post_count)) {
+			entry = post_latest[latest];
+			post_latest[latest] = (gui_post_t){0};
+			post_latest_next = (latest + 1) % GUI_LATEST_MAX;
+			post_prefer_latest = false;
+		} else {
+			entry = post_ring[post_head];
+			post_head = (post_head + 1) % GUI_POST_MAX;
+			post_count--;
+			post_prefer_latest = true;
+		}
 		pthread_mutex_unlock(&post_lock);
 
 		// Outside the lock: the callback may post in turn.
 		entry.cb(entry.user);
+		if (post_clock_us() - started >= POST_DRAIN_US)
+			break;
+	}
+
+	// Rearm the doorbell, not the running LVGL timer. The next main-loop
+	// pass services input/render timers before another bounded batch. Without
+	// eventfd the existing fallback timer services the retained tail.
+	pthread_mutex_lock(&post_lock);
+	bool pending = post_count > 0;
+	for (int i = 0; i < GUI_LATEST_MAX; i++)
+		pending |= post_latest[i].cb != NULL;
+	pthread_mutex_unlock(&post_lock);
+	if (pending && post_wake_fd >= 0) {
+		uint64_t one = 1;
+		ssize_t ignored = write(post_wake_fd, &one, sizeof(one));
+		(void)ignored;
 	}
 }
 

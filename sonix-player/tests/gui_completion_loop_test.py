@@ -56,7 +56,8 @@ def main():
             results.append({'case':case,'passed':True,'stdout':run.stdout,'stderr':run.stderr})
         mutants=[('missing-direct-service',source.replace('\t\tgui_service_completions();','\t\t(void)gui_service_completions;',1),'blank-paused-noeventfd'),
                  ('skip-service-blank',source.replace('\t\tgui_service_completions();','\t\tif(lcd_on) gui_service_completions();',1),'blank-paused-noeventfd'),
-                 ('missing-shutdown',source.replace('\tgui_shutdown_completions();','\t(void)gui_shutdown_completions;',1),'zero-loop-exit')]
+                 ('missing-shutdown',source.replace('\tgui_shutdown_completions();','\t(void)gui_shutdown_completions;',1),'zero-loop-exit'),
+                 ('missing-checkpoint-shutdown',source.replace('\tlibrary_checkpoint_shutdown();','\t(void)library_checkpoint_shutdown;',1),'zero-loop-exit')]
         for label,mutant,case in mutants:
             if mutant==source:raise RuntimeError('Missing mutation anchor: '+label)
             file=temp/(label+'.c');file.write_text(mutant, encoding='utf-8', newline='\n');exe=temp/label

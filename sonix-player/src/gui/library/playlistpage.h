@@ -37,4 +37,8 @@ void playlistpage_add_favourites(const char *const *paths, int count);
 // False when the playlist could not be made or the work not started.
 bool playlistpage_add_tracks_to(const char *name, const char *const *paths, int count);
 
+// Bounded terminal delivery; called by the existing GUI loop and exit hook.
+void playlistpage_service_completion(void);
+void playlistpage_shutdown_completions(void);
+
 #endif /* PLAYLISTPAGE_H */

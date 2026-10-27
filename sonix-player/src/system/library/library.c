@@ -391,6 +391,9 @@ typedef enum {
 static unsigned generation[GEN_COUNT] = {1, 1, 1};
 static atomic_uint database_epoch = 1;
 static atomic_bool database_online;
+static atomic_bool database_preparing_close;
+static pthread_mutex_t database_prepare_lock = PTHREAD_MUTEX_INITIALIZER;
+static atomic_uint checkpoint_queue_generation = 1;
 static unsigned playlist_stage_serial, playlist_stage_active;
 static atomic_bool playlist_stage_busy;
 static library_playlist_writer_t *playlist_writer_active;
@@ -2050,6 +2053,7 @@ bool library_open(const char *db_path) {
 	pthread_mutex_lock(&db_lock);
 	index_features_check();
 	links_check();
+	atomic_store(&database_preparing_close, false);
 	bump_all_generations(); // a different card is a different set of row ids
 	pthread_mutex_unlock(&db_lock);
 
@@ -2073,7 +2077,13 @@ static void library_scan_stop_and_wait(void);
 static void finalize_statements(void);
 static void finalize_known(void);
 
-void library_close(void) {
+void library_prepare_close(void) {
+	// Stop new long-lived writers before asking their existing owners to leave.
+	// Keep the epoch available for the caller's final accepted history drain.
+	pthread_mutex_lock(&database_prepare_lock);
+	pthread_mutex_lock(&rules_lock);
+	atomic_store(&database_preparing_close, true);
+	pthread_mutex_unlock(&rules_lock);
 	// Waits, rather than just asking: a scan still in flight owns prepared
 	// statements, sqlite3_close() then answers SQLITE_BUSY and leaves the file
 	// open -- and on this device an open file on the card makes the unmount
@@ -2083,13 +2093,27 @@ void library_close(void) {
 	// would be writing to a handle that had just been closed.
 	backfill_stop_and_wait();
 	sortkeys_ready = false;
+	pthread_mutex_lock(&db_lock);
+	playlist_writer_close_locked();
+	playlist_stage_active = 0;
+	atomic_store(&playlist_stage_busy, false);
+	pthread_mutex_unlock(&db_lock);
+	pthread_mutex_unlock(&database_prepare_lock);
+}
+
+void library_close(void) {
+	library_prepare_close();
+	// Accepted application history has been drained by normal close callers.
+	// A replaced/deleted DB deliberately discards its old application owner.
+	atomic_store(&database_online, false);
 	// And the covers' worker, which reads the index and writes files beside
 	// it: an open file on the card is an unmount that fails.
 	covertone_detach();
-
+	// No foreign scan/import transaction should remain when the final pending
+	// checkpoint needs its own confirmed commit.
+	library_checkpoint_shutdown();
 	pthread_mutex_lock(&db_lock);
 	if (db) {
-		playlist_writer_close_locked();
 		finalize_statements();
 		finalize_known();
 		int rc = sqlite3_close(db);
@@ -2189,6 +2213,10 @@ static bool replace_damaged(void) {
 	sortkeys_ready = false;
 
 	pthread_mutex_lock(&db_lock);
+	if (atomic_load(&database_preparing_close)) {
+		pthread_mutex_unlock(&db_lock);
+		return false;
+	}
 	playlist_writer_close_locked();
 	finalize_statements();
 	finalize_known();
@@ -2969,7 +2997,7 @@ int library_history_items(library_history_item_t **out) {
 	pthread_mutex_lock(&db_lock);
 	// A recovered index can become available after the initial open. Retry only
 	// when a real local history snapshot is requested, never from an idle timer.
-	if (db && library_database_epoch()) {
+	if (db && library_database_epoch() && !atomic_load(&database_preparing_close)) {
 		history_import_legacy();
 	}
 	int count = 0;
@@ -7216,12 +7244,14 @@ static void row_file(const char *path, char *out, size_t size) {
 	snprintf(out, size, "%.*s", (int)(len < size ? len : size - 1), path);
 }
 
-int library_forget_deleted(const char *const *paths, int count) {
-	if (!paths || count <= 0) {
+int library_forget_deleted(const char *const *paths, int count) { return library_forget_deleted_at(library_database_epoch(), paths, count); }
+
+int library_forget_deleted_at(unsigned epoch, const char *const *paths, int count) {
+	if (!epoch || !paths || count <= 0) {
 		return 0;
 	}
 	pthread_mutex_lock(&db_lock);
-	if (!db) {
+	if (!db || epoch != database_epoch) {
 		pthread_mutex_unlock(&db_lock);
 		return 0;
 	}
@@ -7251,7 +7281,8 @@ int library_forget_deleted(const char *const *paths, int count) {
 			char file[600];
 			struct stat st;
 			row_file(path ? path : "", file, sizeof(file));
-			if (!file[0] || stat(file, &st) == 0) {
+			// An I/O/access error is not proof that the user's file was deleted.
+			if (!file[0] || stat(file, &st) == 0 || (errno != ENOENT && errno != ENOTDIR)) {
 				continue;
 			}
 			sqlite3_reset(del);
@@ -7287,7 +7318,7 @@ int library_forget_deleted(const char *const *paths, int count) {
 	};
 	for (int i = 0; i < count; i++) {
 		struct stat st;
-		if (!paths[i] || !paths[i][0] || stat(paths[i], &st) == 0) {
+		if (!paths[i] || !paths[i][0] || stat(paths[i], &st) == 0 || (errno != ENOENT && errno != ENOTDIR)) {
 			continue;
 		}
 		for (size_t q = 0; q < sizeof(UNDER) / sizeof(UNDER[0]); q++) {
@@ -7879,7 +7910,11 @@ static void *scan_thread_func(void *arg) {
 }
 
 static bool scan_launch(const char *root, scan_mode_t mode) {
-	if (!db || scan_running || ((!root || !root[0]) && mode != SCAN_REORGANIZE)) {
+	// The close gate and publication of a new scanner share this lock, so
+	// prepare_close cannot miss a launch still filling in its initial state.
+	pthread_mutex_lock(&rules_lock);
+	if (atomic_load(&database_preparing_close) || !db || scan_running || ((!root || !root[0]) && mode != SCAN_REORGANIZE)) {
+		pthread_mutex_unlock(&rules_lock);
 		return false;
 	}
 
@@ -7911,14 +7946,18 @@ static bool scan_launch(const char *root, scan_mode_t mode) {
 	if (pthread_create(&scan_thread, NULL, scan_thread_func, NULL) != 0) {
 		scan_running = false;
 		fprintf(stderr, "library: could not start the scan thread\n");
+		pthread_mutex_unlock(&rules_lock);
 		return false;
 	}
 
 	pthread_detach(scan_thread);
+	pthread_mutex_unlock(&rules_lock);
 	return true;
 }
 
 bool library_scan_start(const char *root) {
+	if (atomic_load(&database_preparing_close))
+		return false;
 	if (scan_running && scan_mode != SCAN_FULL) {
 		library_scan_stop_and_wait();
 	}
@@ -7932,7 +7971,7 @@ bool library_scan_start(const char *root) {
 // under before it finishes. False when the thread is not running.
 static bool reorganize_when_done(bool notify) {
 	pthread_mutex_lock(&rules_lock);
-	bool waiting = scan_running;
+	bool waiting = scan_running && !atomic_load(&database_preparing_close);
 	if (waiting) {
 		rules_load(&pending_rules);
 		reorganize_pending = true;
@@ -8088,6 +8127,7 @@ static void library_scan_stop_and_wait(void) {
 
 void library_queue_save_query(const library_index_spec_t *spec, int position, const char *const *extra, const int *extra_slots, int extra_count) {
 	pthread_mutex_lock(&db_lock);
+	atomic_fetch_add(&checkpoint_queue_generation, 1);
 	if (db) {
 		// One transaction: this runs on every track change, and four separate
 		// statements is four journal round trips to a card. A savepoint and not
@@ -8552,7 +8592,7 @@ library_playlist_writer_t *library_playlist_write_begin(const char *name) {
 	char sql[PLAYLIST_TABLE_MAX + 160];
 	snprintf(sql, sizeof(sql), "INSERT INTO %s(path,title,artist,seconds,present) VALUES(?,?,?,?,?)", quoted);
 	pthread_mutex_lock(&db_lock);
-	if (!db || playlist_writer_active || !sqlite3_get_autocommit(db) || !exec_quiet("BEGIN")) {
+	if (!db || atomic_load(&database_preparing_close) || playlist_writer_active || !sqlite3_get_autocommit(db) || !exec_quiet("BEGIN")) {
 		pthread_mutex_unlock(&db_lock);
 		free(writer);
 		return NULL;
@@ -8619,7 +8659,7 @@ struct library_playlist_stage {
 	bool guard_namespace;
 };
 
-static bool playlist_stage_current(const library_playlist_stage_t *stage) { return stage && stage->epoch == database_epoch && stage->serial == playlist_stage_active && db; }
+static bool playlist_stage_current(const library_playlist_stage_t *stage) { return stage && stage->epoch == database_epoch && stage->serial == playlist_stage_active && db && !atomic_load(&database_preparing_close); }
 
 static bool export_source_current_locked(const library_export_source_t *source) { return !source || (source->spec.valid && source->database_epoch == database_epoch && source->generation == generation[domain_of(source->spec.kind)]); }
 
@@ -8628,7 +8668,7 @@ static library_playlist_stage_t *playlist_stage_begin(unsigned epoch, const libr
 	if (!stage)
 		return NULL;
 	pthread_mutex_lock(&db_lock);
-	bool ok = epoch == database_epoch && export_source_current_locked(source) && !playlist_stage_active && db && sqlite3_get_autocommit(db) && (!guard_namespace || namespace_revision == generation[GEN_PLAYLISTS]);
+	bool ok = !atomic_load(&database_preparing_close) && epoch == database_epoch && export_source_current_locked(source) && !playlist_stage_active && db && sqlite3_get_autocommit(db) && (!guard_namespace || namespace_revision == generation[GEN_PLAYLISTS]);
 	if (ok)
 		ok = exec_quiet("DROP TABLE IF EXISTS " PLAYLIST_STAGE_TABLE) && exec_quiet("CREATE TABLE " PLAYLIST_STAGE_TABLE "(idx INTEGER PRIMARY KEY,path TEXT,title TEXT,artist TEXT,seconds INT,present INT,mount INT)");
 	if (ok) {
@@ -9121,22 +9161,258 @@ void library_playlist_count_save(const char *path, long mtime, long size, int tr
 	pthread_mutex_unlock(&db_lock);
 }
 
-void library_playback_state_save(const char *path, double position) {
-	if (!path || !path[0]) {
-		return;
-	}
+// One fixed-size pending checkpoint and one worker snapshot. Queue contents
+// remain with their existing owner; only offsets and the remembered track are
+// coalesced here. No allocation or DB lock is needed on the playback caller.
+#define CHECKPOINT_SETTLE_MS 100
+#define CHECKPOINT_RETRY_MS 30000
+typedef struct {
+	unsigned epoch, queue_generation;
+	uint64_t position_serial, queue_serial;
+	char path[512];
+	char queue_path[512];
+	double position;
+	int index, queue_count;
+	bool query, queue_check_entry, queue_custom;
+} checkpoint_t;
+static checkpoint_t checkpoint_pending;
+static pthread_mutex_t checkpoint_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t checkpoint_wakeup, checkpoint_idle = PTHREAD_COND_INITIALIZER;
+static pthread_t checkpoint_thread;
+static bool checkpoint_cond_ready, checkpoint_started, checkpoint_requested;
+static bool checkpoint_busy, checkpoint_stopping, checkpoint_force, checkpoint_failed;
+static uint64_t checkpoint_serial;
+static int64_t checkpoint_due, checkpoint_retry;
+
+static int64_t checkpoint_now(void) {
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+static bool checkpoint_dirty(void) { return checkpoint_pending.position_serial || checkpoint_pending.queue_serial; }
+
+// A stale snapshot is disposed, never rebound to the newly opened card/queue.
+// Return -1 for an unrelated transaction; it must not become our durable save.
+static int checkpoint_store(const checkpoint_t *c) {
 	pthread_mutex_lock(&db_lock);
+	if (!db || c->epoch != database_epoch) {
+		pthread_mutex_unlock(&db_lock);
+		return 1;
+	}
+	bool queue = c->queue_serial && c->queue_generation == checkpoint_queue_generation;
+	if (!c->position_serial && !queue) {
+		pthread_mutex_unlock(&db_lock);
+		return 1;
+	}
+	if (!sqlite3_get_autocommit(db)) {
+		pthread_mutex_unlock(&db_lock);
+		return -1;
+	}
+	bool begun = exec_quiet("SAVEPOINT playback_checkpoint");
+	bool ok = begun;
 	sqlite3_stmt *stmt = NULL;
-	if (db && sqlite3_prepare_v2(db,
-								 "INSERT OR REPLACE INTO PLAYBACK_STATE(id,path,position,updated_at)"
-								 " VALUES(0,?,?,strftime('%s','now'))",
-								 -1, &stmt, NULL) == SQLITE_OK) {
-		sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT);
-		sqlite3_bind_double(stmt, 2, position);
-		sqlite3_step(stmt);
-		sqlite3_finalize(stmt);
+	if (ok && c->position_serial) {
+		ok = sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO PLAYBACK_STATE(id,path,position,updated_at) VALUES(0,?,?,strftime('%s','now'))", -1, &stmt, NULL) == SQLITE_OK && sqlite3_bind_text(stmt, 1, c->path, -1, SQLITE_TRANSIENT) == SQLITE_OK && sqlite3_bind_double(stmt, 2, c->position) == SQLITE_OK && sqlite3_step(stmt) == SQLITE_DONE;
+		if (sqlite3_finalize(stmt) != SQLITE_OK)
+			ok = false;
+		stmt = NULL;
+	}
+	if (ok && queue) {
+		const char *sql = c->queue_check_entry ? "UPDATE PLAYBACK_QUEUE_STATE SET pos=?1,updated_at=strftime('%s','now') WHERE id=0 AND custom=?2 "
+												 "AND (SELECT COUNT(*) FROM PLAYBACK_QUEUE)=?3 "
+												 "AND EXISTS(SELECT 1 FROM PLAYBACK_QUEUE WHERE idx=?1 AND path=?4) "
+												 "AND NOT EXISTS(SELECT 1 FROM PLAYBACK_QUEUE_QUERY WHERE id=0)"
+						  : c->query		   ? "UPDATE PLAYBACK_QUEUE_QUERY SET pos=?,updated_at=strftime('%s','now') WHERE id=0"
+											   : "UPDATE PLAYBACK_QUEUE_STATE SET pos=?,updated_at=strftime('%s','now') WHERE id=0";
+		ok = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK && sqlite3_bind_int(stmt, 1, c->index) == SQLITE_OK;
+		if (ok && c->queue_check_entry)
+			ok = sqlite3_bind_int(stmt, 2, c->queue_custom) == SQLITE_OK && sqlite3_bind_int(stmt, 3, c->queue_count) == SQLITE_OK && sqlite3_bind_text(stmt, 4, c->queue_path, -1, SQLITE_TRANSIENT) == SQLITE_OK;
+		// A guarded mismatch is a stale intent, not a failed card write. It is
+		// consumed without changing queue rows or retrying it in the background.
+		ok = ok && sqlite3_step(stmt) == SQLITE_DONE && (c->queue_check_entry || sqlite3_changes(db) == 1);
+		if (sqlite3_finalize(stmt) != SQLITE_OK)
+			ok = false;
+	}
+	if (ok)
+		ok = exec_quiet("RELEASE playback_checkpoint");
+	if (!ok && begun) {
+		exec_quiet("ROLLBACK TO playback_checkpoint");
+		exec_quiet("RELEASE playback_checkpoint");
 	}
 	pthread_mutex_unlock(&db_lock);
+	return ok ? 1 : 0;
+}
+
+static void *checkpoint_writer(void *unused) {
+	(void)unused;
+	thread_be_low_priority("playback save");
+	pthread_mutex_lock(&checkpoint_lock);
+	for (;;) {
+		while (!checkpoint_requested && !checkpoint_stopping)
+			pthread_cond_wait(&checkpoint_wakeup, &checkpoint_lock);
+		if (checkpoint_stopping)
+			break;
+		// Let the input/frame pass finish and combine the two writes. The first
+		// request owns this deadline: repeated updates cannot postpone it forever.
+		while (!checkpoint_force && !checkpoint_stopping && checkpoint_now() < checkpoint_due) {
+			struct timespec due = {.tv_sec = checkpoint_due / 1000, .tv_nsec = (checkpoint_due % 1000) * 1000000};
+			pthread_cond_timedwait(&checkpoint_wakeup, &checkpoint_lock, &due);
+		}
+		if (checkpoint_stopping)
+			break;
+		checkpoint_t writing = checkpoint_pending;
+		checkpoint_requested = checkpoint_force = false;
+		checkpoint_busy = true;
+		pthread_mutex_unlock(&checkpoint_lock);
+		int result = checkpoint_store(&writing);
+		pthread_mutex_lock(&checkpoint_lock);
+		checkpoint_busy = false;
+		if (result > 0) {
+			if (checkpoint_pending.position_serial == writing.position_serial)
+				checkpoint_pending.position_serial = 0;
+			if (checkpoint_pending.queue_serial == writing.queue_serial)
+				checkpoint_pending.queue_serial = 0;
+			checkpoint_failed = false;
+			checkpoint_retry = 0;
+		} else {
+			// Keep the latest snapshot for the existing playback poll, without a
+			// retry timer or a hot worker loop on a full/absent/busy card.
+			if (!result && !checkpoint_failed)
+				fprintf(stderr, "library: playback checkpoint deferred after a storage failure\n");
+			checkpoint_failed |= !result;
+			checkpoint_retry = result ? 0 : checkpoint_now() + CHECKPOINT_RETRY_MS;
+			checkpoint_requested = false;
+		}
+		if (!checkpoint_dirty())
+			checkpoint_requested = false;
+		pthread_cond_broadcast(&checkpoint_idle);
+	}
+	pthread_mutex_unlock(&checkpoint_lock);
+	return NULL;
+}
+
+static void checkpoint_request_locked(bool force) {
+	if (checkpoint_stopping || !checkpoint_dirty() || (!force && checkpoint_now() < checkpoint_retry))
+		return;
+	if (!checkpoint_cond_ready) {
+		pthread_condattr_t attr;
+		int rc = pthread_condattr_init(&attr);
+		if (!rc) {
+			rc = pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
+			if (!rc)
+				rc = pthread_cond_init(&checkpoint_wakeup, &attr);
+			pthread_condattr_destroy(&attr);
+		}
+		if (rc) {
+			checkpoint_failed = true;
+			checkpoint_retry = checkpoint_now() + CHECKPOINT_RETRY_MS;
+			return;
+		}
+		checkpoint_cond_ready = true;
+	}
+	if (!checkpoint_started) {
+		if (pthread_create(&checkpoint_thread, NULL, checkpoint_writer, NULL) != 0) {
+			checkpoint_failed = true;
+			checkpoint_retry = checkpoint_now() + CHECKPOINT_RETRY_MS;
+			return; // Failed admission never turns into synchronous UI I/O.
+		}
+		checkpoint_started = true;
+	}
+	if (!checkpoint_requested)
+		checkpoint_due = checkpoint_now() + CHECKPOINT_SETTLE_MS;
+	checkpoint_requested = true;
+	checkpoint_force |= force;
+	pthread_cond_signal(&checkpoint_wakeup);
+}
+
+static void checkpoint_admit_locked(unsigned epoch) {
+	if (checkpoint_pending.epoch != epoch) {
+		memset(&checkpoint_pending, 0, sizeof(checkpoint_pending));
+		checkpoint_pending.epoch = epoch;
+		checkpoint_failed = false;
+		checkpoint_retry = 0;
+	}
+	if (!++checkpoint_serial)
+		checkpoint_serial++;
+}
+
+void library_checkpoint_position_at(unsigned epoch, const char *path, double position) {
+	if (!epoch || epoch != library_database_epoch() || !path || !path[0] || strlen(path) >= sizeof(checkpoint_pending.path))
+		return;
+	pthread_mutex_lock(&checkpoint_lock);
+	if (checkpoint_stopping || epoch != library_database_epoch()) {
+		pthread_mutex_unlock(&checkpoint_lock);
+		return;
+	}
+	checkpoint_admit_locked(epoch);
+	snprintf(checkpoint_pending.path, sizeof(checkpoint_pending.path), "%s", path);
+	checkpoint_pending.position = position;
+	checkpoint_pending.position_serial = checkpoint_serial;
+	checkpoint_request_locked(false);
+	pthread_mutex_unlock(&checkpoint_lock);
+}
+
+static void checkpoint_queue_at(unsigned epoch, int index, bool query, int count, bool custom, const char *path) {
+	if (!epoch || epoch != library_database_epoch() || index < 0)
+		return;
+	pthread_mutex_lock(&checkpoint_lock);
+	if (checkpoint_stopping || epoch != library_database_epoch()) {
+		pthread_mutex_unlock(&checkpoint_lock);
+		return;
+	}
+	checkpoint_admit_locked(epoch);
+	checkpoint_pending.index = index;
+	checkpoint_pending.query = query;
+	checkpoint_pending.queue_check_entry = path != NULL;
+	checkpoint_pending.queue_count = count;
+	checkpoint_pending.queue_custom = custom;
+	snprintf(checkpoint_pending.queue_path, sizeof(checkpoint_pending.queue_path), "%s", path ? path : "");
+	checkpoint_pending.queue_generation = atomic_load(&checkpoint_queue_generation);
+	checkpoint_pending.queue_serial = checkpoint_serial;
+	checkpoint_request_locked(false);
+	pthread_mutex_unlock(&checkpoint_lock);
+}
+
+void library_checkpoint_queue_at(unsigned epoch, int index, bool query) { checkpoint_queue_at(epoch, index, query, 0, false, NULL); }
+
+void library_checkpoint_queue_entry_at(unsigned epoch, int index, int count, bool custom, const char *path) {
+	if (!path || !path[0] || strlen(path) >= sizeof(checkpoint_pending.queue_path) || count <= 0 || index >= count)
+		return;
+	checkpoint_queue_at(epoch, index, false, count, custom, path);
+}
+
+void library_checkpoint_poll(void) {
+	pthread_mutex_lock(&checkpoint_lock);
+	checkpoint_request_locked(false);
+	pthread_mutex_unlock(&checkpoint_lock);
+}
+
+bool library_checkpoint_flush(void) {
+	pthread_mutex_lock(&checkpoint_lock);
+	checkpoint_request_locked(true);
+	while (checkpoint_busy || checkpoint_requested)
+		pthread_cond_wait(&checkpoint_idle, &checkpoint_lock);
+	bool saved = !checkpoint_dirty();
+	pthread_mutex_unlock(&checkpoint_lock);
+	return saved;
+}
+
+void library_checkpoint_shutdown(void) {
+	if (!library_checkpoint_flush())
+		fprintf(stderr, "library: playback checkpoint not confirmed before close\n");
+	pthread_mutex_lock(&checkpoint_lock);
+	checkpoint_stopping = true;
+	bool started = checkpoint_started;
+	if (started)
+		pthread_cond_signal(&checkpoint_wakeup);
+	pthread_mutex_unlock(&checkpoint_lock);
+	if (started)
+		pthread_join(checkpoint_thread, NULL);
+	pthread_mutex_lock(&checkpoint_lock);
+	checkpoint_started = checkpoint_stopping = checkpoint_requested = checkpoint_force = false;
+	memset(&checkpoint_pending, 0, sizeof(checkpoint_pending));
+	pthread_mutex_unlock(&checkpoint_lock);
 }
 
 bool library_playback_state_load(char *path_out, size_t path_size, double *position_out) {
@@ -9168,6 +9444,7 @@ bool library_playback_state_load(char *path_out, size_t path_size, double *posit
 
 void library_queue_save(const char *const *paths, int count, int current_index, bool custom) {
 	pthread_mutex_lock(&db_lock);
+	atomic_fetch_add(&checkpoint_queue_generation, 1);
 	if (!db) {
 		pthread_mutex_unlock(&db_lock);
 		return;

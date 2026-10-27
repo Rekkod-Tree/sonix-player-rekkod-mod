@@ -78,6 +78,18 @@ static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t wakeup = PTHREAD_COND_INITIALIZER;
 static bool started;
 
+// Only the worker calls this, after releasing the job lock and immediately
+// before I/O/decode. A screen transition during cond_wait must affect the
+// first job after wake, without a scheduler syscall for every thumbnail.
+static void prepare_job_priority(void) {
+	static int applied = -1;
+	int visible = power_screen_is_on();
+	if (visible != applied) {
+		thread_set_background_level(visible);
+		applied = visible;
+	}
+}
+
 // Picks up the next slot waiting to be decoded. Called with the lock held.
 static int next_pending(void) {
 	for (int i = 0; i < COVERLOADER_SLOTS; i++) {
@@ -104,6 +116,7 @@ static void run_dual_job(dual_job_t *job, dual_loader_t load) {
 	job->running = true;
 	pthread_mutex_unlock(&lock);
 
+	prepare_job_priority();
 	cover_image_t first, second;
 	bool found = load(path, fw, fh, &first, sw, sh, &second);
 
@@ -153,8 +166,6 @@ static void *worker(void *arg) {
 		// lost, and after two seconds without progress the link is taken for
 		// gone. A picture for a screen nobody can see is not worth that, so with
 		// the screen off the thread goes back to the bottom of the pile.
-		thread_set_background_level(power_screen_is_on());
-
 		pthread_mutex_lock(&lock);
 
 		while (next_pending() < 0 && !(player_id_job.pending && !player_id_job.running) &&
@@ -174,6 +185,7 @@ static void *worker(void *arg) {
 			player_id_job.running = true;
 			pthread_mutex_unlock(&lock);
 
+			prepare_job_priority();
 			uint64_t id = cover_source_id(path);
 
 			pthread_mutex_lock(&lock);
@@ -207,6 +219,7 @@ static void *worker(void *arg) {
 			int w = prefetch_job.w, h = prefetch_job.h;
 			prefetch_job.pending = false;
 			pthread_mutex_unlock(&lock);
+			prepare_job_priority();
 			cover_prefetch_player(path, w, h);
 			continue;
 		}
@@ -230,6 +243,7 @@ static void *worker(void *arg) {
 		slot->running = true;
 		pthread_mutex_unlock(&lock);
 
+		prepare_job_priority();
 		cover_image_t image;
 		bool found = share_w > 0 ? cover_load_shared(path, share_w, share_h, size, &image)
 								  : cover_thumb_load(path, false, size, &image);

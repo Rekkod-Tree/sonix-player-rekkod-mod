@@ -28,6 +28,7 @@
 
 static bool enabled;
 static bool log_areas; // SONIX_PERF_AREAS=1: every frame's areas in the log, to find who repaints
+static bool log_phases; // SONIX_PERF_PHASES=1: named GUI critical-path boundaries.
 static lv_display_t *display;
 static uint32_t report_ms;
 
@@ -53,27 +54,62 @@ static cb_count_t callbacks[PERF_CALLBACKS_MAX];
 static int callback_count;
 
 // This report's counters.
-static uint32_t passes;		   // lv_timer_handler() calls
-static uint32_t busy_passes;   // passes in which a counted timer ran
-static uint32_t woke_timeout;  // poll() ran out: a timer was due
-static uint32_t woke_post;	   // gui_post() from another thread
-static uint32_t woke_touch;	   // the touch panel's descriptor
-static uint32_t frames;		   // refreshes that drew something
-static uint32_t empty_refr;	   // refreshes that found nothing to draw
-static uint64_t frame_cpu_us;  // UI thread CPU over the drawn frames
-static uint64_t frame_flush_us; // ... of which in the flush callback (on the emulator: SDL)
+static uint32_t passes;			 // lv_timer_handler() calls
+static uint32_t busy_passes;	 // passes in which a counted timer ran
+static uint32_t woke_timeout;	 // poll() ran out: a timer was due
+static uint32_t woke_post;		 // gui_post() from another thread
+static uint32_t woke_touch;		 // the touch panel's descriptor
+static uint32_t frames;			 // refreshes that drew something
+static uint32_t empty_refr;		 // refreshes that found nothing to draw
+static uint64_t frame_cpu_us;	 // UI thread CPU over the drawn frames
+static uint64_t frame_flush_us;	 // ... of which in the flush callback (on the emulator: SDL)
 static uint64_t frame_layout_us; // ... of which before rendering (layout, invalidation joins)
 static uint32_t draw_max;		 // the worst frame without its flush
 #define PERF_DRAWS_MAX 1024
 static uint32_t draws[PERF_DRAWS_MAX]; // each frame's cost without its flush, for the percentiles
 static uint32_t draw_count;
 static volatile sig_atomic_t report_now; // SIGUSR2: report at the end of this pass
-static uint32_t frame_cpu_max; // the worst one
-static uint64_t frame_px;	   // pixels repainted
+static uint32_t frame_cpu_max;			 // the worst one
+static uint64_t frame_px;				 // pixels repainted
 static uint32_t frame_px_max;
 static uint32_t frames_over_16; // frames that cost more CPU than a 60 Hz period
 static uint64_t handler_cpu_us; // UI thread CPU inside lv_timer_handler(), frames included
 static uint64_t ignored_cpu_us; // ... in passes where only ignored (emulator) timers ran
+
+// Every sample is counted. Percentiles are upper bounds rounded to 1 ms;
+// the overflow bucket uses the measured maximum, never a truncated duration.
+#define PERF_TIME_BINS 257
+typedef struct {
+	uint64_t count, total, maximum;
+	uint32_t over16, over33, over100;
+	uint32_t bins[PERF_TIME_BINS];
+} time_stat_t;
+static time_stat_t pass_elapsed, frame_elapsed, flush_elapsed, input_elapsed;
+
+static void time_stat_add(time_stat_t *s, uint64_t us) {
+	unsigned bin = us >= (PERF_TIME_BINS - 1) * 1000ULL ? PERF_TIME_BINS - 1 : (unsigned)((us + 999) / 1000);
+	s->count++;
+	s->total += us;
+	if (us > s->maximum)
+		s->maximum = us;
+	s->over16 += us > 16000;
+	s->over33 += us > 33333;
+	s->over100 += us > 100000;
+	s->bins[bin]++;
+}
+
+static uint64_t time_stat_percentile(const time_stat_t *s, unsigned percent) {
+	if (!s->count)
+		return 0;
+	uint64_t rank = (s->count * percent + 99) / 100;
+	uint64_t seen = 0;
+	for (unsigned bin = 0; bin < PERF_TIME_BINS; bin++) {
+		seen += s->bins[bin];
+		if (seen >= rank)
+			return bin == PERF_TIME_BINS - 1 ? s->maximum : bin * 1000ULL;
+	}
+	return s->maximum;
+}
 
 // The frame being drawn.
 static uint64_t refr_t0;
@@ -82,6 +118,10 @@ static uint32_t refr_flush;
 static bool refr_rendering;
 static uint32_t refr_px;
 static uint64_t pass_t0;
+static uint64_t pass_wall_t0, refr_wall_t0, flush_wall_t0, input_wall_t0;
+static bool input_pending, input_known;
+static lv_point_t input_last_point;
+static lv_event_code_t input_last_code;
 
 // Since the last report.
 static uint64_t last_wall_us;
@@ -108,6 +148,26 @@ static uint64_t clock_us(clockid_t id) {
 
 static uint64_t thread_cpu_us(void) { return clock_us(CLOCK_THREAD_CPUTIME_ID); }
 
+// Dispatch-to-next-render, not kernel input latency or physical panel scanout.
+// Stationary PRESSING callbacks do not create samples. A contact that changes
+// nothing visually may legitimately wait for a later frame; use named gestures.
+static void input_event_cb(lv_event_t *e) {
+	lv_event_code_t code = lv_event_get_code(e);
+	if (code != LV_EVENT_PRESSED && code != LV_EVENT_PRESSING && code != LV_EVENT_RELEASED)
+		return;
+	lv_point_t point;
+	lv_indev_get_point(lv_event_get_target(e), &point);
+	if (code == LV_EVENT_PRESSING && input_known && input_last_code != LV_EVENT_RELEASED && point.x == input_last_point.x && point.y == input_last_point.y)
+		return;
+	input_last_point = point;
+	input_last_code = code;
+	input_known = true;
+	if (!input_pending) {
+		input_wall_t0 = clock_us(CLOCK_MONOTONIC);
+		input_pending = true;
+	}
+}
+
 static int find_bias(struct dl_phdr_info *info, size_t size, void *data) {
 	(void)size;
 	// The first object listed is the executable itself.
@@ -116,6 +176,11 @@ static int find_bias(struct dl_phdr_info *info, size_t size, void *data) {
 }
 
 bool perfstat_enabled(void) { return enabled; }
+
+void perfstat_phase(const char *name) {
+	if (enabled && log_phases)
+		fprintf(stderr, "perf: phase %s wall_us=%llu cpu_us=%llu\n", name, (unsigned long long)clock_us(CLOCK_MONOTONIC), (unsigned long long)thread_cpu_us());
+}
 
 void perfstat_ignore_timer(lv_timer_t *timer) {
 	if (timer && ignored_count < PERF_IGNORED_MAX) {
@@ -145,6 +210,7 @@ void perfstat_pass_begin(void) {
 		snap_count++;
 	}
 	pass_t0 = thread_cpu_us();
+	pass_wall_t0 = clock_us(CLOCK_MONOTONIC);
 }
 
 static int count_callback(lv_timer_t *t) {
@@ -170,6 +236,7 @@ void perfstat_pass_end(void) {
 		return;
 	}
 	uint64_t pass_cpu = thread_cpu_us() - pass_t0;
+	time_stat_add(&pass_elapsed, clock_us(CLOCK_MONOTONIC) - pass_wall_t0);
 	handler_cpu_us += pass_cpu;
 	passes++;
 	bool counted = false;
@@ -232,13 +299,16 @@ static void refr_event_cb(lv_event_t *e) {
 	lv_event_code_t code = lv_event_get_code(e);
 	if (code == LV_EVENT_REFR_START) {
 		refr_t0 = thread_cpu_us();
+		refr_wall_t0 = clock_us(CLOCK_MONOTONIC);
 		refr_rendering = false;
 		refr_px = 0;
 		refr_flush = 0;
 	} else if (code == LV_EVENT_FLUSH_START) {
 		flush_t0 = thread_cpu_us();
+		flush_wall_t0 = clock_us(CLOCK_MONOTONIC);
 	} else if (code == LV_EVENT_FLUSH_FINISH) {
 		refr_flush += (uint32_t)(thread_cpu_us() - flush_t0);
+		time_stat_add(&flush_elapsed, clock_us(CLOCK_MONOTONIC) - flush_wall_t0);
 	} else if (code == LV_EVENT_RENDER_START) {
 		refr_rendering = true;
 		frame_layout_us += thread_cpu_us() - refr_t0;
@@ -251,8 +321,7 @@ static void refr_event_cb(lv_event_t *e) {
 				const lv_area_t *a = &d->inv_areas[i];
 				refr_px += (uint32_t)lv_area_get_size(a);
 				if (log_areas && used < sizeof(areas)) {
-					used += (size_t)snprintf(areas + used, sizeof(areas) - used, " %d,%d-%d,%d", (int)a->x1, (int)a->y1,
-											 (int)a->x2, (int)a->y2);
+					used += (size_t)snprintf(areas + used, sizeof(areas) - used, " %d,%d-%d,%d", (int)a->x1, (int)a->y1, (int)a->x2, (int)a->y2);
 				}
 			}
 		}
@@ -265,6 +334,12 @@ static void refr_event_cb(lv_event_t *e) {
 			return;
 		}
 		uint32_t cpu = (uint32_t)(thread_cpu_us() - refr_t0);
+		uint64_t now = clock_us(CLOCK_MONOTONIC);
+		time_stat_add(&frame_elapsed, now - refr_wall_t0);
+		if (input_pending) {
+			time_stat_add(&input_elapsed, now - input_wall_t0);
+			input_pending = false;
+		}
 		frames++;
 		frame_cpu_us += cpu;
 		frame_flush_us += refr_flush;
@@ -346,8 +421,7 @@ static unsigned long thread_switches(int tid, char *name, size_t name_size) {
 			}
 			v[strcspn(v, "\n")] = '\0';
 			snprintf(name, name_size, "%.15s", v);
-		} else if (strncmp(line, "voluntary_ctxt_switches:", 24) == 0 ||
-				   strncmp(line, "nonvoluntary_ctxt_switches:", 27) == 0) {
+		} else if (strncmp(line, "voluntary_ctxt_switches:", 24) == 0 || strncmp(line, "nonvoluntary_ctxt_switches:", 27) == 0) {
 			total += strtoul(strchr(line, ':') + 1, NULL, 10);
 		}
 	}
@@ -430,8 +504,7 @@ static void report_threads(char *out, size_t size, double secs) {
 	}
 	size_t used = strlen(out);
 	for (int i = 0; i < row_count && i < 12 && used < size; i++) {
-		used += (size_t)snprintf(out + used, size - used, " %s/%d:%.1f", rows[i].name, rows[i].tid,
-								 rows[i].delta / secs);
+		used += (size_t)snprintf(out + used, size - used, " %s/%d:%.1f", rows[i].name, rows[i].tid, rows[i].delta / secs);
 	}
 }
 
@@ -445,8 +518,17 @@ static void sigusr2_cb(int sig) {
 	report_now = 1;
 }
 
+static void report_time(const char *name, time_stat_t *s) {
+	fprintf(stderr, "perf: elapsed %s n=%llu avg=%.3f p50_upper=%.3f p95_upper=%.3f p99_upper=%.3f max=%.3f ms over16=%u over33=%u over100=%u\n", name, (unsigned long long)s->count, s->count ? s->total / 1000.0 / s->count : 0.0, time_stat_percentile(s, 50) / 1000.0, time_stat_percentile(s, 95) / 1000.0, time_stat_percentile(s, 99) / 1000.0, s->maximum / 1000.0, s->over16, s->over33, s->over100);
+	memset(s, 0, sizeof(*s));
+}
+
 static void report_cb(lv_timer_t *timer) {
-	(void)timer;
+	if (timer) {
+		// Report after measuring the pass, not from inside the measured timer.
+		report_now = 1;
+		return;
+	}
 	uint64_t now = clock_us(CLOCK_MONOTONIC);
 	double secs = (now - last_wall_us) / 1e6;
 	if (secs <= 0) {
@@ -472,11 +554,12 @@ static void report_cb(lv_timer_t *timer) {
 			"perf: %.1f s: loop %.1f/s (timers %.1f/s; woke: due %.1f post %.1f touch %.1f/s) handler cpu %.2f ms/s (+%.2f emulator-only); "
 			"frames %u (%.1f/s), cpu avg %.2f max %.2f ms (without flush avg %.3f p50 %.3f p95 %.3f max %.3f, layout avg %.3f), >16 ms %u, px avg %u max %u, empty %u; "
 			"process cpu %.1f %%, rss %ld kB (peak %ld), heap %d kB in use, %d kB free\n",
-			secs, passes / secs, busy_passes / secs, woke_timeout / secs, woke_post / secs, woke_touch / secs,
-			(handler_cpu_us - ignored_cpu_us) / 1000.0 / secs, ignored_cpu_us / 1000.0 / secs, frames, frames / secs, frames ? frame_cpu_us / 1000.0 / frames : 0.0,
-			frame_cpu_max / 1000.0, frames ? (frame_cpu_us - frame_flush_us) / 1000.0 / frames : 0.0, p50 / 1000.0, p95 / 1000.0, draw_max / 1000.0,
-			frames ? frame_layout_us / 1000.0 / frames : 0.0, frames_over_16, frames ? (unsigned)(frame_px / frames) : 0u, frame_px_max,
-			empty_refr, cpu_pct, status_kb("VmRSS"), status_kb("VmHWM"), mi.uordblks / 1024, mi.fordblks / 1024);
+			secs, passes / secs, busy_passes / secs, woke_timeout / secs, woke_post / secs, woke_touch / secs, (handler_cpu_us - ignored_cpu_us) / 1000.0 / secs, ignored_cpu_us / 1000.0 / secs, frames, frames / secs, frames ? frame_cpu_us / 1000.0 / frames : 0.0, frame_cpu_max / 1000.0, frames ? (frame_cpu_us - frame_flush_us) / 1000.0 / frames : 0.0, p50 / 1000.0, p95 / 1000.0, draw_max / 1000.0, frames ? frame_layout_us / 1000.0 / frames : 0.0, frames_over_16, frames ? (unsigned)(frame_px / frames) : 0u, frame_px_max, empty_refr, cpu_pct, status_kb("VmRSS"), status_kb("VmHWM"), mi.uordblks / 1024, mi.fordblks / 1024);
+	report_time("handler", &pass_elapsed);
+	report_time("frame", &frame_elapsed);
+	report_time("flush", &flush_elapsed);
+	report_time("dispatch_to_next_render", &input_elapsed);
+	input_pending = false; // A named measurement starts without an old contact.
 
 	// Timers, busiest first.
 	for (int i = 0; i < callback_count; i++) {
@@ -489,11 +572,9 @@ static void report_cb(lv_timer_t *timer) {
 		}
 	}
 	char line[2048];
-	size_t used = (size_t)snprintf(line, sizeof(line), "perf: timers/s (runs/s / cpu per s)");
+	size_t used = (size_t)snprintf(line, sizeof(line), "perf: timers/s (runs/s / estimated pass cpu share per s)");
 	for (int i = 0; i < callback_count && used < sizeof(line); i++) {
-		used += (size_t)snprintf(line + used, sizeof(line) - used, " %#lx(%u):%.1f/%.0fus",
-								 (unsigned long)((uintptr_t)callbacks[i].cb - load_bias), (unsigned)callbacks[i].period,
-								 callbacks[i].runs / secs, callbacks[i].cpu_us / secs);
+		used += (size_t)snprintf(line + used, sizeof(line) - used, " %#lx(%u):%.1f/%.0fus", (unsigned long)((uintptr_t)callbacks[i].cb - load_bias), (unsigned)callbacks[i].period, callbacks[i].runs / secs, callbacks[i].cpu_us / secs);
 	}
 	fprintf(stderr, "%s\n", line);
 
@@ -512,8 +593,7 @@ static void report_cb(lv_timer_t *timer) {
 				break;
 			}
 			uintptr_t exec = a->exec_cb ? (uintptr_t)a->exec_cb : (uintptr_t)a->custom_exec_cb;
-			used += (size_t)snprintf(line + used, sizeof(line) - used, " %#lx(%d ms)",
-									 (unsigned long)(exec - load_bias), (int)a->duration);
+			used += (size_t)snprintf(line + used, sizeof(line) - used, " %#lx(%d ms)", (unsigned long)(exec - load_bias), (int)a->duration);
 		}
 		fprintf(stderr, "%s\n", line);
 	}
@@ -547,6 +627,8 @@ void perfstat_init(lv_display_t *disp) {
 	report_ms = (uint32_t)(seconds > 3600 ? 3600 : seconds) * 1000u;
 	const char *areas = getenv("SONIX_PERF_AREAS");
 	log_areas = areas && areas[0] == '1';
+	const char *phases = getenv("SONIX_PERF_PHASES");
+	log_phases = phases && phases[0] == '1';
 	display = disp;
 	dl_iterate_phdr(find_bias, &load_bias);
 
@@ -555,6 +637,9 @@ void perfstat_init(lv_display_t *disp) {
 	lv_display_add_event_cb(disp, refr_event_cb, LV_EVENT_REFR_READY, NULL);
 	lv_display_add_event_cb(disp, refr_event_cb, LV_EVENT_FLUSH_START, NULL);
 	lv_display_add_event_cb(disp, refr_event_cb, LV_EVENT_FLUSH_FINISH, NULL);
+	for (lv_indev_t *input = lv_indev_get_next(NULL); input; input = lv_indev_get_next(input))
+		if (lv_indev_get_type(input) == LV_INDEV_TYPE_POINTER)
+			lv_indev_add_event_cb(input, input_event_cb, LV_EVENT_ALL, NULL);
 
 	lv_timer_t *t = lv_timer_create(report_cb, report_ms, NULL);
 	perfstat_ignore_timer(t); // its own runs are not the player's
@@ -563,6 +648,5 @@ void perfstat_init(lv_display_t *disp) {
 	char unused[1] = {0};
 	report_threads(unused, sizeof(unused), 1); // the baseline for every thread
 	enabled = true;
-	fprintf(stderr, "perf: statistics every %u s; timer callbacks relative to %#lx (addr2line -f -e <unstripped binary>)\n",
-			report_ms / 1000u, (unsigned long)load_bias);
+	fprintf(stderr, "perf: statistics every %u s; timer callbacks relative to %#lx (addr2line -f -e <unstripped binary>)\n", report_ms / 1000u, (unsigned long)load_bias);
 }

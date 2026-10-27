@@ -87,7 +87,7 @@ int gui_post_wake_fd(void);
 void gui_post_service(void);
 
 // GUI thread, once per existing main-loop pass before LVGL/wait. Services the
-// three module-owned terminal slots even with full message queues or a blank
+// module-owned terminal slots even with full message queues or a blank
 // panel; does not build lazy pages, wake the LCD, or add a timer/worker.
 void gui_service_completions(void);
 

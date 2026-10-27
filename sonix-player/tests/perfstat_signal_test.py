@@ -51,8 +51,9 @@ prefix = r'''
 #include <unistd.h>
 typedef struct {int unused;} lv_display_t;
 typedef struct {int unused;} lv_timer_t;
-enum {LV_EVENT_REFR_START,LV_EVENT_RENDER_START,LV_EVENT_REFR_READY,LV_EVENT_FLUSH_START,LV_EVENT_FLUSH_FINISH};
-static bool enabled,log_areas;
+typedef struct {int unused;} lv_indev_t;
+enum {LV_EVENT_REFR_START,LV_EVENT_RENDER_START,LV_EVENT_REFR_READY,LV_EVENT_FLUSH_START,LV_EVENT_FLUSH_FINISH,LV_EVENT_ALL,LV_INDEV_TYPE_POINTER};
+static bool enabled,log_areas,log_phases;
 static lv_display_t *display;
 static uint32_t report_ms;
 static uintptr_t load_bias;
@@ -66,6 +67,10 @@ static long config_get_int(const char *section,const char *key,long fallback) {
  (void)fallback;assert(!strcmp(section,"debug")&&!strcmp(key,"perf_stats"));return config_seconds;
 }
 static void refr_event_cb(void *event) {(void)event;}
+static void input_event_cb(void *event) {(void)event;}
+static lv_indev_t *lv_indev_get_next(lv_indev_t *p) {(void)p;return NULL;}
+static int lv_indev_get_type(lv_indev_t *p) {(void)p;return LV_INDEV_TYPE_POINTER;}
+static void lv_indev_add_event_cb(lv_indev_t *p,void (*cb)(void *),int event,void *u) {(void)p;(void)cb;(void)event;(void)u;assert(0);}
 static void lv_display_add_event_cb(lv_display_t *d,void (*cb)(void *),int event,void *user) {
  (void)cb;(void)event;(void)user;assert(d);event_count++;
 }

@@ -23,6 +23,11 @@
 // call again; returns false if the file cannot be opened, in which case every
 // call below is a no-op.
 bool library_open(const char *db_path);
+// Normal storage/process exit: stop new scan/import admission and finish the
+// existing writers while the current epoch stays available. The caller then
+// drains accepted application history before library_close. Safe to repeat.
+// Uses the existing bounded scanner stop; a stuck driver can outlast that wait.
+void library_prepare_close(void);
 void library_close(void);
 
 // Closes and reopens the index when its file is no longer the one that was
@@ -541,6 +546,8 @@ int library_fav_remove_many(const char *const *paths, int count);
 // leaves in what it left behind. Their favourites and play counts go with
 // them. Returns how many tracks went.
 int library_forget_deleted(const char *const *paths, int count);
+// Late filesystem completion may only prune the database it started with.
+int library_forget_deleted_at(unsigned epoch, const char *const *paths, int count);
 
 // Removes from the favourites (and from the saved playback state) everything
 // under `prefix`. It is what clears rows pointing into the stream cache, whose
@@ -866,8 +873,22 @@ void library_playlist_count_save(const char *path, long mtime, long size, int tr
 bool library_playlist_count_is_verified(const char *path, long mtime, long size);
 
 // Playback state for the "remember track" option: one track plus position.
-void library_playback_state_save(const char *path, double position);
 bool library_playback_state_load(char *path_out, size_t path_size, double *position_out);
+
+// Bounded, latest-state checkpoints for normal playback. Admission only copies
+// scalars; it never waits for SQLite. A single lazy writer combines the current
+// queue offset and remembered position in one transaction after a short settle.
+// The database epoch and saved queue generation travel with every snapshot.
+void library_checkpoint_position_at(unsigned epoch, const char *path, double position);
+void library_checkpoint_queue_at(unsigned epoch, int index, bool query);
+// After an explicit track reload, validate only this position against the
+// reopened DB's path queue. Never adopts or rewrites the caller's old queue.
+// Matching path/index/count/custom and no query form are checked by the writer.
+void library_checkpoint_queue_entry_at(unsigned epoch, int index, int count, bool custom, const char *path);
+void library_checkpoint_poll(void);
+// Explicit power/storage barriers only. False means a write was not confirmed.
+bool library_checkpoint_flush(void);
+void library_checkpoint_shutdown(void);
 
 // The playback queue, mirrored on disk so it survives a power cycle. Without it
 // a reboot leaves the player holding the remembered track and nothing around

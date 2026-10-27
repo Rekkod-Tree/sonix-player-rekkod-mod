@@ -75,6 +75,9 @@ lv_obj_t *sx_label(lv_obj_t *parent, const lv_font_t *font, lv_style_t *colour_s
 // with an ellipsis holds the cut text, and is simply set again.
 void sx_set_text(lv_obj_t *label, const char *text);
 void sx_set_src(lv_obj_t *img, const void *src);
+// A repeatedly refreshed static background role, as local style. Explicit
+// animation/transition control still uses the LVGL setters directly.
+void sx_set_bg_color(lv_obj_t *obj, lv_color_t color);
 // The image recoloured in `color` at full strength, as local style.
 void sx_set_recolor(lv_obj_t *img, lv_color_t color);
 

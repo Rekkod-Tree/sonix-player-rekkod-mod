@@ -43,6 +43,7 @@
 #include "src/system/library/audiobookdb.h"
 #include "src/system/library/covertone.h"
 #include "src/system/playback/device_state.h"
+#include "src/system/playback/playhistory.h"
 #include "src/system/playback/sleeptimer.h"
 #include "src/system/streaming/cardimport.h"
 #include "src/system/streaming/qobuz.h"
@@ -2228,13 +2229,14 @@ int main(int argc, char **argv) {
 	// taking over that job, which is what manage_mount does; the player still
 	// stays out of the way if it finds the card already mounted.
 	storage_config_t storage_cfg = {
-		// Both NULL: the player probes the block devices and the mount-point
-		// names the stock firmware uses and reports what it found in the log.
+		// The target probes the stock mount points. The host has one explicitly
+		// selected fixture/user root for both its UI and its storage owner.
 		.device = NULL,
-		.mount_point = NULL,
 #ifdef HOST_BUILD
+		.mount_point = music_path,
 		.manage_mount = false, // never touch the developer's own filesystem
 #else
+		.mount_point = NULL,
 		.manage_mount = true,
 #endif
 	};
@@ -2301,14 +2303,9 @@ int main(int argc, char **argv) {
 		.screen_height = (uint32_t)panel_h,
 		.top_bar_height = 44,
 		.padding = SX_BODY_PAD_L,
-#ifdef HOST_BUILD
-		.sd_root_path = music_path,
-#else
-		// Resolved by the mount code above rather than hardcoded: /mnt/sd_0,
-		// /data/mnt/sd_0 and /usr/data/mnt/sd_0 are the same directory reached
-		// through different symlinks, and which one is real varies by firmware.
+		// The storage owner supplies the root on the device and the simulator.
+		// Views must not keep a second, differently selected card directory.
 		.sd_root_path = storage_sd_root(),
-#endif
 	};
 
 	// Artwork thumbnails are kept on the card, next to the music, so that
@@ -2374,10 +2371,8 @@ int main(int argc, char **argv) {
 	// which bundle was found -- which is the first thing to look at when
 	// https stations fail.
 	tls_set_card_root(gui_cfg.sd_root_path);
-	// Where downloaded stream tracks go. The real card is used -- the same
-	// root the Qobuz page and the card watcher use -- and not
-	// gui_cfg.sd_root_path, which on the simulator is a different folder: the
-	// cache and the code that cleans it must agree on one root.
+	// Downloads, their cleanup and local browsers share the storage owner's
+	// root. On the simulator this is the explicitly selected host card folder.
 	const char *card_root = storage_sd_root();
 	stream_provider_set_root_all(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
 	cardimport_set_root(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
@@ -2386,13 +2381,7 @@ int main(int argc, char **argv) {
 	podcaststate_set_root(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
 	// And where a track arriving over DLNA lands: same card, same reason.
 	dlna_set_root(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
-	// And where the emulator looks for Games/GB and Games/GBC. Unlike the
-	// lines above this uses gui_cfg.sd_root_path and not storage_sd_root():
-	// those write a cache, which belongs on the real card, while games are
-	// the user's own files and live where the user's music lives. On the
-	// device the two are the same (see how gui_cfg is filled in); on the
-	// simulator they are not, which is what makes the page testable without
-	// the device.
+	// Games/GB and Games/GBC live on that same selected card.
 	gbdb_set_root(gui_cfg.sd_root_path);
 
 	// Rows pointing into the stream caches are dropped once at boot: a cache
@@ -2664,6 +2653,9 @@ int main(int argc, char **argv) {
 	// Stop new module work before ending GUI service. Existing detached work
 	// may finish/dispose privately; process exit is not a proven bounded join.
 	gui_shutdown_completions();
+	library_prepare_close();
+	playhistory_shutdown();
+	library_checkpoint_shutdown();
 	printf("\n");
 
 	return 0;

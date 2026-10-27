@@ -385,8 +385,16 @@ static void overlay_watch(lv_obj_t *object) {
 	lv_obj_add_event_cb(object, overlay_deleted, LV_EVENT_DELETE, NULL);
 }
 void sx_artview_overlay_will_show(lv_obj_t *overlay) {
+	// A partially visible overlay needs both surfaces. Keep its prepared
+	// artwork even while it is still below the viewport; do not convert/free
+	// it again at every drag coordinate.
+	if (preparing_overlay == overlay && !opaque_overlay)
+		return;
 	if (preparing_overlay && preparing_overlay != opaque_overlay)
 		lv_obj_remove_event_cb(preparing_overlay, overlay_deleted);
+	if (opaque_overlay)
+		lv_obj_remove_event_cb(opaque_overlay, overlay_deleted);
+	opaque_overlay = NULL;
 	preparing_overlay = overlay;
 	overlay_watch(overlay);
 	epoch++;

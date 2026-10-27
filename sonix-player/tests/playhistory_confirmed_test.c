@@ -17,13 +17,25 @@ bool audio_get_listening_progress(double *position, double *total, unsigned *ser
 	return fake_ready;
 }
 void audio_get_current_file(char *out, size_t size) { snprintf(out, size, "%s", fake_file); }
+void thread_be_low_priority(const char *name) { assert(name); }
+
+static bool test_exec(const char *sql) {
+	playhistory_flush();
+	pthread_mutex_lock(&db_lock);
+	bool ok = exec(sql);
+	pthread_mutex_unlock(&db_lock);
+	return ok;
+}
 
 static int stored_count(void) {
+	playhistory_flush();
+	pthread_mutex_lock(&db_lock);
 	sqlite3_stmt *s;
 	assert(sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM PLAY_HISTORY", -1, &s, NULL) == SQLITE_OK);
 	assert(sqlite3_step(s) == SQLITE_ROW);
 	int count = sqlite3_column_int(s, 0);
 	sqlite3_finalize(s);
+	pthread_mutex_unlock(&db_lock);
 	return count;
 }
 static void start(const char *path, bool waiting) {
@@ -34,8 +46,8 @@ static void start(const char *path, bool waiting) {
 }
 int main(void) {
 	assert(sqlite3_open(":memory:", &db) == SQLITE_OK);
-	assert(exec("CREATE TABLE MEDIA_TABLE(path TEXT, name TEXT)"));
-	assert(exec("CREATE TABLE PLAY_HISTORY(id INTEGER PRIMARY KEY AUTOINCREMENT,path TEXT,name TEXT,artist TEXT,played_at INT)"));
+	assert(test_exec("CREATE TABLE MEDIA_TABLE(path TEXT, name TEXT)"));
+	assert(test_exec("CREATE TABLE PLAY_HISTORY(id INTEGER PRIMARY KEY AUTOINCREMENT,path TEXT,name TEXT,artist TEXT,played_at INT)"));
 	atomic_store(&database_online, true);
 	atomic_store(&database_epoch, 10);
 	start("/fixture/a.flac", false);
@@ -70,7 +82,7 @@ int main(void) {
 	fake_ready = true;
 	playhistory_left();
 	assert(stored_count() == 3); // Heard between GUI polls.
-	assert(exec("BEGIN"));
+	assert(test_exec("BEGIN"));
 	start("/fixture/deferred.flac", false);
 	fake_ready = true;
 	playhistory_heard(fake_file);
@@ -81,26 +93,30 @@ int main(void) {
 	int count = playhistory_items(&items);
 	assert(count == 4 && items[count - 1].id < 0);
 	free(items);
-	assert(exec("ROLLBACK"));
+	assert(test_exec("ROLLBACK"));
 	playhistory_poll();
 	assert(stored_count() == 4 && playhistory_current_id() > 0);
 	assert(playhistory_entry(deferred_id, NULL, 0, name, sizeof(name), NULL, 0));
 	playhistory_left();
 	assert(playhistory_entry(deferred_id, NULL, 0, name, sizeof(name), NULL, 0));
-	assert(exec("BEGIN"));
+	assert(test_exec("BEGIN"));
 	start("/fixture/old-card.flac", false);
 	fake_ready = true;
 	playhistory_heard(fake_file);
 	assert(playhistory_current_id() < 0);
+	// Keep the old write deferred until after the card identity changes.
+	playhistory_flush();
+	pthread_mutex_lock(&db_lock);
 	assert(exec("ROLLBACK"));
 	atomic_fetch_add(&database_epoch, 1);
+	pthread_mutex_unlock(&db_lock);
 	playhistory_poll();
 	assert(stored_count() == 4 && playhistory_current_id() == 0);
 	assert(!playhistory_entry(deferred_id, NULL, 0, name, sizeof(name), NULL, 0));
 	assert(!library_history_entry_at(10, a, NULL, 0, name, sizeof(name), NULL, 0));
 	assert(library_history_record_at(10, "/old", "Old", "", 0) == 0);
 	assert(stored_count() == 4);
-	assert(exec("BEGIN"));
+	assert(test_exec("BEGIN"));
 	for (int i = 0; i < 70; i++) {
 		char path[128];
 		snprintf(path, sizeof(path), "/fixture/pending-%d.flac", i);
@@ -112,7 +128,7 @@ int main(void) {
 	count = playhistory_items(&items);
 	assert(count == 4 + 64 && playhistory_unsaved());
 	free(items);
-	assert(exec("ROLLBACK"));
+	assert(test_exec("ROLLBACK"));
 	for (int i = 0; i < 20; i++)
 		playhistory_poll();
 	assert(stored_count() == 4 + 64);
@@ -131,6 +147,7 @@ int main(void) {
 	assert(playhistory_entry(untagged, NULL, 0, name, sizeof(name), NULL, 0));
 	assert(!strcmp(name, "Late book title") && stored_count() == before_untagged + 1);
 	playhistory_left();
+	playhistory_flush();
 	long long legacy = library_history_record_at(library_database_epoch(), "/fixture/old-untagged.aac", "", "", 1);
 	assert(legacy > 0 && playhistory_entry(legacy, NULL, 0, name, sizeof(name), NULL, 0));
 	assert(!strcmp(name, "old-untagged.aac"));
@@ -139,6 +156,7 @@ int main(void) {
 	sqlite3_bind_int64(legacy_row, 1, legacy);
 	assert(sqlite3_step(legacy_row) == SQLITE_ROW && !sqlite3_column_bytes(legacy_row, 0));
 	sqlite3_finalize(legacy_row); // Display fallback must not rewrite old records.
+	playhistory_shutdown();
 	assert(sqlite3_close(db) == SQLITE_OK);
 	db = NULL;
 	puts("PASS confirmed starts, same-listen metadata, paused restore, short listen, deferred transaction, stale card and bounded memory");

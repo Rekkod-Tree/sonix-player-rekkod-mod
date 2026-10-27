@@ -4,7 +4,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "lvgl/lvgl.h"
+// Only the diagnostic implementation needs LVGL definitions. Playback code
+// can mark an optional phase without importing the GUI library.
+typedef struct _lv_display_t lv_display_t;
+typedef struct _lv_timer_t lv_timer_t;
 
 // Wake-up and frame accounting, for measuring what the player costs at rest
 // and while drawing. Off unless asked for, and then only on the UI thread.
@@ -18,6 +21,9 @@
 //     names with addr2line on the unstripped binary (see PERF-1.3.0.md);
 //   - frames drawn, the UI thread's CPU per frame (layout + render + flush,
 //     average and worst) and the pixels each one repainted;
+//   - elapsed handler/frame/flush and pointer-dispatch-to-next-render time,
+//     with all-sample 1 ms histogram upper bounds (p50/p95/p99) and maxima;
+//     dispatch time excludes kernel input backlog and physical panel scanout;
 //   - the context switches of every thread of the process (a sleeping thread
 //     that wakes costs one), the process's CPU share, its resident and peak
 //     memory and the malloc arena.
@@ -44,5 +50,9 @@ void perfstat_woke(bool by_post, bool by_touch);
 
 // True while statistics are being gathered.
 bool perfstat_enabled(void);
+
+// Optional named GUI boundaries (constant labels only, no paths/session data).
+// Requires SONIX_PERF_PHASES=1 and enabled collection; otherwise no clock/log work.
+void perfstat_phase(const char *name);
 
 #endif /* PERFSTAT_H */
