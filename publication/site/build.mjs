@@ -9,6 +9,7 @@ const dist=join(here,'dist');
 const data=JSON.parse(readFileSync(join(here,'content.json'),'utf8'));
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const docs='https://github.com/Rekkod-Tree/sonix-player-rekkod-mod/blob/main/';
+const countLabel=n=>`${n} ${n%100>=11&&n%100<=14?'пунктов':n%10===1?'пункт':n%10>=2&&n%10<=4?'пункта':'пунктов'}`;
 const ids=new Set();
 const origins={mod:'Доработка мода',adapted:'Адаптация Sonix'};
 const states={available:'Реализовано',preparing:'Дорабатывается'};
@@ -21,7 +22,7 @@ const renderedFeatures=data.features.map(row=>{
 });
 const features=Object.entries(data.categories).map(([category,name],index)=>{
   const entries=renderedFeatures.filter((_,i)=>data.features[i][1]===category);
-  return `<details class="catalog-group" data-group="${category}"><summary><span class="group-index">${String(index+1).padStart(2,'0')}</span><span class="group-title">${esc(name)}<small>${esc(categoryNotes[category])}</small></span><span class="group-count">${entries.length} пунктов</span><span class="disclosure" aria-hidden="true">+</span></summary><div class="group-items">${entries.join('\n')}</div></details>`;
+  return `<details class="catalog-group" data-group="${category}"><summary><span class="group-index">${String(index+1).padStart(2,'0')}</span><span class="group-title">${esc(name)}<small>${esc(categoryNotes[category])}</small></span><span class="group-count">${countLabel(entries.length)}</span><span class="disclosure" aria-hidden="true">+</span></summary><div class="group-items">${entries.join('\n')}</div></details>`;
 }).join('\n');
 const gallery=[
  ['r1-home.png','Главная под себя','Пять ярлыков и постоянное «Ещё».'],
@@ -30,7 +31,7 @@ const gallery=[
  ['r1-album.png','Страница альбома','Обложка, данные и действия с треками.'],
  ['r1-local-search.png','Светлая тема и поиск','Настоящие результаты, обложки и клавиатура.'],
  ['r1-palettes.png','Все палитры рядом','Выбор оформления на настоящем R1.'],
- ['r1-mini-compact.png','Компактный мини-плеер','Новая настройка в прогоне кандидата.'],
+ ['r1-mini-compact.png','Компактный мини-плеер','Компактная панель на страницах каталога.'],
  ['r1-autoeq.png','Профили под наушники','Результаты поиска AutoEQ.'],
  ['r1-peq.png','PEQ и кривая отклика','Настройка обработки на устройстве.'],
  ['r1-album-list.png','Список альбомов','Цветные обложки и компактная панель.'],
@@ -61,10 +62,10 @@ const galleryHTML=gallery.map(([file,title,caption])=>{
   return `<figure class="screen"><button type="button" class="screen-button" data-image="assets/${file}" data-caption="${esc(title)}" data-date="${esc(shownDate)}" aria-label="Увеличить: ${esc(title)}"><img loading="lazy" decoding="async" src="assets/${file}" width="480" height="800" alt="${esc(title)} — снимок реального HiBy R1"></button><figcaption><strong>${esc(title)}</strong><span>${esc(caption)}</span><small>${esc(shownDate)}</small></figcaption></figure>`;
 }).join('\n');
 let html=readFileSync(join(here,'template.html'),'utf8');
-for(const [token,value] of Object.entries({FEATURES:features,COUNT:data.features.length,GALLERY:galleryHTML,CATEGORIES:Object.entries(data.categories).map(([id,name])=>`<option value="${id}">${esc(name)}</option>`).join(''),REVIEWED:esc(data.reviewed)}))html=html.replaceAll(`{{${token}}}`,String(value));
+for(const [token,value] of Object.entries({FEATURES:features,COUNT:data.features.length,GALLERY:galleryHTML,CATEGORIES:Object.entries(data.categories).map(([id,name])=>`<option value="${id}">${esc(name)}</option>`).join(''),REVIEWED:esc(data.reviewed),RELEASE:esc(data.release),STATE:esc(data.state)}))html=html.replaceAll(`{{${token}}}`,String(value));
 if(/\{\{\w+\}\}/.test(html))throw new Error('Unresolved template placeholder');
 writeFileSync(join(dist,'index.html'),html);
-writeFileSync(join(dist,'assets/sources.json'),JSON.stringify({note:'Unmodified physical R1 captures. Ten images are from recorded native candidate runs on 22 October; two gallery images and the video poster are archival. These are not captures of the final published v1.4.0 image.',images:provenance},null,2)+'\n');
+writeFileSync(join(dist,'assets/sources.json'),JSON.stringify({note:'Unmodified physical R1 captures. Ten images are from recorded native candidate runs on 22 October; two gallery images and the video poster are archival. Archive captures, not screenshots of the current 1.4.2 final image.',images:provenance},null,2)+'\n');
 const files=[];
 const allowed=new Set(['index.html','site.css','site.js','manifest.json','assets/sources.json','assets/gestures-r1.mp4','assets/palette-colors.js','assets/video-poster.png',...gallery.map(([file])=>'assets/'+file)]);
 function inventory(dir){for(const name of readdirSync(dir)){const path=join(dir,name);if(statSync(path).isDirectory())inventory(path);else {const file=relative(dist,path).replaceAll('\\','/');if(!allowed.has(file))throw new Error(`Unexpected output file: ${file}`);if(file!=='manifest.json')files.push({file,bytes:statSync(path).size,sha256:createHash('sha256').update(readFileSync(path)).digest('hex')});}}}
